@@ -4,6 +4,7 @@
 <head>
     <meta charset="utf-8">
     <title>HerdLink - NL Livestock Trade Network Analyser</title>
+    <link rel="icon" href="favicon.ico" sizes="any">
     <!-- Load Bootstrap CSS -->
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
     <!-- Load D3.js -->
@@ -11,7 +12,7 @@
     <!-- Load jLouvain -->
     <script type="text/javascript" src="assets/js/jLouvain.js"></script>
     <!-- Load fontawesome -->
-    <script src="https://kit.fontawesome.com/a14764fea8.js" crossorigin="anonymous"></script>
+    <script src="https://kit.fontawesome.com/2807c65ad2.js" crossorigin="anonymous"></script>
     <!-- Load Vivus -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/vivus/0.3.1/vivus.min.js"></script>
     <!-- Load savesvg.js -->
@@ -39,30 +40,53 @@
     <!-- Introductory overlay -->
     <div id="introOverlay" class="intro-overlay" role="dialog" aria-modal="true" aria-labelledby="introTitle">
       <div class="intro-content">
-        <div class="intro-head">
+        <!-- <div class="intro-head">
           <div>
             <h2 id="introTitle" style="margin:0;">How to use HerdLink</h2>
             <p class="intro-subtitle">Runs locally in your browser — your data stays on your machine.</p>
           </div>
           <div class="intro-badge">⌨️ Shortcuts</div>
-        </div>
+        </div> -->
 
         <div class="intro-grid">
-          <div class="intro-left">
-            <h3>Quick start</h3>
-            <ol>
-              <li>Choose your CSV using the file input on the left.</li>
-              <li>Switch Graph / Map using the button or <kbd>M</kbd>.</li>
-              <li>Click a node to enter focus mode; press <kbd>Q</kbd> to quit.</li>
-              <li>Use the right panel for detailed stats and trade info.</li>
-            </ol>
-            <div class="intro-note">
-              Tip: press <kbd>S</kbd> anytime to export a screenshot.
+        <div class="intro-left">
+            <div class="intro-badge intro-badge-left">
+            <i class="fa-solid fa-book"></i> Quick Start
             </div>
-          </div>
+
+            <div class="intro-note">
+                <i class="fa-light fa-circle-small"></i>
+                Select a <strong>time resolution</strong> from the top-left switches. <br><i class="fa-solid fa-calendar-day"> </i>: daily / <i class="fa-solid fa-calendar-week"></i>: weekly / <i class="fa-solid fa-calendar-days"></i>: monthly / <i class="fa-regular fa-calendar-days"></i>: yearly 
+            </div>
+            <div class="intro-note">
+                <i class="fa-light fa-circle-small"></i>
+                Toggle <strong>Graph</strong> / <strong>Map</strong> view using the first button at the bottom-right of the network panel. <br><i class="fa-solid fa-hexagon-nodes"></i>: Graph view / <i class="fa-solid fa-map-location-dot"></i>: Map view / or press <kbd>M</kbd> to switch.
+            </div>
+            <div class="intro-note">
+                <i class="fa-light fa-circle-small"></i>
+                Click a node to enter <strong>focus mode</strong>; press <kbd>Q</kbd> to exit.
+            </div>
+            <div class="intro-note">
+                <i class="fa-light fa-circle-small"></i>
+                Use <kbd><i class="fa-solid fa-angle-up"></i></kbd> / <kbd><i class="fa-solid fa-angle-down"></i></kbd> to switch focal nodes quickly; see the side panels for detailed stats and trade info.
+            </div>
+            <div class="intro-note">
+                <i class="fa-light fa-circle-small"></i>
+                If time controls are available, press <kbd>Space</kbd> to play / pause, <kbd><i class="fa-solid fa-angle-left"></i></kbd> / <kbd><i class="fa-solid fa-angle-right"></i></kbd> to step time, <kbd>F</kbd> to jump to start.
+            </div>
+            <div class="intro-note">
+                <i class="fa-light fa-circle-small"></i>
+                In focus mode, links can be turned off in the right panel. Press <kbd>R</kbd> to restore links and <kbd>S</kbd> to export a screenshot.
+            </div>
+
+            <div class="intro-note">
+            <i class="fa-light fa-circle-small"></i>
+            Press <kbd>Esc</kbd> to quickly exit the help overlay. Press <kbd>H</kbd> anytime to toggle it.
+            </div>
+        </div>
 
           <div class="intro-right">
-            <h3>Keyboard shortcuts</h3>
+            <div class="intro-badge intro-badge-right"><i class="fa-solid fa-keyboard"></i> Shortcuts</div>
 
             <div class="kbd-annotated" id="introShortcutDiagram">
               <div class="kbd-callout kbd-callout--s">
@@ -117,16 +141,17 @@
             </div>
 
             <div style="margin-top:10px; color:#6b7280;">
-              Highlighted keys are active shortcuts.
+              <i class="fa-solid fa-circle-info"></i> Highlighted keys are active shortcuts.
             </div>
           </div>
         </div>
 
         <div class="intro-actions">
-          <label style="display:flex; gap:8px; align-items:center;">
-            <input type="checkbox" id="dontShowAgain"> Do not show again
-          </label>
-          <button id="introOkButton" class="btn btn-success">Start exploring</button>
+          <div class="intro-dont-show-again">
+                <label style="display:flex; gap:8px; align-items:center;">
+                <input type="checkbox" id="dontShowAgain">Do not show again
+          </div>
+          <button id="introOkButton" class="btn btn-success"><i class="fa-solid fa-compass"></i> Start exploring</button>
         </div>
       </div>
     </div>
