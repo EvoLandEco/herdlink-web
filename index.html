@@ -418,7 +418,7 @@
     </div>
 
     <script>
-        // ---- Global Variables ----
+        // Global state
         let loadedCSVData = null;
         let uniqueDates = [];
         let temporalUpdateTimeout;
@@ -469,11 +469,11 @@
         let preYDomainGlobalStats = null;
         let preYDomainNodeStats = null;
 
-        // Simple in-memory cache
+        // Cache loaded assets in memory.
         const assetCache = {};
 
-        // Helper function to fetch an asset.
-        // For JSON data, we use d3.json; for images (or SVG files) we can fetch as a blob.
+        // Load an asset and cache the result.
+        // Supports JSON, blob, and text payloads.
         function fetchAsset(url, type = "json") {
             if (assetCache[url]) {
                 return Promise.resolve(assetCache[url]);
@@ -497,7 +497,7 @@
             });
         }
 
-        // ---- Fetch GeoJSON Files ----
+        // Load GeoJSON files.
         fetchAsset("assets/files/herdlink/nl_corop.geojson", "json")
             .then(data => { nlMapData = data; })
             .catch(error => { console.error("Error loading nl_corop.geojson:", error); });
@@ -506,10 +506,10 @@
             .then(data => { nlLabelPoints = data; })
             .catch(error => { console.error("Error loading nl_corop_labelpoint.geojson:", error); });
 
-        // ---- Disable mode toggle button initially ----
+        // Disable the mode toggle until data is ready.
         d3.select("#toggleModeButton").attr("disabled", true);
 
-        // ---- Toggle Button Event ----
+        // Switch between graph and map modes.
         d3.select("#toggleModeButton").on("click", () => {
             if (currentMode === "graph") {
                 switchToMapMode();
@@ -528,23 +528,23 @@
             }
         });
 
-        // helper function to pre-compute all trade data
+        // Precompute trade records for the selected date.
         function precomputeAllTradeData() {
-            // Assume window.currentDate is a Date object representing the current date.
+            // Use the active date from global state.
             const currentDate = window.currentDate;
 
-            // Create a global mapping from node id to an array of trade records.
-            // Each trade record will be stored twice: one for the source (outgoing)
-            // and one for the target (incoming).
+            // Map each node id to its trade records.
+            // Store each trade once as outgoing
+            // and once as incoming.
             window.precomputedTradeData = {};
 
-            // Initialize keys for all nodes (assuming allNodes is an array of node objects)
+            // Initialize an empty trade list for every node.
             allNodes.forEach(node => {
                 window.precomputedTradeData[node.id] = [];
             });
 
-            // Filter loadedCSVData to include only records matching the current date.
-            // Here we compare year, month, and day.
+            // Keep only records for the active day.
+            // Compare by year, month, and day.
             const filteredRecords = loadedCSVData.filter(record => {
                 const recordDate = new Date(record.time);
                 return recordDate.getFullYear() === currentDate.getFullYear() &&
@@ -552,27 +552,27 @@
                     recordDate.getDate() === currentDate.getDate();
             });
 
-            // Iterate over the filtered CSV records.
+            // Build records from the filtered rows.
             filteredRecords.forEach(record => {
                 const weight = +record.AANTAL;
                 const source = record.COROP_LEV;
                 const target = record.COROP_AFN;
-                // Exclude self-loops.
+                // Skip self-loops.
                 if (source === target) return;
                 if (weight > 0) {
-                    // Compute distance (which is symmetric).
+                    // Distance is symmetric.
                     const sourceCoords = getCoordinatesForStatcode(source);
                     const targetCoords = getCoordinatesForStatcode(target);
                     if (!sourceCoords || !targetCoords) return;
                     const distance = computeDistance(sourceCoords, targetCoords);
 
-                    // Retrieve the node objects (assumed to be in allNodes).
+                    // Resolve source and target nodes.
                     const sourceNode = allNodes.find(n => n.id === source);
                     const targetNode = allNodes.find(n => n.id === target);
                     if (!sourceNode || !targetNode) return;
                     const massProduct = sourceNode.tradeTotal * targetNode.tradeTotal;
 
-                    // Create two records: one for outgoing and one for incoming.
+                    // Build outgoing and incoming entries.
                     const outgoingRecord = {
                         sourceId: source,
                         targetId: target,
@@ -590,16 +590,16 @@
                         type: "incoming"
                     };
 
-                    // Add to the mapping.
-                    // For the source node, record as outgoing.
+                    // Save both entries.
+                    // Outgoing entry for source node.
                     window.precomputedTradeData[source].push(outgoingRecord);
-                    // For the target node, record as incoming.
+                    // Incoming entry for target node.
                     window.precomputedTradeData[target].push(incomingRecord);
                 }
             });
         }
 
-        // ---- Helper: Map COROP Code to statnaam ----
+        // Map COROP code to statnaam.
         function getStatnaam(code) {
             if (nlLabelPoints && nlLabelPoints.features) {
                 let feat = nlLabelPoints.features.find(f => f.properties.statcode === code);
@@ -609,16 +609,16 @@
         }
 
         function updateNetworkStats(force = false) {
-            // Declare variables for stats.
+            // Initialize aggregate stats.
             let totalNodes, totalEdges, totalTradeVolume, avgTradeEdge, avgTradeNode, numComponents, modularity, partition, numPartitions, hotSpotStats;
 
-            // Helper function to safely convert a value to a fixed number of digits.
+            // Format numbers safely with fixed precision.
             function safeToFixed(value, digits = 0) {
                 const num = Number(value);
                 return isFinite(num) ? num.toFixed(digits) : "N/A";
             }
 
-            // If a current date is defined and there are precomputed stats for it, use them.
+            // Use precomputed stats when available for the current date.
             if (window.currentDate && window.allTemporalStats && window.allTemporalStats[window.currentDate.toISOString()] && !force) {
                 const stats = window.allTemporalStats[window.currentDate.toISOString()];
                 totalNodes = stats.totalNodes;
@@ -631,17 +631,17 @@
                 partition = stats.partition;
                 numPartitions = stats.numPartitions;
 
-                // Assign the partition to each node.
+                // Assign partition ids to nodes.
                 allNodes.forEach(node => {
                     node.community = partition[node.id];
                 });
             } else if (force) {
-                // Recompute all stats.
+                // Recompute network-wide statistics.
                 const activeNodes = allNodes.filter(node => node.active);
 
-                // Compute simple stats.
+                // Compute basic counts and totals.
                 const simpleStats = computeSimpleStats(activeNodes, enabledLinks);
-                // Compute connectivity (treating links as undirected).
+                // Compute connectivity on an undirected view.
                 numComponents = computeNumberOfConnectedComponents(activeNodes, enabledLinks);
                 // Compute modularity.
                 modResult = computeModularity(activeNodes, enabledLinks);
@@ -657,10 +657,10 @@
                 modularity = modResult.modularity;
                 partition = modResult.partition;
 
-                // Compute number of partitions.
+                // Count distinct partitions.
                 numPartitions = new Set(Object.values(partition)).size;
 
-                // Assign the partition to each node.
+                // Assign partition ids to nodes.
                 allNodes.forEach(node => {
                     node.community = partition[node.id];
                 });
@@ -668,19 +668,19 @@
                 console.error("No stats found for the current date. Computing basic stats...");
             }
 
-            // If a current date is defined and there are precomputed node stats for it, assign to hotspots.
+            // Use cached node stats for hotspots when available.
             if (window.currentDate && window.allTemporalNodeStats && window.allTemporalNodeStats[window.currentDate.toISOString()] && !force) {
                 hotSpotStats = window.allTemporalNodeStats[window.currentDate.toISOString()];
                 hotspots = hotSpotStats;
             } else if (force) {
-                // Recompute node stats.
+                // Recompute node-level statistics.
                 hotSpotStats = computeHotSpotMetrics(allNodes, enabledLinks);
                 hotspots = hotSpotStats;
             } else {
                 console.error("No node stats found for the current date. Computing node stats...");
             }
 
-            // Prepare an array of stat objects.
+            // Build stat rows for rendering.
             const statItems = [
                 { icon: '<i class="fa-solid fa-map-pin"></i>', label: "Active Regions", value: totalNodes },
                 { icon: '<i class="fa-solid fa-route"></i>', label: "Trade Routes", value: totalEdges },
@@ -691,7 +691,7 @@
                 { icon: '<i class="fa-brands fa-hubspot"></i>', label: "Modularity", value: safeToFixed(modularity, 3) }
             ];
 
-            // Select the SVG container for stats.
+            // Select the stats container.
             const container = d3.select(".statsContainer")
                 .call(
                     d3.drag()
@@ -702,27 +702,27 @@
                             const parentRect = d3.select("#col2").node().getBoundingClientRect();
                             const thisRect = d3.select(this).node().getBoundingClientRect();
 
-                            // Current CSS 'left' and 'top' in pixels
+                            // Read current left/top positions in pixels.
                             const currentLeft = parseFloat(d3.select(this).style("left"));
                             const currentTop = parseFloat(d3.select(this).style("top"));
 
-                            // Compute the new position by adding the drag deltas
+                            // Apply drag deltas.
                             let newLeft = currentLeft + event.dx;
                             let newTop = currentTop + event.dy;
 
-                            // Clamp horizontally so it stays within #col2
+                            // Keep the panel within #col2 horizontally.
                             newLeft = Math.max(
                                 0,
                                 Math.min(newLeft, parentRect.width - thisRect.width)
                             );
 
-                            // Clamp vertically
+                            // Keep the panel within #col2 vertically.
                             newTop = Math.max(
                                 0,
                                 Math.min(newTop, parentRect.height - thisRect.height)
                             );
 
-                            // Update the container’s position
+                            // Update panel position.
                             d3.select(this)
                                 .style("left", newLeft + "px")
                                 .style("top", newTop + "px");
@@ -742,67 +742,67 @@
                 container.style("background", "rgba(0, 255, 0, 0.03)");
             }
 
-            // Define dimensions and positioning.
+            // Layout constants for stat rows.
             const statItemHeight = 20;
             const statMargin = 4;
             const startX = 0;
             const valueX = 250;
 
-            // Append each stat item as a div.
+            // Render each stat row.
             statItems.forEach(itemData => {
                 const item = container.append("div")
                     .attr("class", "stat-item")
                     .style("color", selectedNodeData ? "white" : "gray");
 
-                // Append icon.
+                // Render icon.
                 item.append("div")
                     .attr("class", "stat-icon")
                     .html(itemData.icon);
 
-                // Append label.
+                // Render label.
                 item.append("span")
                     .attr("class", "stat-label")
                     .text(itemData.label);
 
-                // Append value.
+                // Render value.
                 item.append("span")
                     .attr("class", "stat-value")
                     .text(itemData.value);
             });
 
-            // Compute the current spectral radius based on enabled links.
+            // Compute spectral radius from enabled links.
             const currentSR = computeSpectralRadius(allNodes, enabledLinks);
 
-            // Get max spectral radius from the global variable.
+            // Read maximum spectral radius from cached temporal stats.
             maxSR = window.maxTemporalStats ? window.maxTemporalStats.spectralRadius : 0;
 
-            // Normalize current spectral radius relative to the initial one.
+            // Normalize current spectral radius against the baseline.
             const normalizedValue = currentSR / maxSR; // 1.0 means no change
-            const formattedNormal = normalizedValue.toFixed(3); // to three decimal places
+            const formattedNormal = normalizedValue.toFixed(3); // three decimal places
 
-            // Create a linear color scale:
-            // 0.0 maps to avocado green, 1.0 maps to salmon, 2.0 maps to orange.
+            // Color scale for normalized risk score.
+            // 0.0 = green, 1.0 = salmon, 2.0 = orange.
             const colorScale = d3.scaleLinear()
                 .domain([0, 1, 2])
                 .range(["#b2c248", "salmon", "orange"])
                 .clamp(true);
 
-            // Update the display element.
+            // Update the risk score display.
             const displayElement = document.getElementById("networkTransRiskScore");
             displayElement.innerHTML = `
                 <i class="fa-solid fa-virus"></i> Risk Score: <span class="current-sr">${formattedNormal}</span> <span class="initial-sr">(1.000)</span>
             `;
 
-            // Make the element visible.
+            // Ensure the display is visible.
             if (displayElement.style.display === 'none' || getComputedStyle(displayElement).display === 'none') {
                 displayElement.style.display = "block";
             }
 
-            // Set the initial color to always salmon.
+            // Keep baseline value color fixed to salmon.
             const initialSpan = displayElement.querySelector(".initial-sr");
             initialSpan.style.color = "salmon";
 
-            // Set the color of the current value based on its normalized value.
+            // Color current value by normalized risk.
             const currentSpan = displayElement.querySelector(".current-sr");
             currentSpan.style.color = colorScale(normalizedValue);
         }
@@ -1290,7 +1290,7 @@
             // Update the stored y-domain.
             preYDomainNodeStats = y.domain();
 
-            // --- Add sliding window highlight for the current date ---
+            // Add sliding window highlight for the current date
             // Define the width (in pixels) for the sliding window.
             const windowWidth = 15;
             // Compute the x-coordinate for the highlight (centered on window.currentDate).
@@ -1317,7 +1317,7 @@
                     .attr("height", height);
             }
 
-            // --- Add vertical dashed line at the center of the window rect ---
+            // Add vertical dashed line at the center of the window rect
             // Compute the x-coordinate for the line (center of the window rect).
             const lineX = currentX + windowWidth / 2;
             let highlightLine = svg.select("line.current-date-line");
@@ -1343,7 +1343,7 @@
                 highlightLine.raise();
             }
 
-            // --- Add drag behavior for the sliding window highlight
+            // Add drag behavior for the sliding window highlight.
             const sliderEl = document.getElementById("timeSlider"); // get the slider element
 
             highlightRect.call(d3.drag()
@@ -1377,7 +1377,7 @@
                 })
             );
 
-            // --- Compute the top five nodes within the current window ---
+            // Compute the top five nodes within the current window
             // For each node, find the data point (from node.values) closest to window.currentDate.
             const bisectDate = d3.bisector(d => d.date).left;
             const topNodes = nodesArray.map(node => {
@@ -1403,7 +1403,7 @@
                 .sort((a, b) => b.value - a.value)  // sort descending by value
                 .slice(0, 5);
 
-            // --- Adjust label positions to avoid overlap ---
+            // Adjust label positions to avoid overlap
             // First, sort the topNodes by their natural y position (ascending: top to bottom).
             topNodes.sort((a, b) => a.y - b.y);
             const minSpacing = 22;
@@ -1450,7 +1450,7 @@
                     .attr("d", line);
             });
 
-            // --- Data join for top five node labels with background ---
+            // Data join for top five node labels with background
             const labelGroups = svg.selectAll("g.top-label-group")
                 .data(topNodes, d => d.nodeId);
 
@@ -1501,7 +1501,7 @@
                         .attr("height", bbox.height + 4);
 
 
-                    // --- Add dashed line from the left edge of the label background to the node's point ---
+                    // Add dashed line from the left edge of the label background to the node's point
                     // Compute the node's point relative to the label group's coordinate system.
                     // The absolute node y is d.y, so its relative coordinate is (d.y - d.adjustedY).
                     const nodePointXRelative = x(window.currentDate) - (currentX + windowWidth + 5);
@@ -1600,13 +1600,13 @@
                 // Filter out inactive nodes.
                 const activeNodes = nodes.filter(node => node.active);
 
-                // Compute simple stats.
+                // Compute basic counts and totals.
                 const simpleStats = computeSimpleStats(activeNodes, enabledLinks);
-                // Compute connectivity (treating links as undirected).
+                // Compute connectivity on an undirected view.
                 const numComponents = computeNumberOfConnectedComponents(activeNodes, enabledLinks);
                 // Compute modularity.
                 const { partition, modularity } = computeModularity(activeNodes, enabledLinks);
-                // Compute number of partitions.
+                // Count distinct partitions.
                 const numPartitions = new Set(Object.values(partition)).size;
                 // Compute spectral radius (risk score).
                 const spectralRadius = computeSpectralRadius(activeNodes, enabledLinks);
@@ -1709,20 +1709,20 @@
          * Treats links as undirected, returns how many connected components are in the graph.
          */
         function computeNumberOfConnectedComponents(nodes, links) {
-            // Build an undirected adjacency list
+            // Build an undirected adjacency list.
             const adjList = {};
             nodes.forEach(n => { adjList[n.id] = new Set(); });
 
             links.forEach(e => {
-                // Note: if e.source or e.target is an object, use e.source.id, e.target.id
+                // If e.source or e.target is an object, use e.source.id and e.target.id.
                 const s = (typeof e.source === "object") ? e.source.id : e.source;
                 const t = (typeof e.target === "object") ? e.target.id : e.target;
-                // add each direction for undirected
+                // Add each direction for the undirected graph.
                 adjList[s].add(t);
                 adjList[t].add(s);
             });
 
-            // BFS or DFS to count components
+            // Use BFS/DFS to count connected components.
             let visited = new Set();
             let componentCount = 0;
 
@@ -1792,7 +1792,7 @@
          * @returns {Object} An object mapping node IDs to their computed eigenvector centrality.
          */
         function computeEigenvectorCentrality(allNodes, enabledLinks, maxIter = 100, tol = 1e-6) {
-            // Build an undirected adjacency list.
+            // Build an undirected adjacency list..
             // For each node, create an object to map each neighbor to the sum of weights.
             const adj = {};
             allNodes.forEach(n => {
@@ -1874,9 +1874,7 @@
          *
          */
         function computeHotSpotMetrics(allNodes, enabledLinks) {
-            //////////////////////////////////////////////
             // 1) Weighted In-Degree & Out-Degree
-            //////////////////////////////////////////////
             const metrics = {};
             allNodes.forEach(n => {
                 metrics[n.id] = {
@@ -1901,10 +1899,8 @@
                 }
             });
 
-            //////////////////////////////////////////////
             // 2) Weighted Betweenness Centrality
             //    (Simplified Brandes approach)
-            //////////////////////////////////////////////
             // A simple binary min-heap implementation for the priority queue.
             class MinHeap {
                 constructor() {
@@ -2066,9 +2062,7 @@
             // Run the weighted betweenness centrality calculation.
             brandesBetweennessWeighted(allNodes, adj);
 
-            //////////////////////////////////////////////
             // 3) Weighted PageRank (Simplified)
-            //////////////////////////////////////////////
             let d = 0.85;
             let N = allNodes.length;
             let outWeightSum = {};
@@ -2103,9 +2097,7 @@
                 doPageRankIteration(allNodes, enabledLinks);
             }
 
-            //////////////////////////////////////////////
             // 4) Eigenvector Centrality
-            //////////////////////////////////////////////
             // Compute eigenvector centrality using only enabled links.
             const eigenCentrality = computeEigenvectorCentrality(allNodes, enabledLinks);
             allNodes.forEach(n => {
@@ -2115,7 +2107,7 @@
             return metrics;
         }
 
-        // ---- Helper: Adjust Arrow Endpoint ----
+        // Adjust the arrow endpoint.
         function getAdjustedTarget(d) {
             let dx = d.target.x - d.source.x,
                 dy = d.target.y - d.source.y,
@@ -2125,7 +2117,7 @@
             return { x: d.target.x - (dx / dist) * r, y: d.target.y - (dy / dist) * r };
         }
 
-        // ---- Create Network ----
+        // Create Network
         function initNetwork(isReplot = false) {
             // Create annotation group
             annotationGroup = svg.append("g").attr("class", "annotation-group");
@@ -2196,7 +2188,7 @@
             // Append primary node shape (circle for active, FontAwesome icon for inactive).
             nodeEnter.each(function (d) {
                 const nodeGroup = d3.select(this);
-                // Note: Always compute node radius, or the node labels won't follow.
+                // Always compute node radius so labels remain aligned.
                 d.r = nodeSize(d.tradeTotal);
 
                 if (d.active) {
@@ -2421,7 +2413,7 @@
                     annotationGroup.selectAll("*").remove();
                 });
 
-            // ---- Add Hotspot Stroke Legend ----
+            // Add Hotspot Stroke Legend
             if (!isReplot) {
                 addHotspotLegend();
             }
@@ -2431,7 +2423,7 @@
                 switchToMapMode(instant = true);
             }
 
-            // ---- Define Edge Glow and Drop Shadow Filters ----
+            // Define Edge Glow and Drop Shadow Filters
             // Select existing defs or create one if not present.
             let defs = svg.select("defs");
             if (defs.empty()) {
@@ -2547,7 +2539,7 @@
 
             const offsets = getAnnotationOffset(xPos, yPos, w, h);
 
-            // --- Compute trade volumes using only enabled links ---
+            // Compute trade volumes using only enabled links
             const incomingTrade = d3.sum(allLinks.filter(link => {
                 const tgt = (typeof link.target === "object") ? link.target.id : link.target;
                 return tgt === d.id && !link.disabled;
@@ -2714,7 +2706,7 @@
             // Get the drawing group.
             const drawingGroup = radarSVG.select("g.radar-drawing");
 
-            // --- Normalize hotspot metrics ---
+            // Normalize hotspot metrics
             const nodeMetrics = hotspots[d.id];
             if (!nodeMetrics) return;
 
@@ -2725,7 +2717,7 @@
             const normEigen = nodeMetrics.eigenvector / hotspotsMax.eigenvector; // New metric.
             const values = [normIn, normOut, normBet, normPR, normEigen];
 
-            // --- Radar chart geometry ---
+            // Radar chart geometry
             const radarRadius = Math.min(drawWidth, drawHeight) / 2;
             const numAxes = 5;
             const baseAngle = -Math.PI / 2;  // starting at top.
@@ -2769,7 +2761,7 @@
                 ]);
             }
 
-            // --- Draw axis lines ---
+            // Draw axis lines
             for (let i = 0; i < numAxes; i++) {
                 const angle = baseAngle + (2 * Math.PI * i / numAxes);
                 const x2 = radarRadius * Math.cos(angle) + centerX;
@@ -2791,7 +2783,7 @@
                 }
             }
 
-            // --- Draw or update baseline radar polygon ---
+            // Draw or update baseline radar polygon
             let baselinePath = drawingGroup.select("path.radar-baseline");
             if (baselinePath.empty()) {
                 baselinePath = drawingGroup.append("path")
@@ -2819,7 +2811,7 @@
                     };
                 });
 
-            // --- Update vertices with interpolation using global previous positions ---
+            // Update vertices with interpolation using global previous positions
             const vertexSelection = drawingGroup.selectAll("circle.vertex")
                 .data(newPoints);
 
@@ -3116,7 +3108,7 @@
                         // parentRect.width - thisRect.width is the rightmost position.
                         newX = Math.max(0, Math.min(newX, parentRect.width - thisRect.width));
 
-                        // Clamp vertically.
+                        // Keep the panel within #col2 vertically..
                         newY = Math.max(0, Math.min(newY, parentRect.height - thisRect.height));
 
                         // Apply the clamped positions.
@@ -3147,7 +3139,7 @@
                         .style("filter", "brightness(1)");
                 });
 
-            // ---- Define Edge Glow and Drop Shadow Filters ----
+            // Define Edge Glow and Drop Shadow Filters
             let defs = svg.select("defs");
             if (defs.empty()) {
                 defs = svg.append("defs");
@@ -3304,7 +3296,7 @@
 
         const debouncedOnClickNode = debounce(onClickNode, 300, immediate = true);
 
-        // ---- Node Click Handler ----
+        // Node Click Handler
         function onClickNode(event, d) {
             if (event.defaultPrevented) return;
             // Save previous selection before clearing
@@ -3436,7 +3428,7 @@
                     }
                 });
 
-            // --- Update annotation styling for the selected node ---
+            // Update annotation styling for the selected node
             annotationGroup.selectAll(".node-annotation")
                 .classed("selected", !!selectedNodeData);
 
@@ -3457,7 +3449,7 @@
             // Add/update overlay.
             if (svg.select("#mapOverlay").empty()) {
                 if (wasSelected) {
-                    // If a node was already selected, do NOT animate.
+                    // Skip animation when a node is already selected.
                     svg.insert("rect", ":first-child")
                         .attr("id", "mapOverlay")
                         .attr("x", 0)
@@ -3520,7 +3512,7 @@
                 });
         }
 
-        // ---- Clear Selection (If Clicking Again/Unclicked) ----
+        // Clear Selection (If Clicking Again/Unclicked)
         function clearSelection(flag) {
             selectedNodeData = null;
 
@@ -3559,7 +3551,7 @@
                 .attr("stroke", null)
                 .attr("stroke-opacity", null);
 
-            // --- Update annotation styling for the selected node ---
+            // Update annotation styling for the selected node
             annotationGroup.selectAll(".node-annotation")
                 .classed("selected", !!selectedNodeData);
 
@@ -3744,7 +3736,7 @@
             const allOutgoingEnabled = outgoing.every(trade => !trade.disabled);
             const allIncomingEnabled = incoming.every(trade => !trade.disabled);
 
-            // --- Compute distances using geojson data ---
+            // Compute distances using geojson data
             const selectedCoords = getCoordinatesForStatcode(selectedNodeData.id);
 
             // For outgoing trades, the "other" node is the target.
@@ -4156,7 +4148,7 @@
                 if (link.weight > 0) {
                     const sourceId = (typeof link.source === "object") ? link.source.id : link.source;
                     const targetId = (typeof link.target === "object") ? link.target.id : link.target;
-                    if (sourceId === targetId) return;  // Exclude self-loops.
+                    if (sourceId === targetId) return;  // Skip self-loops.
                     const sourceNode = allNodes.find(n => n.id === sourceId);
                     const targetNode = allNodes.find(n => n.id === targetId);
                     if (!sourceNode || !targetNode) return;
@@ -4211,7 +4203,7 @@
             // Use same tick formatter as before.
             const tickFormat = d3.format("~s");
 
-            // ----- Vertical grid lines & x tick labels -----
+            // Vertical grid lines & x tick labels
             const xTicks = xScale.ticks(5, "~s").filter((d, i) => i % 2 === 0);
 
             // Vertical grid lines.
@@ -4246,7 +4238,7 @@
                 .text(d => tickFormat(d));
             xGridLabels.exit().remove();
 
-            // ----- Horizontal grid lines & y tick labels -----
+            // Horizontal grid lines & y tick labels
             const yTicks = yScale.ticks(5, "~s").filter((d, i) => i % 1 === 0);
             // Horizontal grid lines.
             const yGrid = g.selectAll(".y-grid")
@@ -4280,7 +4272,7 @@
                 .text(d => tickFormat(d));
             yGridLabels.exit().remove();
 
-            // ----- Contour Plot Background -----
+            // Contour Plot Background
             // Compute density contours weighted by massProduct.
             const densityData = d3.contourDensity()
                 .x(d => xScale(d.distance))
@@ -4312,7 +4304,7 @@
 
             contourLayer.lower();  // move to the bottom of the group
 
-            // ----- Update scatter points using the D3 update pattern -----
+            // Update scatter points using the D3 update pattern
             const circles = g.selectAll(".trade-circle")
                 .data(tradeData, d => d.sourceId + "-" + d.targetId);
             circles.exit()
@@ -4337,10 +4329,10 @@
                 .transition().duration(750)
                 .attr("r", d => sizeScale(d.massProduct));
 
-            // ----- Add tooltip on mouseover -----
+            // Add tooltip on mouseover
             // Not working, placeholder here
 
-            // ----- Regression Trend Line -----
+            // Regression Trend Line
             const logData = tradeData.map(d => ({
                 logDistance: Math.log(d.distance),
                 logWeight: Math.log(d.weight),
@@ -4371,7 +4363,7 @@
                 .attr("x2", xScale(xTrendMax))
                 .attr("y2", yScale(yTrendMax));
 
-            // ----- Axis Labeling -----
+            // Axis Labeling
             let topLabel = svg.select(".top-label");
             if (topLabel.empty()) {
                 topLabel = svg.append("g").attr("class", "top-label");
@@ -4385,7 +4377,7 @@
             topLabel.attr("transform", `translate(${containerNode.clientWidth / 2}, ${margin.top / 2})`);
             topLabel.select(".distance-label").attr("y", 20);
 
-            // ----- R² Display at Top Right -----
+            // R² Display at Top Right
             const ssTot = d3.sum(logData, d => d.w * Math.pow(d.logWeight - yBar, 2));
             const ssRes = d3.sum(logData, d => d.w * Math.pow(d.logWeight - (intercept + slope * d.logDistance), 2));
             const rSquared = 1 - ssRes / ssTot;
@@ -4471,7 +4463,7 @@
                 return;
             }
 
-            // ----- Scales -----
+            // Scales
             // X-scale: distance (log scale). Maximum is fixed at 380 km.
             const xMin = d3.min(tradeDataAll, d => d.distance);
             const xScale = d3.scaleLog()
@@ -4500,7 +4492,7 @@
 
             const tickFormat = d3.format("~s");
 
-            // ----- Vertical grid lines & x tick labels -----
+            // Vertical grid lines & x tick labels
             const xTicks = xScale.ticks(5, "~s").filter((d, i) => i % 2 === 0);
             const xGrid = g.selectAll(".x-grid").data(xTicks);
             xGrid.enter()
@@ -4530,7 +4522,7 @@
                 .text(d => tickFormat(d));
             xGridLabels.exit().remove();
 
-            // ----- Horizontal grid lines & y tick labels -----
+            // Horizontal grid lines & y tick labels
             const yTicks = yScale.ticks(2, "~s");
             const yGrid = g.selectAll(".y-grid").data(yTicks);
             yGrid.enter()
@@ -4560,7 +4552,7 @@
                 .text(d => tickFormat(d));
             yGridLabels.exit().remove();
 
-            // ----- Contour Density Layers -----
+            // Contour Density Layers
             function updateContourLayer(data, groupClass, fillColor) {
                 const densityData = d3.contourDensity()
                     .x(d => xScale(d.distance))
@@ -4595,7 +4587,7 @@
                 updateContourLayer(incomingData, "contour-incoming", incomingColor);
             }
 
-            // ----- Update Scatter Points -----
+            // Update Scatter Points
             const sampledData = tradeDataAll.length > 200 ? d3.shuffle(tradeDataAll).slice(0, 200) : tradeDataAll;
             const circles = g.selectAll(".trade-circle")
                 .data(sampledData, d => d.sourceId + "-" + d.targetId);
@@ -4619,8 +4611,8 @@
                 .transition().duration(750)
                 .attr("r", d => sizeScale(d.massProduct));
 
-            // ----- Regression Lines & R² for Each Subset -----
-            // Helper: Compute regression parameters given data array.
+            // Regression Lines & R² for Each Subset
+            // Compute regression parameters for a data array.
             function computeRegression(data) {
                 const logData = data.map(d => ({
                     logDistance: Math.log(d.distance),
@@ -4649,7 +4641,7 @@
                 return 1 - ssRes / ssTot;
             }
 
-            // ----- Regression Lines & R² for Each Subset -----
+            // Regression Lines & R² for Each Subset
             // Compute regression for overall.
             const overallReg = computeRegression(tradeDataAll);
             let regLineAll = g.select(".regression-all");
@@ -4709,7 +4701,7 @@
             const outgoingRSq = outgoingData.length > 0 ? computeRSquared(outgoingReg) : null;
             const incomingRSq = incomingData.length > 0 ? computeRSquared(incomingReg) : null;
 
-            // ----- R² Display at Top Right -----
+            // R² Display at Top Right
             // Use a single text element with three tspans.
             let r2Label = g.select(".r2-label");
             if (r2Label.empty()) {
@@ -4740,7 +4732,7 @@
                 .attr("fill", incomingColor)
                 .text("In: R² = " + (incomingRSq !== null ? incomingRSq.toFixed(3) : "NA"));
 
-            // ----- Axis Labeling -----
+            // Axis Labeling
             let topLabel = svg.select(".top-label");
             if (topLabel.empty()) {
                 topLabel = svg.append("g").attr("class", "top-label");
@@ -4909,7 +4901,7 @@
             // In the enter selection, build the node shapes.
             nodesEnter.each(function (d) {
                 const nodeGroup = d3.select(this);
-                // Note: Always compute node radius, or the node labels won't follow.
+                // Always compute node radius so labels remain aligned.
                 d.r = nodeSize(d.tradeTotal);
 
                 if (d.active) {
@@ -5376,7 +5368,7 @@
                 playBtn.click();
             }
 
-            // Note: No need to disable buttons here, as this function is called by updateNetwork()
+            // Buttons are already managed by updateNetwork().
             // Set all links to enabled.
             allLinks.forEach(link => {
                 link.disabled = false;
@@ -5402,7 +5394,7 @@
             updateSCCs();
             updateAnnotationForNode(selectedNodeData, annotationGroup);
 
-            // Note: Although updateNetwork() disables and re-enables checkboxes, we still need to mimick
+            // Even though updateNetwork() toggles checkbox states, we still need to mimic
             // this visual change here because updateTradeTable() above re-initializes the checkboxes.
             disableAllCheckboxes();
             enableAllCheckboxes(550);
@@ -5412,7 +5404,7 @@
             }
         }
 
-        // ---- Force Simulation Drag Handler ----
+        // Force Simulation Drag Handler
         function drag(simulation) {
             function dragstarted(event, d) { if (!event.active) simulation.alphaTarget(0.3).restart(); d.fx = d.x; d.fy = d.y; }
             function dragged(event, d) { d.fx = event.x; d.fy = event.y; }
@@ -5420,7 +5412,7 @@
             return d3.drag().on("start", dragstarted).on("drag", dragged).on("end", dragended);
         }
 
-        // ---- Functions to switch between graph and map mode ----
+        // Functions to switch between graph and map mode
         function switchToMapMode(instant = false) {
             if (forceSim) forceSim.stop();
             if (!nlMapData) { console.error("Failed to load NL map data."); return; }
@@ -5525,7 +5517,7 @@
             }
         }
 
-        // ---- Update Node Positions When Switching to Map Mode ----
+        // Update Node Positions When Switching to Map Mode
         function updateMapPositionsWithTransition(instant = false, recordOnly = false) {
             const transitionDuration = instant ? 0 : 1000;
 
@@ -5646,10 +5638,8 @@
                 }));
             }
 
-            // ---------------------------
             // Step 1: For each node (except root), pick the single incoming edge of maximum weight
             //         in the (possibly reversed) graph
-            // ---------------------------
             let inEdges = {};
             nodes.forEach(node => {
                 if (node.id === root.id) return;
@@ -5664,9 +5654,7 @@
                 }
             });
 
-            // ---------------------------
             // Step 2: Detect a cycle by DFS
-            // ---------------------------
             let cycle = null;
             let visited = {};
 
@@ -5713,9 +5701,7 @@
                 return result;
             }
 
-            // ---------------------------
             // Step 3: Contract the cycle
-            // ---------------------------
             // create a synthetic node ID for the entire cycle
             let cycleId = cycle.join("_");
 
@@ -5748,9 +5734,7 @@
             let T = chuLiuEdmonds(contractedNodes, contractedEdges, contractedRoot, "in");
             // ^ pass direction = "in" here
 
-            // ---------------------------
             // Step 4: Expand the cycle
-            // ---------------------------
             // find the edge pointing to the cycleId in T
             let cycleEdge = T.find(e => {
                 const tid = (typeof e.target === "object") ? e.target.id : e.target;
@@ -5961,7 +5945,7 @@
                 .text(d => d.data.name);
         }
 
-        // ---- Maximum Clique Computation with Reciprocal Edges ----
+        // Maximum Clique Computation with Reciprocal Edges
         // Only consider an undirected edge between two nodes if both A->B and B->A exist.
         function computeMaximumClique() {
             let directedEdges = new Set();
@@ -6090,7 +6074,7 @@
 
         function computeSpectralRadius(allNodes, enabledLinks, maxIter = 100, tol = 1e-6) {
             // 1. Filter out disabled links.
-            // Note: Already done globally.
+            // Already configured globally.
 
             // 2. Create a mapping from node id to index.
             const n = allNodes.length;
@@ -6156,7 +6140,7 @@
             return eigenvalue;
         }
 
-        // Helper: build adjacency list for a directed graph
+        // Build an adjacency list for a directed graph.
         function buildAdjList(nodes, edges) {
             const adj = {};
             nodes.forEach(n => { adj[n.id] = []; });
@@ -6341,7 +6325,7 @@
                         .style("display", "none");
                 });
 
-            // ---- Convex hull setup ----
+            // Convex hull setup
             const hullSelection = g.selectAll(".clusterHull")
                 .data(d3.range(nClusters))
                 .enter()
@@ -6559,7 +6543,7 @@
             }
 
             // 2) Filter out disabled links from allLinks.
-            // Note: Already done globally.
+            // Already configured globally.
 
             // 3) Compute in-arbo and out-arbo using only enabled links.
             let inArbo = chuLiuEdmonds(activeNodes, enabledLinks, newRoot, "in");
@@ -6570,13 +6554,9 @@
             // visualizeArborescence(outArbo, "#outArboSVG", newRootId);
         }
 
-        // ------------------------------------------------------------------------------
-        // ---- ******************************************************************** ----
-        // ---- ****************** MAIN ENTRY POINT of HerdLink ******************** ----
-        // ---- ******************************************************************** ----
-        // ------------------------------------------------------------------------------
+        // MAIN ENTRY POINT of HerdLink
 
-        // ---- On Pagee Load ----
+        // On page load
         window.addEventListener('load', function () {
             // Clear any previous network visualization.
             if (svg && svg.node().hasChildNodes()) {
@@ -6617,7 +6597,7 @@
         let playPauseKeyListener = null;
         let fromStartKeyListener = null;
 
-        // A helper function to remove any existing document-level event listeners for the time controls.
+        // Helper function to remove existing document-level listeners for time controls.
         function removeTimeControlListeners() {
             if (sliderKeyListener) {
                 document.removeEventListener("keydown", sliderKeyListener);
@@ -6749,7 +6729,7 @@
                             link.target = nodesMap[link.target];
                         });
 
-                        // *** NEW: Compute global edge extent from all links with weight > 0 ***
+                        // NEW: Compute global edge extent from all links with weight > 0
                         edgeExtent = d3.extent(links.filter(l => l.weight > 0), d => Math.log(d.weight));
                         // Now, edgeExtent is a global variable available for later use in styling.
 
@@ -6977,7 +6957,7 @@
             // Reapply on window resize
             window.addEventListener("resize", matchButtonWidths);
 
-            // Event lister for the stat select dropdown.
+            // Event listener for the stats dropdown.
             document.getElementById("statSelect").addEventListener("change", function () {
                 window.currentSelectedStat = this.value;
                 updateGlobalStatsChart(window.currentSelectedStat);
@@ -7011,11 +6991,7 @@
             window.addEventListener("resize", updateInOutArbos);
         }
 
-        // ------------------------------------------------------------------------------
-        // ---- ******************************************************************** ----
-        // ---- ***************** STARTER's INTRODUCTION OVERLAY ******************* ----
-        // ---- ******************************************************************** ----
-        // ------------------------------------------------------------------------------
+        // Intro overlay
 
         (() => {
             const PREF_KEY = "hideIntro";
@@ -7053,7 +7029,7 @@
                 const Keyboard = window.SimpleKeyboard?.default;
                 if (!Keyboard) throw new Error("SimpleKeyboard not loaded");
 
-                // Build only once; keep it for reopen
+                // Build the keyboard once and reuse it.
                 if (kbd) return;
 
                 kbd = new Keyboard(".introKeyboard", {
@@ -7136,11 +7112,11 @@
                 positionLinesRepeated();
             }
 
-            // Wait until simple-keyboard has actually inserted .hg-button nodes, THEN build lines.
+            // Wait until simple-keyboard renders buttons, then draw connector lines.
             function ensureLinesWhenReady(timeoutMs = 2500) {
                 if (!overlayIsOpen()) return;
 
-                // If already ready, build immediately
+                // If buttons already exist, draw lines now.
                 const qBtnMaybe = kbd?.getButtonElement("q");
                 const qBtn = Array.isArray(qBtnMaybe) ? qBtnMaybe[0] : qBtnMaybe;
                 if (qBtn) {
@@ -7148,15 +7124,15 @@
                 return;
                 }
 
-                // Observe DOM changes under the keyboard container
+                // Watch keyboard DOM changes until buttons appear.
                 const kbRoot = document.querySelector("#introKeyboard");
                 if (!kbRoot) {
-                // fallback: try again shortly
+                // Fallback retry.
                 setTimeout(() => { if (overlayIsOpen()) buildLines(); }, 300);
                 return;
                 }
 
-                // Clean old observer
+                // Clean up existing observer.
                 if (keyboardReadyObserver) {
                 try { keyboardReadyObserver.disconnect(); } catch (e) {}
                 keyboardReadyObserver = null;
@@ -7171,7 +7147,7 @@
                     if (el) {
                         try { keyboardReadyObserver.disconnect(); } catch (e) {}
                         keyboardReadyObserver = null;
-                        // two RAFs to let layout settle
+                        // Use two RAF ticks to let layout settle.
                         requestAnimationFrame(() => requestAnimationFrame(buildLines));
                     } else if (performance.now() - start > timeoutMs) {
                         try { keyboardReadyObserver.disconnect(); } catch (e) {}
@@ -7182,7 +7158,7 @@
 
                 keyboardReadyObserver.observe(kbRoot, { childList: true, subtree: true });
 
-                // Hard timeout fallback
+                // Final timeout fallback.
                 setTimeout(() => {
                 if (keyboardReadyObserver) {
                     try { keyboardReadyObserver.disconnect(); } catch (e) {}
@@ -7216,17 +7192,17 @@
                 localStorage.setItem(PREF_KEY, "true");
                 }
 
-                // stop blocking clicks immediately
+                // Stop blocking clicks immediately.
                 introOverlay.style.pointerEvents = "none";
 
-                // fade out
+                // Fade out overlay.
                 introOverlay.classList.add("hide");
 
-                // lines must be cleaned because they live outside overlay
+                // Remove connector lines; they live outside the overlay.
                 cleanupLines();
             }
 
-            // After fade out, remove overlay from layout so it never blocks clicks
+            // After fade-out, remove overlay from layout to avoid blocking clicks.
             if (introOverlay) {
                 introOverlay.addEventListener("animationend", (e) => {
                 if (e.animationName !== "overlayFadeOut") return;
@@ -7235,22 +7211,22 @@
                 });
             }
 
-            // Buttons
+            // Button bindings
             okBtn?.addEventListener("click", () => closeIntro(true));
             helpBtn?.addEventListener("click", () => openIntro(true));
 
-            // Keep lines positioned if window resizes while open
+            // Reposition lines when the window resizes.
             window.addEventListener("resize", () => {
                 if (!overlayIsOpen()) return;
                 lines.forEach(l => { try { l.position(); } catch (e) {} });
             });
 
-            // Initial show (after DOM is ready)
+            // Initial open after DOM is ready.
             document.addEventListener("DOMContentLoaded", () => {
                 openIntro(false);
             });
 
-            // Expose minimal API for other modules (hotkeys, buttons, etc.)
+            // Expose a minimal API for hotkeys and UI controls.
             window.isIntroOverlayOpen = function () {
             const overlay = document.getElementById("introOverlay");
                 if (!overlay) return false;
@@ -7264,17 +7240,13 @@
             };
 
             window.closeIntroOverlay = function (persist = true) {
-                closeIntro(persist); //
+                closeIntro(persist);
             };
         })();
 
-        // ------------------------------------------------------------------------------
-        // ---- ******************************************************************** ----
-        // ---- ****************** ANIMATED NETWORK LOGO LOGICS ******************** ----
-        // ---- ******************************************************************** ----
-        // ------------------------------------------------------------------------------
+        // Animated network logo
 
-        // Initialize Vivus on the SVG inside the card header
+        // Initialize Vivus animation for the card header SVG.
         var drawDuration = 24;
         var myAnim = new Vivus('mySVG', {
             duration: drawDuration,
@@ -7288,7 +7260,7 @@
 
         function fadeInNodes(step, maxStep) {
             setTimeout(() => {
-                // Select all nodes for the current step
+                // Select nodes for the current animation step.
                 const nodes = document.querySelectorAll('.circle.step' + step);
                 nodes.forEach(node => {
                     node.classList.add('blue-bg');
@@ -7305,13 +7277,9 @@
             }, 1000);
         });
 
-        // ------------------------------------------------------------------------------
-        // ---- ******************************************************************** ----
-        // ---- ***************** OTHER UI LOGICS (BUTTONS etc.) ******************* ----
-        // ---- ******************************************************************** ----
-        // ------------------------------------------------------------------------------
+        // Other UI logic
 
-        // Functions to disable and enable all buttons, with a timeout value for enabling.
+        // Disable all controls, then optionally re-enable them after a timeout.
         function disableAllButtons() {
             d3.selectAll(".csv-switcher").classed("disabled", true);
             d3.select("#mapLayerButton").attr("disabled", true);
@@ -7333,18 +7301,18 @@
         }
 
         function disableAllCheckboxes() {
-            // Disable all link checkboxes.
+            // Disable link checkboxes.
             d3.selectAll(".trade-checkbox").property("disabled", true);
-            // Also disable all header checkboxes.
+            // Disable header checkboxes.
             d3.selectAll(".trade-header-checkbox").property("disabled", true);
         }
 
         function enableAllCheckboxes(timeoutVal) {
             if (!window.isPlaying) {
                 d3.timeout(() => {
-                    // Enable all link checkboxes.
+                    // Enable link checkboxes.
                     d3.selectAll(".trade-checkbox").property("disabled", false);
-                    // Also enable all header checkboxes.
+                    // Enable header checkboxes.
                     d3.selectAll(".trade-header-checkbox").property("disabled", false);
                 }, timeoutVal);
             }
@@ -7355,23 +7323,23 @@
             menu.classList.toggle("active");
         });
 
-        // Function to save the SVG to PNG file
+        // Save the current SVG as a PNG file.
         function downloadSvg() {
-            // Generate filename based on current timestamp and a random suffix
+            // Generate a filename from timestamp and random suffix.
             const timestamp = new Date().toISOString().replace(/[-:]/g, "").replace("T", "_").split(".")[0];
             const filename = `network_${timestamp}_${Math.random().toString(36).substring(7)}.png`;
 
-            // Download the SVG as PNG
+            // Download the SVG as PNG.
             saveSvgAsPng(document.getElementById("mainFigureSVG"), filename);
         }
 
-        // Event listener for the screenshot button to trigger the download
+        // Screenshot button handler.
         document.getElementById("screenshotButton").addEventListener("click", downloadSvg);
 
-        // Attach an event listener to the restore button.
+        // Restore button handler.
         document.getElementById("restoreButton").addEventListener("click", restoreLinks);
 
-        // Match the widths of the screenshot and restore buttons
+        // Match screenshot and restore button widths.
         function matchButtonWidths() {
             const screenshotButton = document.getElementById("screenshotButton");
             const restoreButton = document.getElementById("restoreButton");
@@ -7382,18 +7350,18 @@
             }
         }
 
-        // Run the function after page load
+        // Run after page load.
         window.onload = matchButtonWidths;
 
-        // ----- Define Keyboard Shortcuts for the functionalities -----
+        // Keyboard shortcuts
 
-        // Shortcut for taking a screenshot: Press 's'
+        // Shortcut: press "s" to take a screenshot.
         document.addEventListener("DOMContentLoaded", function () {
             const screenshotButton = document.getElementById("screenshotButton");
 
-            // Enable keyboard shortcut when the screenshot button is enabled
+            // Only trigger when the screenshot button is enabled.
             document.addEventListener("keydown", function (event) {
-                if (event.key === "s" && !window.isSwitchingCSV && !window.isPlaying && !window.isDoingTemporalUpdate) {  // Press 's' to take a screenshot
+                if (event.key === "s" && !window.isSwitchingCSV && !window.isPlaying && !window.isDoingTemporalUpdate) {
                     if (!screenshotButton.disabled && !window.isSwitchingCSV && !window.isPlaying && !window.isDoingTemporalUpdate) {
                         event.preventDefault(); // Prevent browser save shortcut
                         screenshotButton.click(); // Trigger button click
@@ -7402,13 +7370,13 @@
             });
         });
 
-        // Shortcut for toggling the network mode: Press 'm'
+        // Shortcut: press "m" to toggle network mode.
         document.addEventListener("DOMContentLoaded", function () {
             const toggleModeButton = document.getElementById("toggleModeButton");
 
-            // Enable keyboard shortcut when the toggle button is enabled
+            // Only trigger when the toggle button is enabled.
             document.addEventListener("keydown", function (event) {
-                if (event.key === "m" && !window.isSwitchingCSV && !window.isPlaying && !window.isDoingTemporalUpdate) {  // Press 'm' to toggle network mode
+                if (event.key === "m" && !window.isSwitchingCSV && !window.isPlaying && !window.isDoingTemporalUpdate) {
                     if (!toggleModeButton.disabled && !window.isSwitchingCSV && !window.isPlaying && !window.isDoingTemporalUpdate) {
                         event.preventDefault(); // Prevent browser save shortcut
                         toggleModeButton.click(); // Trigger button click
@@ -7417,11 +7385,11 @@
             });
         });
 
-        // Shortcut for quitting the focus mode: Press 'q'
-        // Calls clearSelection(false) to remove the focus from the selected node
+        // Shortcut: press "q" to exit focus mode.
+        // Clears node focus using clearSelection(false).
         document.addEventListener("DOMContentLoaded", function () {
             document.addEventListener("keydown", function (event) {
-                if (event.key === "q" && !window.isSwitchingCSV && !window.isDoingTemporalUpdate) {  // Press 'q' to quit focus mode
+                if (event.key === "q" && !window.isSwitchingCSV && !window.isDoingTemporalUpdate) {
                     event.preventDefault();
                     if (selectedNodeData) {
                         clearSelection(false);
@@ -7430,11 +7398,11 @@
             });
         });
 
-        // Shortcut for the restore button: Press 'r'
+        // Shortcut: press "r" to restore links.
         document.addEventListener("DOMContentLoaded", function () {
             const restoreButton = document.getElementById("restoreButton")
             document.addEventListener("keydown", function (event) {
-                if (event.key === "r" && !window.isSwitchingCSV && !window.isPlaying && !window.isDoingTemporalUpdate) { // Press 'r' to restore the links
+                if (event.key === "r" && !window.isSwitchingCSV && !window.isPlaying && !window.isDoingTemporalUpdate) {
                     if (!restoreButton.disabled) {
                         event.preventDefault();
                         restoreButton.click();
@@ -7443,35 +7411,35 @@
             });
         });
 
-        // Shortcut for play/pause the time replay: Press 'space'
-        // Note: The listener is defined in the same function to insert the element
+        // Shortcut: press Space to play/pause time replay.
+        // Listener is registered where the control is created.
 
-        // Shortcut for play/pause the time replay: Press 'f'
-        // Note: The listener is defined in the same function to insert the element
+        // Shortcut: press "f" to play/pause time replay.
+        // Listener is registered where the control is created.
 
-        // Shortcut for adjusting the time slider: Press 'left' or 'right' arrow keys
-        // Note: The listener is defined in the same function to insert the element
+        // Shortcut: left/right arrows adjust the time slider.
+        // Listener is registered where the control is created.
 
-        // Shortcut to switch between focal nodes: Press 'up' or 'down' arrow keys
+        // Shortcut: up/down arrows switch focal nodes.
         document.addEventListener("keydown", function (e) {
             if (e.key === "ArrowDown" || e.key === "ArrowUp") {
                 if (!window.isSwitchingCSV && !window.isPlaying && !window.isDoingTemporalUpdate) {
                     e.preventDefault();
 
-                    // Get all node elements. They should have been attached to .nodeGroup.
+                    // Get all node elements attached to .nodeGroup.
                     const nodesArray = d3.selectAll(".nodeGroup").nodes();
                     if (!nodesArray.length) return;
 
-                    // Determine the current index based on selectedNodeData (if any)
+                    // Resolve the current index from selectedNodeData.
                     let currentIndex = -1;
                     if (selectedNodeData) {
                         currentIndex = nodesArray.findIndex(el => el.__data__.id === selectedNodeData.id);
                     }
-                    // If no node is selected or not found, default to the first node.
+                    // Default to the first node if nothing is selected.
                     if (currentIndex === -1) {
                         currentIndex = 0;
                     } else {
-                        // Update index: ArrowDown goes to the next node; ArrowUp to the previous.
+                        // ArrowDown moves forward; ArrowUp moves backward.
                         if (e.key === "ArrowDown") {
                             currentIndex = (currentIndex + 1) % nodesArray.length;
                         } else if (e.key === "ArrowUp") {
@@ -7479,18 +7447,18 @@
                         }
                     }
 
-                    // Get the node data from AllNodes
+                    // Resolve node data from allNodes.
                     const selectedNode = allNodes.find(n => n.id === nodesArray[currentIndex].__data__.id);
 
-                    // Call debouncedOnClickNode with the selected node data
+                    // Focus the node via debouncedOnClickNode.
                     debouncedOnClickNode("click", selectedNode);
                 }
             }
         });
 
-        // Shortcut for the help/intro overlay button: Press 'h'
+        // Shortcut: press "h" to toggle the intro overlay.
         document.addEventListener("keydown", function (event) {
-            // Don't steal typing in inputs
+            // Do not intercept typing in editable fields.
             const t = event.target;
             const tag = t && t.tagName ? t.tagName.toLowerCase() : "";
             if (tag === "input" || tag === "textarea" || (t && t.isContentEditable)) return;
@@ -7499,15 +7467,15 @@
                 event.preventDefault();
 
                 if (window.isIntroOverlayOpen && window.isIntroOverlayOpen()) {
-                // Toggle OFF (do NOT persist "don't show again" automatically)
+                // Close without persisting "don't show again".
                 window.closeIntroOverlay?.(false);
                 } else {
-                // Toggle ON (force ignores "don't show again")
+                // Open even if "don't show again" is set.
                 window.openIntroOverlay?.(true);
                 }
             }
         });
-        // When the intro overlay is open, we want to block all keyboard shortcuts except for Tab (to navigate) and Esc (to close).
+        // While intro overlay is open, block shortcuts except Tab and Escape.
         document.addEventListener("keydown", function (event) {
             if (!window.isIntroOverlayOpen || !window.isIntroOverlayOpen()) return;
 
@@ -7520,7 +7488,7 @@
                 return;
             }
 
-            // Allow H to toggle-close while open
+            // Allow "h" to close while overlay is open.
             if (event.key === "h" || event.key === "H") {
                 event.preventDefault();
                 event.stopImmediatePropagation();
