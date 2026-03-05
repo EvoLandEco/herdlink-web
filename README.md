@@ -7,7 +7,12 @@
 
 HerdLink Web is an interactive web application for **livestock trade network visualization and analysis**. It helps users explore movement patterns, network structures, and spatialtemporal dynamics in livestock trade data through a browser-first experience. The ultimate goal is to provide epidemiological insights and practical decision support.
 
-![Screenshot](assets/screenshots/UI.png)
+Normal mode             |  Focus mode
+:-------------------------:|:-------------------------:
+![Screenshot 1](assets/screenshots/UI-A.png)  |  ![Screenshot 2](assets/screenshots/UI-B.png)
+
+
+
 
 ## Live Application
 
