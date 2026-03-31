@@ -804,6 +804,7 @@
       const currentDateAnnoType = d3.annotationCalloutCircle;
       let hoveredNode = null;
       let hoveredLink = null;
+      let hoveredLinkElement = null;
       let annotationGroup = null;
       let lastRadarData = null;
       const metricNames = [
@@ -2692,10 +2693,89 @@
         };
       }
 
+      function getLinkBaseClass(d) {
+        const srcId = typeof d.source === "object" ? d.source.id : d.source;
+        const tgtId = typeof d.target === "object" ? d.target.id : d.target;
+
+        if (
+          selectedNodeData &&
+          d.weight > 0 &&
+          !d.disabled &&
+          (srcId === selectedNodeData.id || tgtId === selectedNodeData.id)
+        ) {
+          return srcId === selectedNodeData.id
+            ? "linkSelectOut"
+            : "linkSelectIn";
+        }
+
+        return "link";
+      }
+
+      function getLinkHoverClass(d) {
+        const baseClass = getLinkBaseClass(d);
+        if (baseClass === "linkSelectIn") return "linkSelectInOver";
+        if (baseClass === "linkSelectOut") return "linkSelectOutOver";
+        return "linkOver";
+      }
+
+      function restoreLinkClass(linkElement, d) {
+        if (!linkElement || !d) return;
+        d3.select(linkElement).attr("class", getLinkBaseClass(d));
+      }
+
+      function clearHoveredLinkState() {
+        if (hoveredLinkElement) {
+          const previousDatum = d3.select(hoveredLinkElement).datum();
+          restoreLinkClass(hoveredLinkElement, previousDatum);
+        }
+
+        hoveredLink = null;
+        hoveredLinkElement = null;
+
+        if (annotationGroup) {
+          annotationGroup.selectAll("*").remove();
+        }
+      }
+
+      function handleLinkMouseEnter(event, d) {
+        if (hoveredLinkElement && hoveredLinkElement !== this) {
+          const previousDatum = d3.select(hoveredLinkElement).datum();
+          restoreLinkClass(hoveredLinkElement, previousDatum);
+        }
+
+        hoveredLink = d;
+        hoveredLinkElement = this;
+
+        d3.select(this).interrupt().attr("class", getLinkHoverClass(d));
+        updateAnnotationForLink(d, annotationGroup);
+      }
+
+      function handleLinkMouseMove(event, d) {
+        if (hoveredLinkElement === this && hoveredLink === d) {
+          updateAnnotationForLink(d, annotationGroup);
+        }
+      }
+
+      function handleLinkMouseLeave(event, d) {
+        restoreLinkClass(this, d);
+
+        if (hoveredLinkElement === this) {
+          hoveredLinkElement = null;
+          hoveredLink = null;
+        }
+
+        if (annotationGroup) {
+          annotationGroup.selectAll("*").remove();
+        }
+      }
+
       // Create Network
       function initNetwork(isReplot = false) {
         // Create annotation group
-        annotationGroup = svg.append("g").attr("class", "annotation-group");
+        annotationGroup = svg
+          .append("g")
+          .attr("class", "annotation-group")
+          .style("pointer-events", "none");
 
         // if forceSim exists, stop it and reset the simulation
         if (forceSim) {
@@ -3024,34 +3104,9 @@
         });
 
         linkSelection
-          .on("mouseover", function (event, d) {
-            hoveredLink = d;
-            if (d3.select(this).classed("linkSelectIn")) {
-              d3.select(this).attr("class", "linkSelectInOver").raise();
-            } else if (d3.select(this).classed("linkSelectOut")) {
-              d3.select(this).attr("class", "linkSelectOutOver").raise();
-            } else {
-              d3.select(this).attr("class", "linkOver").raise();
-            }
-            updateAnnotationForLink(d, annotationGroup);
-          })
-          .on("mousemove", function (event, d) {
-            if (hoveredLink === d) {
-              updateAnnotationForLink(d, annotationGroup);
-            }
-          })
-          .on("mouseout", function (event, d) {
-            if (d3.select(this).classed("linkSelectInOver")) {
-              d3.select(this).attr("class", "linkSelectIn");
-            } else if (d3.select(this).classed("linkSelectOutOver")) {
-              d3.select(this).attr("class", "linkSelectOut");
-            } else {
-              d3.select(this).attr("class", "link");
-            }
-            // Clear annotations.
-            hoveredLink = null;
-            annotationGroup.selectAll("*").remove();
-          });
+          .on("mouseenter", handleLinkMouseEnter)
+          .on("mousemove", handleLinkMouseMove)
+          .on("mouseleave", handleLinkMouseLeave);
 
         // Add Hotspot Stroke Legend
         if (!isReplot) {
@@ -4064,6 +4119,7 @@
       // Node Click Handler
       function onClickNode(event, d) {
         if (event.defaultPrevented) return;
+        clearHoveredLinkState();
         // Save previous selection before clearing
         let wasSelected = !!selectedNodeData;
         let wasSameNode = selectedNodeData && selectedNodeData.id === d.id;
@@ -4326,6 +4382,7 @@
 
       // Clear Selection (If Clicking Again/Unclicked)
       function clearSelection(flag) {
+        clearHoveredLinkState();
         selectedNodeData = null;
 
         const colorScale = d3
@@ -6007,6 +6064,7 @@
         // Disable buttons and checkboxes during transitions.
         disableAllButtons();
         disableAllCheckboxes();
+        clearHoveredLinkState();
 
         // 1. Update link.disabled based on checkboxes.
         d3.selectAll(".trade-checkbox").each(function () {
@@ -6957,20 +7015,8 @@
 
       function updateTemporalNetwork() {
         isDoingTemporalUpdate = true;
-        let previousLinkIndex = null;
-        // If a link is hovered, reset its styling.
-        if (hoveredLink) {
-          previousLinkIndex = hoveredLink.id;
-          linkSelection
-            .filter((d) => d === hoveredLink)
-            .attr("class", "link") // reset class to the base state
-            .attr("opacity", (d) =>
-              d.disabled ? 0 : selectedNodeData ? 1 : 0.2,
-            )
-            .attr("marker-end", null);
-          hoveredLink = null;
-        }
-        annotationGroup.selectAll("*").remove();
+        let previousLinkIndex = hoveredLink ? hoveredLink.id : null;
+        clearHoveredLinkState();
         d3.select("#radial-labels-container").selectAll("*").remove();
 
         let lastSelectedNodeIndex = null;
@@ -7005,7 +7051,7 @@
 
         // DATA JOIN for links.
         const linksSelection = linkGroup
-          .selectAll("path.link")
+          .selectAll("path")
           .data(allLinks, linkKey);
 
         // EXIT: Transition out old links.
@@ -7038,19 +7084,9 @@
               .attr("stroke-dasharray", totalLength + " " + totalLength)
               .attr("stroke-dashoffset", totalLength);
           })
-          .on("mouseover", function (event, d) {
-            hoveredLink = d;
-            updateAnnotationForLink(d, annotationGroup);
-          })
-          .on("mousemove", function (event, d) {
-            if (hoveredLink === d) {
-              updateAnnotationForLink(d, annotationGroup);
-            }
-          })
-          .on("mouseout", function (event, d) {
-            hoveredLink = null;
-            annotationGroup.selectAll("*").remove();
-          });
+          .on("mouseenter", handleLinkMouseEnter)
+          .on("mousemove", handleLinkMouseMove)
+          .on("mouseleave", handleLinkMouseLeave);
 
         // MERGE and transition links.
         linkSelection = linksEnter.merge(linksSelection);
