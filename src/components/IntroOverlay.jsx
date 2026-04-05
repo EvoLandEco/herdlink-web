@@ -189,7 +189,7 @@ export function IntroOverlay() {
 
             {quickStartNotes.map((note) => (
               <div key={note.key} className="intro-note">
-                <i className="fa-solid fa-circle"></i>
+                <i className="fa-light fa-circle-small"></i>
                 {note.content}
               </div>
             ))}
