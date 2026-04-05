@@ -5,66 +5,76 @@
 ![Website](https://img.shields.io/website?url=https%3A%2F%2Fherdlink.nl&label=HerdLink.nl)
 ![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)
 
-HerdLink Web is an interactive web application for **livestock trade network visualization and analysis**. It helps users explore movement patterns, network structures, and spatialtemporal dynamics in livestock trade data through a browser-first experience. The ultimate goal is to provide epidemiological insights and practical decision support.
+HerdLink Web is a browser-based tool for exploring livestock trade networks in the Netherlands. It combines network views, regional map overlays, and time-based summaries so movement patterns and structural shifts are easier to inspect.
 
 Normal mode             |  Focus mode
 :-------------------------:|:-------------------------:
-![Screenshot 1](assets/screenshots/UI-A.png)  |  ![Screenshot 2](assets/screenshots/UI-B.png)
-
-
-
+![Screenshot 1](public/assets/screenshots/UI-A.png)  |  ![Screenshot 2](public/assets/screenshots/UI-B.png)
 
 ## Live Application
 
-This repository is automatically deployed using **GitHub Pages** and published at:
+- [https://herdlink.nl](https://herdlink.nl)
 
-- **https://herdlink.nl**
+## What It Does
 
-For deployment details, see your repository's GitHub Pages settings and workflow configuration in GitHub.
+- Renders regional trade networks with graph and map views.
+- Switches between daily, weekly, monthly, and yearly aggregations.
+- Highlights focus-mode trade flows, partner balance, and community structure.
+- Tracks temporal metrics such as active regions, trade routes, modularity, and spectral radius.
+- Exports the main network view as a PNG image.
 
-## Key Capabilities
-
-- Interactive network rendering for livestock trade relations.
-- Temporal aggregation views (daily, weekly, monthly, yearly).
-- Regional geospatial overlays for contextual interpretation.
-- Export support for generated visual assets (e.g., SVG).
-- Front-end architecture suitable for iterative analytics enhancements.
-
-## Project Structure
+## Project Layout
 
 ```text
 .
-├── index.html                  # Main application entry
-├── assets/
-│   ├── css/                    # Styling
-│   ├── data/                   # Aggregated trade datasets
-│   ├── files/herdlink/         # Geo and map resources
-│   ├── icon/                   # Branding assets
-│   └── js/                     # Visualization and graph logic
-├── favicon.ico
-└── CNAME                       # Custom domain for GitHub Pages
+├── index.html                    # Vite entry document
+├── src/
+│   ├── App.jsx                   # React shell and mount bridge
+│   ├── components/               # Static layout components
+│   └── styles/herdlink.css       # Application styles
+├── public/
+│   ├── assets/
+│   │   ├── data/                 # Aggregated trade datasets
+│   │   ├── files/herdlink/       # GeoJSON and SVG assets
+│   │   ├── js/                   # D3 helpers and HerdLink runtime
+│   │   └── screenshots/          # README images
+│   ├── CNAME
+│   └── favicon.ico
+├── package.json
+└── vite.config.js
 ```
 
-## Local Development
+## Development
 
-Because this is a static web application, you can run it locally with any simple HTTP server.
-
-Example using Python:
+Install dependencies:
 
 ```bash
-python3 -m http.server 8080
+npm install
 ```
 
-Then open:
+Start the local dev server:
 
-- http://localhost:8080
+```bash
+npm run dev
+```
 
-## Technology Highlights
+Create a production build:
 
-- **D3 ecosystem and helper libraries** for visualization and annotation.
-- **Graph tooling** for network construction and layout.
-- **GeoJSON-based map layers** for regional context.
-- **Static deployment model** for fast delivery via GitHub Pages.
+```bash
+npm run build
+```
+
+Preview the build locally:
+
+```bash
+npm run preview
+```
+
+## Architecture Notes
+
+The page shell is rendered with React. The visualization engine remains a browser runtime in [`public/assets/js/herdlink-runtime.js`](public/assets/js/herdlink-runtime.js), where the D3 network logic, keyboard shortcuts, and export controls live.
+
+This split keeps the layout easy to maintain while preserving the existing analysis workflow and asset format.
 
 ## License
 
