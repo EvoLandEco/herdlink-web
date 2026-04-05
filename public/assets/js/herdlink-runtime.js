@@ -9137,10 +9137,7 @@
             if (!window.isPlaying) {
               d3.timeout(() => {
                 d3.selectAll(".csv-switcher").classed("disabled", false);
-                d3.select("#mapLayerButton").attr(
-                  "disabled",
-                  currentMode === "map" ? null : true,
-                );
+                d3.select("#mapLayerButton").attr("disabled", true);
                 d3.select("#toggleModeButton").attr("disabled", null);
                 d3.select("#screenshotButton").attr("disabled", null);
                 d3.select("#restoreButton").attr("disabled", null);
@@ -9169,6 +9166,9 @@
           document
             .getElementById("mapLayerButton")
             .addEventListener("click", function () {
+              if (this.disabled) {
+                return;
+              }
               const menu = document.getElementById("mapLayerMenu");
               menu.classList.toggle("active");
             });
