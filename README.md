@@ -70,12 +70,6 @@ Preview the build locally:
 npm run preview
 ```
 
-## Architecture Notes
-
-The page shell is rendered with React. The visualization engine remains a browser runtime in [`public/assets/js/herdlink-runtime.js`](public/assets/js/herdlink-runtime.js), where the D3 network logic, keyboard shortcuts, and export controls live.
-
-This split keeps the layout easy to maintain while preserving the existing analysis workflow and asset format.
-
 ## License
 
 This project is licensed under the **MIT License**. See [`LICENSE`](LICENSE) for details.
