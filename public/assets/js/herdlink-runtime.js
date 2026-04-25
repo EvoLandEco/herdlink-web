@@ -1221,10 +1221,16 @@
               markerLayer.selectAll("*").remove();
             }
 
+            const legendWidth = current
+              ? keys.length * 42 + 82
+              : getSimulationCompartmentLegendWidth(keys);
             const legend = svg
               .append("g")
               .attr("class", "simulation-chart-legend")
-              .attr("transform", `translate(${margin.left},42)`);
+              .attr(
+                "transform",
+                `translate(${Math.max(margin.left, (node.clientWidth - legendWidth) / 2)},42)`,
+              );
             keys.forEach((key, index) => {
               const item = legend
                 .append("g")
@@ -1381,6 +1387,68 @@
               .fitSize([width, height], nlMapData);
           }
 
+          function renderSimulationSpatialLegend(svg, x, y) {
+            const items = [
+              { label: "Prevalence", type: "fill", color: "#bed9ad" },
+              { label: "Exposure flow", type: "line", color: "#f2c94c" },
+              { label: "New cases", type: "circle", color: "#2e8d34" },
+            ];
+            const legend = svg
+              .selectAll("g.simulation-spatial-mini-legend")
+              .data([null])
+              .join("g")
+              .attr("class", "simulation-spatial-mini-legend")
+              .attr("transform", `translate(${x},${y})`);
+            const rows = legend
+              .selectAll("g.simulation-spatial-mini-legend-row")
+              .data(items, (item) => item.label)
+              .join("g")
+              .attr("class", "simulation-spatial-mini-legend-row")
+              .attr("transform", (item, index) => `translate(0,${index * 15})`);
+
+            rows
+              .selectAll("rect.simulation-spatial-mini-legend-fill")
+              .data((item) => (item.type === "fill" ? [item] : []))
+              .join("rect")
+              .attr("class", "simulation-spatial-mini-legend-fill")
+              .attr("x", 0)
+              .attr("y", 1)
+              .attr("width", 10)
+              .attr("height", 8)
+              .attr("rx", 2)
+              .attr("fill", (item) => item.color);
+            rows
+              .selectAll("line.simulation-spatial-mini-legend-line")
+              .data((item) => (item.type === "line" ? [item] : []))
+              .join("line")
+              .attr("class", "simulation-spatial-mini-legend-line")
+              .attr("x1", 0)
+              .attr("x2", 12)
+              .attr("y1", 6)
+              .attr("y2", 6)
+              .attr("stroke", (item) => item.color)
+              .attr("stroke-width", 2)
+              .attr("stroke-linecap", "round");
+            rows
+              .selectAll("circle.simulation-spatial-mini-legend-circle")
+              .data((item) => (item.type === "circle" ? [item] : []))
+              .join("circle")
+              .attr("class", "simulation-spatial-mini-legend-circle")
+              .attr("cx", 6)
+              .attr("cy", 6)
+              .attr("r", 4.5)
+              .attr("fill", (item) => item.color)
+              .attr("stroke", "#172218")
+              .attr("stroke-width", 0.6);
+            rows
+              .selectAll("text")
+              .data((item) => [item])
+              .join("text")
+              .attr("x", 17)
+              .attr("y", 9)
+              .text((item) => item.label);
+          }
+
           function getSimulationLabelPoint(id, projection) {
             const feature = nlLabelPoints?.features?.find(
               (item) => item.properties.statcode === id,
@@ -1486,7 +1554,7 @@
             if (!frame || selectedNodeData) return;
             const container = d3.select("#tradeDistribution");
             const node = container.node();
-            const margin = { top: 52, right: 12, bottom: 38, left: 12 };
+            const margin = { top: 48, right: 12, bottom: 38, left: 12 };
             const width = Math.max(10, node.clientWidth - margin.left - margin.right);
             const height = Math.max(10, node.clientHeight - margin.top - margin.bottom);
             let svg = container.select("svg.simulation-spatial-chart");
@@ -1505,8 +1573,23 @@
               return;
             }
             g.selectAll(".empty-message").remove();
+            renderSimulationSpatialLegend(svg, margin.left + 2, 34);
 
-            const projection = getSimulationPanelProjection(width, height);
+            const mapBoxHeight = Math.max(10, height - 8);
+            const mapBox = {
+              x: 0,
+              y: Math.max(0, (height - mapBoxHeight) / 2),
+              width,
+              height: mapBoxHeight,
+            };
+            const projection = getSimulationPanelProjection(
+              mapBox.width,
+              mapBox.height,
+            );
+            projection.translate([
+              projection.translate()[0] + mapBox.x,
+              projection.translate()[1] + mapBox.y,
+            ]);
             const path = d3.geoPath().projection(projection);
             const spatialNodes = getSimulationSpatialNodes(frame, projection);
             const spatialById = new Map(spatialNodes.map((item) => [item.id, item]));
@@ -2170,6 +2253,10 @@
             root.selectAll(".simulation-focus-grid text").attr("fill", "none");
           }
 
+          function getSimulationCompartmentLegendWidth(keys) {
+            return Math.max(0, (keys.length - 1) * 40 + 32);
+          }
+
           function renderSimulationCompartmentLegend(svg, keys, x, y) {
             svg.selectAll(".simulation-focus-legend").remove();
             const legend = svg
@@ -2309,7 +2396,18 @@
               });
             }
 
-            renderSimulationCompartmentLegend(svg, ["S", "E", "I", "R"], margin.left, 44);
+            const legendKeys = ["S", "E", "I", "R"];
+            renderSimulationCompartmentLegend(
+              svg,
+              legendKeys,
+              Math.max(
+                margin.left,
+                (node.clientWidth -
+                  getSimulationCompartmentLegendWidth(legendKeys)) /
+                  2,
+              ),
+              44,
+            );
           }
 
           function getSimulationNodeInsightView(view) {
@@ -2436,23 +2534,24 @@
             `;
           }
 
-          function prepareSimulationNodeInsightChart(svg, containerNode) {
+          function prepareSimulationNodeInsightChart(svg, containerNode, options = {}) {
             const container = d3.select("#tradeNodeInsight");
             const labelNode = container.select(".trade-nodeinsight-label").node();
             const controlsNode = document.getElementById(
               "tradeNodeInsightControls",
             );
             const summaryNode = document.getElementById("tradeNodeInsightSummary");
+            const legendBandHeight = options.legendBandHeight || 0;
             const overlayH =
               (labelNode ? labelNode.getBoundingClientRect().height : 0) +
               (controlsNode ? controlsNode.getBoundingClientRect().height : 0) +
               (summaryNode ? summaryNode.getBoundingClientRect().height : 0) +
               22;
             const margin = {
-              top: Math.max(overlayH, 104),
-              right: 22,
+              top: Math.max(overlayH, 104) + legendBandHeight,
+              right: options.right ?? 22,
               bottom: 28,
-              left: 54,
+              left: options.left ?? 54,
             };
             const width = Math.max(
               10,
@@ -2887,18 +2986,26 @@
               { key: "Incoming", color: "#f2c94c" },
               { key: "Outgoing", color: "#eb5757" },
             ];
+            const legendItemWidth = 86;
+            const legendWidth = legendData.length * legendItemWidth - 8;
             const legend = g
               .selectAll("g.simulation-focus-inline-legend")
               .data([null])
               .join("g")
               .attr("class", "simulation-focus-inline-legend")
-              .attr("transform", "translate(0,-16)");
+              .attr(
+                "transform",
+                `translate(${Math.max(0, (width - legendWidth) / 2)},-18)`,
+              );
             const items = legend
               .selectAll("g.simulation-focus-inline-legend-item")
               .data(legendData, (d) => d.key)
               .join("g")
               .attr("class", "simulation-focus-inline-legend-item")
-              .attr("transform", (d, index) => `translate(${index * 86},0)`);
+              .attr(
+                "transform",
+                (d, index) => `translate(${index * legendItemWidth},0)`,
+              );
             items
               .selectAll("rect")
               .data((d) => [d])
@@ -3056,7 +3163,13 @@
               svg.selectAll("*").remove();
             }
             svg.attr("data-simulation-view", selectedView);
-            const { g, width, height } = prepareSimulationNodeInsightChart(svg, node);
+            const { g, width, height } = prepareSimulationNodeInsightChart(
+              svg,
+              node,
+              selectedView === "spatial"
+                ? { legendBandHeight: 16, left: 46 }
+                : {},
+            );
 
             if (selectedView === "exposure") {
               renderSimulationExposureInsight(g, width, height, state);
@@ -6572,7 +6685,7 @@
             );
     
             // Append a "?" button.
-            infoBtn = d3.select(".hotspotInfoButton");
+            const infoBtn = d3.select(".hotspotInfoButton");
             infoBtn
               .append("div")
               .attr("class", "has-tip")
@@ -6621,125 +6734,111 @@
           }
     
           function showHotspotInfoOverlay() {
-            // Create or select the overlay container.
             let overlay = d3.select("body").select("#hotspotInfoOverlay");
             if (overlay.empty()) {
               overlay = d3
                 .select("body")
                 .append("div")
-                .attr("id", "hotspotInfoOverlay")
-                .style("position", "fixed")
-                .style("top", "0")
-                .style("left", "0")
-                .style("width", "100%")
-                .style("height", "100%")
-                .style("background", "rgba(0,0,0,0.6)")
-                .style("display", "flex")
-                .style("justify-content", "center")
-                .style("align-items", "center")
-                .style("z-index", "10000")
-                .style("pointer-events", "auto");
+                .attr("id", "hotspotInfoOverlay");
             }
-    
-            // Clear any previous content.
-            overlay.html("");
-    
-            // Create a card container.
-            const card = overlay
-              .append("div")
-              .attr("class", "hotspot-info-card")
-              .style("background", "#fff")
-              .style("padding", "20px")
-              .style("border-radius", "8px")
-              .style("max-width", "800px")
-              .style("width", "80%")
-              .style("box-shadow", "0 2px 8px rgba(0,0,0,0.3)")
-              .style("font-family", "sans-serif")
-              .style("color", "#333")
-              .style("position", "relative");
-    
-            // Add a close button.
-            card
-              .append("div")
-              .attr("class", "hotspot-info-close")
-              .style("position", "absolute")
-              .style("top", "10px")
-              .style("right", "10px")
-              .style("cursor", "pointer")
-              .style("font-size", "18px")
-              .html('<i class="fa-solid fa-circle-xmark"></i>')
-              .on("click", function () {
-                overlay
-                  .transition()
-                  .duration(300)
-                  .style("opacity", 0)
-                  .on("end", () => overlay.remove());
-              });
-    
-            // Add a title.
-            card
-              .append("h2")
-              .style("margin-top", "0")
-              .text("Hotspot Metrics Overview");
-    
-            // Create a table.
-            const tableHTML = `
-                          <table style="width:100%; border-collapse: collapse; font-size: 14px;">
-                          <thead>
-                              <tr style="background: #4CAF50; color: white;">
-                              <th style="padding: 8px; border: 1px solid #ddd;">Code</th>
-                              <th style="padding: 8px; border: 1px solid #ddd;">Metric</th>
-                              <th style="padding: 8px; border: 1px solid #ddd;">Descriptor</th>
-                              <th style="padding: 8px; border: 1px solid #ddd;">Interpretation</th>
-                              <th style="padding: 8px; border: 1px solid #ddd;">Calculation</th>
-                              </tr>
-                          </thead>
-                          <tbody>
-                              <tr>
-                              <td style="padding: 8px; border: 1px solid #ddd;">ID</td>
-                              <td style="padding: 8px; border: 1px solid #ddd;">Weighted In-Degree</td>
-                              <td style="padding: 8px; border: 1px solid #ddd;">Vulnerable</td>
-                              <td style="padding: 8px; border: 1px solid #ddd;">Farms frequently receiving livestock (high exposure risk).</td>
-                              <td style="padding: 8px; border: 1px solid #ddd;">Sum of incoming trade weights (log-scaled).</td>
-                              </tr>
-                              <tr>
-                              <td style="padding: 8px; border: 1px solid #ddd;">OD</td>
-                              <td style="padding: 8px; border: 1px solid #ddd;">Weighted Out-Degree</td>
-                              <td style="padding: 8px; border: 1px solid #ddd;">Seeding</td>
-                              <td style="padding: 8px; border: 1px solid #ddd;">Farms frequently sending livestock (potential spreaders).</td>
-                              <td style="padding: 8px; border: 1px solid #ddd;">Sum of outgoing trade weights (log-scaled).</td>
-                              </tr>
-                              <tr>
-                              <td style="padding: 8px; border: 1px solid #ddd;">BT</td>
-                              <td style="padding: 8px; border: 1px solid #ddd;">Betweenness</td>
-                              <td style="padding: 8px; border: 1px solid #ddd;">Bottleneck</td>
-                              <td style="padding: 8px; border: 1px solid #ddd;">Farms acting as bridges; their disruption can hinder spread.</td>
-                              <td style="padding: 8px; border: 1px solid #ddd;">Computed via Brandes algorithm (shortest-path based).</td>
-                              </tr>
-                              <tr>
-                              <td style="padding: 8px; border: 1px solid #ddd;">PR</td>
-                              <td style="padding: 8px; border: 1px solid #ddd;">PageRank</td>
-                              <td style="padding: 8px; border: 1px solid #ddd;">Sink</td>
-                              <td style="padding: 8px; border: 1px solid #ddd;">Farms that often receive livestock from key hubs.</td>
-                              <td style="padding: 8px; border: 1px solid #ddd;">Iterative random-walk based model.</td>
-                              </tr>
-                              <tr>
-                              <td style="padding: 8px; border: 1px solid #ddd;">EC</td>
-                              <td style="padding: 8px; border: 1px solid #ddd;">Eigenvector Centrality</td>
-                              <td style="padding: 8px; border: 1px solid #ddd;">Amplifier</td>
-                              <td style="padding: 8px; border: 1px solid #ddd;">Farms connected to influential nodes, potentially magnifying outbreaks.</td>
-                              <td style="padding: 8px; border: 1px solid #ddd;">Computed via power iteration on the adjacency matrix.</td>
-                              </tr>
-                          </tbody>
-                          </table>
-                      `;
-            card.append("div").html(tableHTML);
-    
+
+            const closeOverlay = () => {
+              overlay.classed("hide", true);
+              setTimeout(() => overlay.remove(), 240);
+            };
+
+            const metrics = [
+              {
+                code: "ID",
+                name: "Weighted In Degree",
+                role: "Vulnerable",
+                icon: "fa-arrow-down",
+                text: "Regions receiving larger livestock volumes carry higher exposure pressure.",
+                method: "Incoming trade weights, log scaled",
+              },
+              {
+                code: "OD",
+                name: "Weighted Out Degree",
+                role: "Seeding",
+                icon: "fa-arrow-up",
+                text: "Regions sending larger livestock volumes can seed wider spread.",
+                method: "Outgoing trade weights, log scaled",
+              },
+              {
+                code: "BT",
+                name: "Betweenness",
+                role: "Bottleneck",
+                icon: "fa-route",
+                text: "Regions sitting on trade paths can connect otherwise separate flows.",
+                method: "Brandes shortest path score",
+              },
+              {
+                code: "PR",
+                name: "PageRank",
+                role: "Sink",
+                icon: "fa-magnet",
+                text: "Regions receiving from important senders can collect downstream risk.",
+                method: "Random walk centrality",
+              },
+              {
+                code: "EC",
+                name: "Eigenvector Centrality",
+                role: "Amplifier",
+                icon: "fa-tower-broadcast",
+                text: "Regions linked to influential partners can magnify network pressure.",
+                method: "Power iteration on adjacency",
+              },
+            ];
+
             overlay
-              .style("opacity", 0)
-              .transition()
-              .duration(300)
-              .style("opacity", 1);
+              .attr("class", "hotspot-info-overlay")
+              .attr("role", "presentation")
+              .html(`
+                <section class="hotspot-info-card" role="dialog" aria-modal="true" aria-labelledby="hotspotInfoTitle">
+                  <button class="hotspot-info-close" type="button" aria-label="Close hotspot metrics">
+                    <i class="fa-solid fa-xmark"></i>
+                  </button>
+                  <div class="hotspot-info-head">
+                    <div>
+                      <div class="hotspot-info-badge">
+                        <i class="fa-solid fa-circle-info"></i>
+                        Hotspot guide
+                      </div>
+                      <h2 id="hotspotInfoTitle">Hotspot Metrics</h2>
+                      <p class="hotspot-info-subtitle">
+                        Dashed hotspot rings mark regions with high centrality or flow pressure in the trade network.
+                      </p>
+                    </div>
+                  </div>
+                  <div class="hotspot-info-grid">
+                    ${metrics
+                      .map(
+                        (metric) => `
+                          <article class="hotspot-metric-card">
+                            <div class="hotspot-metric-head">
+                              <span class="hotspot-metric-code">${metric.code}</span>
+                              <span class="hotspot-metric-role">
+                                <i class="fa-solid ${metric.icon}"></i>
+                                ${metric.role}
+                              </span>
+                            </div>
+                            <h3>${metric.name}</h3>
+                            <p>${metric.text}</p>
+                            <div class="hotspot-metric-method">${metric.method}</div>
+                          </article>
+                        `,
+                      )
+                      .join("")}
+                  </div>
+                </section>
+              `);
+
+            overlay.on("click", function (event) {
+              if (event.target === overlay.node()) {
+                closeOverlay();
+              }
+            });
+            overlay.select(".hotspot-info-close").on("click", closeOverlay);
           }
     
           function debounce(func, wait, immediate) {
