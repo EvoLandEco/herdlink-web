@@ -26,6 +26,27 @@
             h = containerCol2.clientHeight;
           svg.attr("viewBox", `0 0 ${w} ${h}`);
           let currentMode = "graph";
+          const controlTips = {
+            switchToMap: "Switch to map view (M)",
+            switchToGraph: "Switch to graph view (M)",
+            play: "Play time steps (Space)",
+            pause: "Pause time steps (Space)",
+            fromStart: "Jump to first time step (F)",
+            hotspotInfo: "Show hotspot details",
+          };
+          function setControlTip(element, tip) {
+            if (!element) return;
+            element.setAttribute("aria-label", tip);
+            element.setAttribute("data-tip", tip);
+          }
+          function setModeControlTip(tip) {
+            setControlTip(document.getElementById("toggleModeButton"), tip);
+            setControlTip(
+              document.querySelector(".toggle-button-container"),
+              tip,
+            );
+          }
+          setModeControlTip(controlTips.switchToMap);
           let nlMapData = null,
             nlLabelPoints = null;
           let forceSim = null,
@@ -79,28 +100,50 @@
     
           // Cache loaded assets in memory.
           const assetCache = {};
+
+          function resolveAssetUrl(url) {
+            if (/^(?:[a-z]+:)?\/\//i.test(url)) {
+              return url;
+            }
+
+            const assetPath = url.replace(/^\.?\//, "");
+            const basePath = window.HERDLINK_BASE_PATH || "/";
+            const baseUrl = new URL(basePath, window.location.origin);
+            return new URL(assetPath, baseUrl).toString();
+          }
     
           // Load an asset and cache the result.
           // Supports JSON, blob, and text payloads.
           function fetchAsset(url, type = "json") {
-            if (assetCache[url]) {
-              return Promise.resolve(assetCache[url]);
+            const assetUrl = resolveAssetUrl(url);
+            if (assetCache[assetUrl]) {
+              return Promise.resolve(assetCache[assetUrl]);
             }
             let promise;
             if (type === "json") {
-              promise = d3.json(url);
-            } else if (type === "blob") {
-              promise = fetch(url).then((response) => {
+              promise = fetch(assetUrl).then((response) => {
                 if (!response.ok) {
-                  throw new Error(`Failed to load ${url}`);
+                  throw new Error(`Failed to load ${assetUrl}`);
+                }
+                return response.json();
+              });
+            } else if (type === "blob") {
+              promise = fetch(assetUrl).then((response) => {
+                if (!response.ok) {
+                  throw new Error(`Failed to load ${assetUrl}`);
                 }
                 return response.blob();
               });
             } else if (type === "text") {
-              promise = fetch(url).then((response) => response.text());
+              promise = fetch(assetUrl).then((response) => {
+                if (!response.ok) {
+                  throw new Error(`Failed to load ${assetUrl}`);
+                }
+                return response.text();
+              });
             }
             return promise.then((data) => {
-              assetCache[url] = data;
+              assetCache[assetUrl] = data;
               return data;
             });
           }
@@ -136,6 +179,7 @@
                 .classed("map-mode", true)
                 .classed("graph-mode", false);
               currentMode = "map";
+              setModeControlTip(controlTips.switchToGraph);
             } else {
               switchToGraphMode();
               d3.select("#toggleModeButton")
@@ -145,6 +189,7 @@
                 .classed("graph-mode", true)
                 .classed("map-mode", false);
               currentMode = "graph";
+              setModeControlTip(controlTips.switchToMap);
             }
           });
     
@@ -3191,6 +3236,10 @@
             infoBtn = d3.select(".hotspotInfoButton");
             infoBtn
               .append("div")
+              .attr("class", "has-tip")
+              .attr("data-tip", controlTips.hotspotInfo)
+              .attr("data-tip-placement", "right")
+              .attr("aria-label", controlTips.hotspotInfo)
               .html('<i class="fa-solid fa-circle-info"></i>')
               .on("click", function () {
                 showHotspotInfoOverlay();
@@ -8297,7 +8346,9 @@
             }
     
             // Use weekly aggregation as the default CSV file.
-            const defaultCSVUrl = "./assets/data/weekly_aggregation.csv";
+            const defaultCSVUrl = resolveAssetUrl(
+              "assets/data/weekly_aggregation.csv",
+            );
     
             // Initialize the network visualization with the default CSV file.
             document
@@ -8323,7 +8374,7 @@
                 currentTimeSpan = resolution;
     
                 const fileName = `${resolution}_aggregation.csv`;
-                const csvUrl = `./assets/data/${fileName}`;
+                const csvUrl = resolveAssetUrl(`assets/data/${fileName}`);
     
                 // Load CSV file using d3.csv
                 initHerdLink(csvUrl);
@@ -8565,12 +8616,18 @@
                   // Create "Play/Pause" button.
                   const playPauseBtn = document.createElement("button");
                   playPauseBtn.id = "playPauseBtn";
+                  playPauseBtn.className = "has-tip";
+                  playPauseBtn.dataset.tipPlacement = "top";
+                  setControlTip(playPauseBtn, controlTips.play);
                   playPauseBtn.innerHTML = '<i class="fa-solid fa-play"></i>';
                   timeControls.appendChild(playPauseBtn);
     
                   // Create "From Start" button.
                   const fromStartBtn = document.createElement("button");
                   fromStartBtn.id = "fromStartBtn";
+                  fromStartBtn.className = "has-tip";
+                  fromStartBtn.dataset.tipPlacement = "top";
+                  setControlTip(fromStartBtn, controlTips.fromStart);
                   fromStartBtn.innerHTML =
                     '<i class="fa-solid fa-clock-rotate-left"></i>';
                   timeControls.appendChild(fromStartBtn);
@@ -8652,6 +8709,7 @@
                   playPauseBtn.addEventListener("click", function () {
                     if (playPauseBtn.innerHTML.includes("play")) {
                       window.isPlaying = true;
+                      setControlTip(playPauseBtn, controlTips.pause);
                       playPauseBtn.innerHTML = '<i class="fa-solid fa-pause"></i>';
                       playInterval = setInterval(() => {
                         let currentIdx = +slider.value;
@@ -8661,11 +8719,13 @@
                           updateCurrentDateDisplay(uniqueDates[slider.value]);
                         } else {
                           clearInterval(playInterval);
+                          setControlTip(playPauseBtn, controlTips.play);
                           playPauseBtn.innerHTML =
                             '<i class="fa-solid fa-play"></i>';
                         }
                       }, 1000);
                     } else {
+                      setControlTip(playPauseBtn, controlTips.play);
                       playPauseBtn.innerHTML = '<i class="fa-solid fa-play"></i>';
                       clearInterval(playInterval);
                       window.isPlaying = false;

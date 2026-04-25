@@ -2,22 +2,30 @@ import { Fragment } from "react";
 import { HerdLinkLogo } from "./HerdLinkLogo";
 
 const resolutionOptions = [
-  { id: "daily", value: "daily", iconClass: "fa-solid fa-calendar-day" },
+  {
+    id: "daily",
+    value: "daily",
+    iconClass: "fa-solid fa-calendar-day",
+    tip: "Load daily trade data",
+  },
   {
     id: "weekly",
     value: "weekly",
     iconClass: "fa-solid fa-calendar-week",
+    tip: "Load weekly trade data",
     defaultChecked: true,
   },
   {
     id: "monthly",
     value: "monthly",
     iconClass: "fa-solid fa-calendar-days",
+    tip: "Load monthly trade data",
   },
   {
     id: "yearly",
     value: "yearly",
     iconClass: "fa-regular fa-calendar-days",
+    tip: "Load yearly trade data",
   },
 ];
 
@@ -26,11 +34,27 @@ const animalOptions = [
     id: "pig",
     value: "pig",
     iconClass: "fa-solid fa-pig",
+    tip: "Pig trade data",
     defaultChecked: true,
   },
-  { id: "cow", value: "cow", iconClass: "fa-solid fa-cow" },
-  { id: "sheep", value: "sheep", iconClass: "fa-solid fa-sheep" },
-  { id: "poultry", value: "poultry", iconClass: "fa-solid fa-bird" },
+  {
+    id: "cow",
+    value: "cow",
+    iconClass: "fa-solid fa-cow",
+    tip: "Cow trade data",
+  },
+  {
+    id: "sheep",
+    value: "sheep",
+    iconClass: "fa-solid fa-sheep",
+    tip: "Sheep trade data",
+  },
+  {
+    id: "poultry",
+    value: "poultry",
+    iconClass: "fa-solid fa-bird",
+    tip: "Poultry trade data",
+  },
 ];
 
 export function LeftPanel() {
@@ -70,7 +94,13 @@ export function LeftPanel() {
                       value={option.value}
                       defaultChecked={option.defaultChecked}
                     />
-                    <label htmlFor={option.id}>
+                    <label
+                      className="has-tip"
+                      htmlFor={option.id}
+                      data-tip={option.tip}
+                      data-tip-placement="bottom"
+                      aria-label={option.tip}
+                    >
                       <i className={option.iconClass}></i>
                     </label>
                   </Fragment>
@@ -90,7 +120,13 @@ export function LeftPanel() {
                       defaultChecked={option.defaultChecked}
                       disabled
                     />
-                    <label htmlFor={option.id}>
+                    <label
+                      className="has-tip"
+                      htmlFor={option.id}
+                      data-tip={option.tip}
+                      data-tip-placement="bottom"
+                      aria-label={option.tip}
+                    >
                       <i className={option.iconClass}></i>
                     </label>
                   </Fragment>

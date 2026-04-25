@@ -110,6 +110,41 @@ textarea:focus-visible {
   outline-offset: 2px;
 }
 
+.herdlink-tooltip {
+  position: fixed;
+  left: -9999px;
+  top: -9999px;
+  z-index: 30000;
+  width: max-content;
+  max-width: min(240px, 72vw);
+  padding: 6px 9px;
+  color: #fff;
+  font-size: 0.78rem;
+  font-weight: 700;
+  line-height: 1.2;
+  text-align: center;
+  white-space: normal;
+  letter-spacing: 0;
+  pointer-events: none;
+  background: rgba(17, 24, 39, 0.96);
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: var(--radius-sm);
+  box-shadow: 0 10px 22px rgba(0, 0, 0, 0.18);
+  opacity: 0;
+  visibility: hidden;
+  transform: translateY(4px);
+  transition:
+    opacity var(--transition-fast),
+    transform var(--transition-fast),
+    visibility var(--transition-fast);
+}
+
+.herdlink-tooltip.is-visible {
+  opacity: 1;
+  visibility: visible;
+  transform: translateY(0);
+}
+
 ::selection {
   background: rgba(76, 175, 80, 0.2);
 }
@@ -368,8 +403,13 @@ textarea:focus-visible {
   background: var(--color-disabled-bg);
 }
 
+.animal-switcher.disabled {
+  pointer-events: auto;
+}
+
 .csv-switcher.disabled label {
   color: var(--color-disabled);
+  cursor: not-allowed;
   background: none;
 }
 

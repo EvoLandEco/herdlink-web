@@ -244,7 +244,14 @@ export function IntroOverlay() {
               Do not show again
             </label>
           </div>
-          <button id="introOkButton" className="btn btn-success" type="button">
+          <button
+            id="introOkButton"
+            className="btn btn-success has-tip"
+            type="button"
+            data-tip="Close this guide"
+            data-tip-placement="top"
+            aria-label="Close this guide"
+          >
             <i className="fa-solid fa-compass"></i> Start exploring
           </button>
         </div>
