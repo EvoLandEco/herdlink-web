@@ -25,7 +25,7 @@
           let w = containerCol2.clientWidth,
             h = containerCol2.clientHeight;
           svg.attr("viewBox", `0 0 ${w} ${h}`);
-          let currentMode = "graph";
+          let currentMode = "map";
           const controlTips = {
             switchToMap: "Switch to map view (M)",
             switchToGraph: "Switch to graph view (M)",
@@ -46,7 +46,7 @@
               tip,
             );
           }
-          setModeControlTip(controlTips.switchToMap);
+          setModeControlTip(controlTips.switchToGraph);
           let nlMapData = null,
             nlLabelPoints = null;
           let forceSim = null,
@@ -149,20 +149,28 @@
           }
     
           // Load GeoJSON files.
-          fetchAsset("assets/files/herdlink/nl_corop.geojson", "json")
+          const mapDataReady = fetchAsset(
+            "assets/files/herdlink/nl_corop.geojson",
+            "json",
+          )
             .then((data) => {
               nlMapData = data;
             })
             .catch((error) => {
               console.error("Error loading nl_corop.geojson:", error);
+              throw error;
             });
     
-          fetchAsset("assets/files/herdlink/nl_corop_labelpoint.geojson", "json")
+          const labelPointsReady = fetchAsset(
+            "assets/files/herdlink/nl_corop_labelpoint.geojson",
+            "json",
+          )
             .then((data) => {
               nlLabelPoints = data;
             })
             .catch((error) => {
               console.error("Error loading nl_corop_labelpoint.geojson:", error);
+              throw error;
             });
     
           // Disable the mode toggle until data is ready.
@@ -9449,7 +9457,11 @@
             true,
           );
 
-          bootstrapHerdLink();
+          Promise.all([mapDataReady, labelPointsReady])
+            .then(bootstrapHerdLink)
+            .catch((error) => {
+              console.error("Error starting HerdLink:", error);
+            });
   }
 
   window.addEventListener("herdlink:mount", initHerdLinkRuntime, { once: true });

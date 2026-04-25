@@ -44,18 +44,18 @@ export function NetworkPanel() {
       </div>
       <div
         className="toggle-button-container has-tip"
-        data-tip="Switch to map view (M)"
+        data-tip="Switch to graph view (M)"
         data-tip-placement="top"
       >
         <button
           id="toggleModeButton"
-          className="btn graph-mode"
+          className="btn map-mode"
           type="button"
           disabled
-          aria-label="Switch to map view (M)"
+          aria-label="Switch to graph view (M)"
         >
           <span className="btn-text">
-            <i className="fa-solid fa-map-location-dot"></i>
+            <i className="fa-solid fa-hexagon-nodes"></i>
           </span>
         </button>
       </div>
