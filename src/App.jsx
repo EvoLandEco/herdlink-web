@@ -20,6 +20,14 @@ const runtimeScripts = [
 ];
 
 const scriptLoaders = new Map();
+const tooltipGap = 10;
+const tooltipMargin = 8;
+const oppositePlacements = {
+  top: "bottom",
+  right: "left",
+  bottom: "top",
+  left: "right",
+};
 
 function loadRuntimeScript({ src, crossOrigin }) {
   const existing = document.querySelector(`script[data-herdlink-src="${src}"]`);
@@ -64,10 +72,177 @@ function loadRuntimeScript({ src, crossOrigin }) {
   return loader;
 }
 
+function clamp(value, min, max) {
+  return Math.min(Math.max(value, min), max);
+}
+
+function getTipTarget(event) {
+  if (!(event.target instanceof Element)) {
+    return null;
+  }
+
+  return event.target.closest(".has-tip[data-tip]");
+}
+
+function getPlacementQueue(placement) {
+  return [
+    placement,
+    oppositePlacements[placement],
+    "top",
+    "bottom",
+    "right",
+    "left",
+  ].filter((item, index, list) => item && list.indexOf(item) === index);
+}
+
+function getTooltipPosition(targetRect, tooltipRect, placement) {
+  if (placement === "bottom") {
+    return {
+      left: targetRect.left + targetRect.width / 2 - tooltipRect.width / 2,
+      top: targetRect.bottom + tooltipGap,
+    };
+  }
+
+  if (placement === "left") {
+    return {
+      left: targetRect.left - tooltipRect.width - tooltipGap,
+      top: targetRect.top + targetRect.height / 2 - tooltipRect.height / 2,
+    };
+  }
+
+  if (placement === "right") {
+    return {
+      left: targetRect.right + tooltipGap,
+      top: targetRect.top + targetRect.height / 2 - tooltipRect.height / 2,
+    };
+  }
+
+  return {
+    left: targetRect.left + targetRect.width / 2 - tooltipRect.width / 2,
+    top: targetRect.top - tooltipRect.height - tooltipGap,
+  };
+}
+
+function isTooltipOnScreen(position, tooltipRect) {
+  return (
+    position.left >= tooltipMargin &&
+    position.top >= tooltipMargin &&
+    position.left + tooltipRect.width <= window.innerWidth - tooltipMargin &&
+    position.top + tooltipRect.height <= window.innerHeight - tooltipMargin
+  );
+}
+
 export default function App() {
+  useEffect(() => {
+    const tooltip = document.getElementById("herdlinkTooltip");
+    let activeTarget = null;
+
+    if (!tooltip) {
+      return undefined;
+    }
+
+    const placeTooltip = () => {
+      if (!activeTarget) {
+        return;
+      }
+
+      const targetRect = activeTarget.getBoundingClientRect();
+      const tooltipRect = tooltip.getBoundingClientRect();
+      const preferredPlacement = activeTarget.dataset.tipPlacement || "top";
+      const placements = getPlacementQueue(preferredPlacement);
+      const chosenPosition =
+        placements
+          .map((placement) =>
+            getTooltipPosition(targetRect, tooltipRect, placement),
+          )
+          .find((position) => isTooltipOnScreen(position, tooltipRect)) ||
+        getTooltipPosition(targetRect, tooltipRect, preferredPlacement);
+
+      const maxLeft = window.innerWidth - tooltipRect.width - tooltipMargin;
+      const maxTop = window.innerHeight - tooltipRect.height - tooltipMargin;
+
+      tooltip.style.left = `${clamp(
+        chosenPosition.left,
+        tooltipMargin,
+        maxLeft,
+      )}px`;
+      tooltip.style.top = `${clamp(
+        chosenPosition.top,
+        tooltipMargin,
+        maxTop,
+      )}px`;
+    };
+
+    const showTooltip = (target) => {
+      const tip = target.dataset.tip;
+
+      if (!tip) {
+        return;
+      }
+
+      activeTarget = target;
+      tooltip.textContent = tip;
+      tooltip.classList.add("is-visible");
+      tooltip.setAttribute("aria-hidden", "false");
+      placeTooltip();
+    };
+
+    const hideTooltip = () => {
+      activeTarget = null;
+      tooltip.classList.remove("is-visible");
+      tooltip.setAttribute("aria-hidden", "true");
+    };
+
+    const handlePointerOver = (event) => {
+      const target = getTipTarget(event);
+
+      if (target) {
+        showTooltip(target);
+      }
+    };
+
+    const handlePointerOut = (event) => {
+      if (
+        activeTarget &&
+        event.relatedTarget instanceof Node &&
+        activeTarget.contains(event.relatedTarget)
+      ) {
+        return;
+      }
+
+      hideTooltip();
+    };
+
+    const handleFocusIn = (event) => {
+      const target = getTipTarget(event);
+
+      if (target) {
+        showTooltip(target);
+      }
+    };
+
+    document.addEventListener("pointerover", handlePointerOver);
+    document.addEventListener("pointerout", handlePointerOut);
+    document.addEventListener("focusin", handleFocusIn);
+    document.addEventListener("focusout", hideTooltip);
+    window.addEventListener("resize", placeTooltip);
+    window.addEventListener("scroll", placeTooltip, true);
+
+    return () => {
+      document.removeEventListener("pointerover", handlePointerOver);
+      document.removeEventListener("pointerout", handlePointerOut);
+      document.removeEventListener("focusin", handleFocusIn);
+      document.removeEventListener("focusout", hideTooltip);
+      window.removeEventListener("resize", placeTooltip);
+      window.removeEventListener("scroll", placeTooltip, true);
+    };
+  }, []);
+
   useEffect(() => {
     let frameId = null;
     let cancelled = false;
+
+    window.HERDLINK_BASE_PATH = basePath;
 
     runtimeScripts
       .reduce((chain, script) => {
@@ -103,6 +278,12 @@ export default function App() {
   return (
     <>
       <IntroOverlay />
+      <div
+        id="herdlinkTooltip"
+        className="herdlink-tooltip"
+        role="tooltip"
+        aria-hidden="true"
+      ></div>
       <div id="radial-labels-container"></div>
       <div id="mainContainer">
         <LeftPanel />

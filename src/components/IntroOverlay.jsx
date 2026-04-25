@@ -3,7 +3,7 @@ const quickStartNotes = [
     key: "resolution",
     content: (
       <>
-        Select a <strong>time resolution</strong> from the top-left switches.
+        Select a <strong>time resolution</strong> from the top left switches.
         <br />
         <i className="fa-solid fa-calendar-day"></i>: daily /
         <i className="fa-solid fa-calendar-week"></i>: weekly /
@@ -17,11 +17,24 @@ const quickStartNotes = [
     content: (
       <>
         Toggle <strong>Graph</strong> / <strong>Map</strong> view using the
-        first button at the bottom-right of the network panel.
+        first button at the bottom right of the network panel.
         <br />
         <i className="fa-solid fa-hexagon-nodes"></i>: Graph view /
         <i className="fa-solid fa-map-location-dot"></i>: Map view / or press
         <kbd>M</kbd> to switch.
+      </>
+    ),
+  },
+  {
+    key: "simulation",
+    content: (
+      <>
+        Use the top left <strong>mode switch</strong> to move between the trade
+        ledger and <strong>simulation mode</strong>; press <kbd>E</kbd> to
+        switch quickly.
+        <br />
+        <i className="fa-solid fa-book"></i>: ledger /
+        <i className="fa-solid fa-flask"></i>: simulation
       </>
     ),
   },
@@ -86,6 +99,17 @@ const shortcutCallouts = [
       </>
     ),
     description: "Export the current view as PNG.",
+  },
+  {
+    key: "e",
+    className: "kbd-callout--e",
+    dotId: "introDotE",
+    label: (
+      <>
+        <kbd>E</kbd> Sim / Ledger
+      </>
+    ),
+    description: "Switch between simulation and ledger modes.",
   },
   {
     key: "m",
@@ -187,12 +211,19 @@ export function IntroOverlay() {
               <i className="fa-solid fa-book"></i> Quick Start
             </div>
 
-            {quickStartNotes.map((note) => (
-              <div key={note.key} className="intro-note">
-                <i className="fa-light fa-circle-small"></i>
-                {note.content}
-              </div>
-            ))}
+            <div className="intro-note-list">
+              {quickStartNotes.map((note, index) => (
+                <div
+                  key={note.key}
+                  className={`intro-note intro-note--${note.key}`}
+                >
+                  <span className="intro-note-index">
+                    {String(index + 1).padStart(2, "0")}
+                  </span>
+                  <span className="intro-note-copy">{note.content}</span>
+                </div>
+              ))}
+            </div>
           </div>
 
           <div className="intro-right">
@@ -244,7 +275,14 @@ export function IntroOverlay() {
               Do not show again
             </label>
           </div>
-          <button id="introOkButton" className="btn btn-success" type="button">
+          <button
+            id="introOkButton"
+            className="btn btn-success has-tip"
+            type="button"
+            data-tip="Close this guide"
+            data-tip-placement="top"
+            aria-label="Close this guide"
+          >
             <i className="fa-solid fa-compass"></i> Start exploring
           </button>
         </div>

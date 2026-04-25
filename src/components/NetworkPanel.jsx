@@ -11,18 +11,22 @@ export function NetworkPanel() {
     <div id="col2">
       <button
         id="mapLayerButton"
-        className="map-layer-button"
+        className="map-layer-button has-tip"
         type="button"
         disabled
+        data-tip="Map layers"
+        data-tip-placement="top"
+        aria-label="Map layers"
       >
         <i className="fa-solid fa-layer-group"></i>
       </button>
       <button
         id="helpOverlayButton"
-        className="help-overlay-button"
+        className="help-overlay-button has-tip"
         type="button"
-        title="Help (H)"
-        aria-label="Help (H)"
+        data-tip="Open help (H)"
+        data-tip-placement="left"
+        aria-label="Open help (H)"
       >
         <i className="fa-solid fa-question"></i>
       </button>
@@ -38,31 +42,42 @@ export function NetworkPanel() {
           </div>
         ))}
       </div>
-      <div className="toggle-button-container">
+      <div
+        className="toggle-button-container has-tip"
+        data-tip="Switch to graph view (M)"
+        data-tip-placement="top"
+      >
         <button
           id="toggleModeButton"
-          className="btn graph-mode"
+          className="btn map-mode"
           type="button"
           disabled
+          aria-label="Switch to graph view (M)"
         >
           <span className="btn-text">
-            <i className="fa-solid fa-map-location-dot"></i>
+            <i className="fa-solid fa-hexagon-nodes"></i>
           </span>
         </button>
       </div>
       <button
         id="restoreButton"
-        className="restore-button"
+        className="restore-button has-tip"
         type="button"
         disabled
+        data-tip="Restore links (R)"
+        data-tip-placement="top"
+        aria-label="Restore links (R)"
       >
         <i className="fa-solid fa-arrows-rotate"></i>
       </button>
       <button
         id="screenshotButton"
-        className="screenshot-button"
+        className="screenshot-button has-tip"
         type="button"
         disabled
+        data-tip="Export screenshot (S)"
+        data-tip-placement="top"
+        aria-label="Export screenshot (S)"
       >
         <i className="fa-solid fa-camera"></i>
       </button>
@@ -87,6 +102,9 @@ export function NetworkPanel() {
       <div id="currentDateWidget" className="current-date-widget">
         <span className="current-date-label"></span>
         <span className="current-date-value"></span>
+      </div>
+      <div id="timeAuthorCredit" className="time-author-credit">
+        Author: Tianjian Qin
       </div>
     </div>
   );
