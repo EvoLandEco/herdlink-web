@@ -1,13 +1,13 @@
 # HerdLink Web
 
-![Version](https://img.shields.io/badge/version-v0.5.1--alpha-2f6fed)
+![Version](https://img.shields.io/badge/version-v0.6.0--alpha-2f6fed)
 ![Deployment](https://img.shields.io/badge/deployment-GitHub%20Pages-121013?logo=github)
 ![Website](https://img.shields.io/website?url=https%3A%2F%2Fherdlink.nl&label=HerdLink.nl)
 ![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)
 
-HerdLink Web is a browser-based tool for exploring livestock trade networks in the Netherlands. It combines network views, regional map overlays, and time-based summaries so movement patterns and structural shifts are easier to inspect.
+HerdLink Web is a browser-based tool for exploring livestock trade networks in the Netherlands. It combines regional graph views, map overlays, temporal metrics, partition summaries, and simulation panels so movement structure and disease spread scenarios can be inspected in one workspace.
 
-Normal mode             |  Focus mode
+Trade ledger mode             |  Focus mode
 :-------------------------:|:-------------------------:
 ![Screenshot 1](public/assets/screenshots/UI-A.png)  |  ![Screenshot 2](public/assets/screenshots/UI-B.png)
 
@@ -15,13 +15,30 @@ Normal mode             |  Focus mode
 
 - [https://herdlink.nl](https://herdlink.nl)
 
-## What It Does
+## Main Features
 
-- Renders regional trade networks with graph and map views.
-- Switches between daily, weekly, monthly, and yearly aggregations.
-- Highlights focus-mode trade flows, partner balance, and community structure.
-- Tracks temporal metrics such as active regions, trade routes, modularity, and spectral radius.
-- Exports the main network view as a PNG image.
+- Trade ledger mode for daily, weekly, monthly, and yearly livestock movement summaries.
+- Graph and map views with regional links, map layers, risk scores, and network metrics.
+- Focus mode for inspecting one region's incoming and outgoing trade structure.
+- Simulation mode with SEIR controls, compartment trajectory panels, regional prevalence maps, and focus node simulation insights.
+- Partition and community views that summarize trade clustering, partition exposure, and CR-region mappings.
+- Intro overlay with quick start notes, keyboard shortcuts, and guided shortcut callouts.
+- PNG export for the main network visualization.
+
+## Shortcuts
+
+| Key | Action |
+| --- | --- |
+| `E` | Switch between trade ledger and simulation modes |
+| `M` | Switch between map and graph views |
+| `S` | Export a screenshot |
+| `R` | Restore disabled links |
+| `Q` | Exit focus mode |
+| `H` | Open or close the help overlay |
+| `Space` | Play or pause the time slider |
+| `F` | Jump to the first time step |
+| `←` / `→` | Step through time |
+| `↑` / `↓` | Switch focal node |
 
 ## Project Layout
 

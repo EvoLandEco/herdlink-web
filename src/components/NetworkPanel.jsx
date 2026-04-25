@@ -103,6 +103,9 @@ export function NetworkPanel() {
         <span className="current-date-label"></span>
         <span className="current-date-value"></span>
       </div>
+      <div id="timeAuthorCredit" className="time-author-credit">
+        Author: Tianjian Qin
+      </div>
     </div>
   );
 }

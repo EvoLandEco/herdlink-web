@@ -42,18 +42,37 @@ const animalOptions = [
     value: "cow",
     iconClass: "fa-solid fa-cow",
     tip: "Cow trade data",
+    disabled: true,
   },
   {
     id: "sheep",
     value: "sheep",
     iconClass: "fa-solid fa-sheep",
     tip: "Sheep trade data",
+    disabled: true,
   },
   {
     id: "poultry",
     value: "poultry",
     iconClass: "fa-solid fa-bird",
     tip: "Poultry trade data",
+    disabled: true,
+  },
+];
+
+const modeOptions = [
+  {
+    id: "tradeLedgerMode",
+    value: "trade-ledger",
+    iconClass: "fa-solid fa-book",
+    tip: "Trade ledger mode",
+    defaultChecked: true,
+  },
+  {
+    id: "simulationMode",
+    value: "simulation",
+    iconClass: "fa-solid fa-flask",
+    tip: "Simulation mode",
   },
 ];
 
@@ -66,7 +85,7 @@ export function LeftPanel() {
             <div className="header-row header-row-1">
               <div className="logo-container">
                 <h4 className="app-title">HerdLink</h4>
-                <div className="app-version">v0.5.1-alpha</div>
+                <div className="app-version">v0.6.0-alpha</div>
                 <div className="app-credit">
                   <a
                     className="app-credit-link"
@@ -83,54 +102,88 @@ export function LeftPanel() {
               </div>
             </div>
 
-            <div className="header-row header-row-2">
-              <div className="csv-switcher upper-switcher">
-                {resolutionOptions.map((option) => (
-                  <Fragment key={option.id}>
-                    <input
-                      type="radio"
-                      id={option.id}
-                      name="csvResolution"
-                      value={option.value}
-                      defaultChecked={option.defaultChecked}
-                    />
-                    <label
-                      className="has-tip"
-                      htmlFor={option.id}
-                      data-tip={option.tip}
-                      data-tip-placement="bottom"
-                      aria-label={option.tip}
-                    >
-                      <i className={option.iconClass}></i>
-                    </label>
-                  </Fragment>
-                ))}
-              </div>
-            </div>
+            <div className="header-controls-row">
+              <div className="header-switcher-stack">
+                <div className="header-row header-row-2">
+                  <div className="csv-switcher upper-switcher">
+                    {resolutionOptions.map((option) => (
+                      <Fragment key={option.id}>
+                        <input
+                          type="radio"
+                          id={option.id}
+                          name="csvResolution"
+                          value={option.value}
+                          defaultChecked={option.defaultChecked}
+                        />
+                        <label
+                          className="has-tip"
+                          htmlFor={option.id}
+                          data-tip={option.tip}
+                          data-tip-placement="bottom"
+                          aria-label={option.tip}
+                        >
+                          <i className={option.iconClass}></i>
+                        </label>
+                      </Fragment>
+                    ))}
+                  </div>
+                </div>
 
-            <div className="header-row header-row-3">
-              <div className="animal-switcher csv-switcher lower-switcher disabled">
-                {animalOptions.map((option) => (
-                  <Fragment key={option.id}>
-                    <input
-                      type="radio"
-                      id={option.id}
-                      name="animalType"
-                      value={option.value}
-                      defaultChecked={option.defaultChecked}
-                      disabled
-                    />
-                    <label
-                      className="has-tip"
-                      htmlFor={option.id}
-                      data-tip={option.tip}
-                      data-tip-placement="bottom"
-                      aria-label={option.tip}
-                    >
-                      <i className={option.iconClass}></i>
-                    </label>
-                  </Fragment>
-                ))}
+                <div className="header-row header-row-3">
+                  <div className="animal-switcher csv-switcher lower-switcher">
+                    {animalOptions.map((option) => (
+                      <Fragment key={option.id}>
+                        <input
+                          type="radio"
+                          id={option.id}
+                          name="animalType"
+                          value={option.value}
+                          defaultChecked={option.defaultChecked}
+                          disabled={option.disabled}
+                        />
+                        <label
+                          className="has-tip"
+                          htmlFor={option.id}
+                          data-tip={option.tip}
+                          data-tip-placement="bottom"
+                          aria-label={option.tip}
+                          aria-disabled={option.disabled}
+                        >
+                          <i className={option.iconClass}></i>
+                        </label>
+                      </Fragment>
+                    ))}
+                  </div>
+                </div>
+              </div>
+
+              <div
+                className="mode-switcher-frame"
+                role="group"
+                aria-label="Mode"
+              >
+                <div className="mode-switcher">
+                  {modeOptions.map((option) => (
+                    <Fragment key={option.id}>
+                      <input
+                        type="radio"
+                        id={option.id}
+                        name="modeType"
+                        value={option.value}
+                        defaultChecked={option.defaultChecked}
+                      />
+                      <label
+                        className="has-tip"
+                        htmlFor={option.id}
+                        data-tip={option.tip}
+                        data-tip-placement="right"
+                        aria-label={option.tip}
+                      >
+                        <i className={option.iconClass}></i>
+                      </label>
+                    </Fragment>
+                  ))}
+                </div>
               </div>
             </div>
           </div>

@@ -18,6 +18,7 @@
           let currentTimeSpan;
           window.isPlaying = false;
           window.isSwitchingCSV = false;
+          window.isSwitchingAppMode = false;
           let isDoingTemporalUpdate = false;
           window.isDoingTemporalUpdate = false;
           const svg = d3.select("#col2 svg");
@@ -97,6 +98,3297 @@
           let topNMetric = {};
           let preYDomainGlobalStats = null;
           let preYDomainNodeStats = null;
+          const simulationCompartmentColors = {
+            S: "#7bb661",
+            E: "#f2c94c",
+            I: "#eb5757",
+            R: "#4f83cc",
+          };
+          const simulationCompartmentLabels = {
+            S: "Susceptible",
+            E: "Exposed",
+            I: "Infectious",
+            R: "Recovered",
+          };
+          const simulationPrevalenceScale = d3
+            .scaleSequential(
+              d3.interpolateRgbBasis([
+                "#e5efd8",
+                "#9fbe7c",
+                "#d4bd69",
+                "#d88a4f",
+                "#b94f45",
+                "#74353d",
+              ]),
+            )
+            .domain([0, 0.35])
+            .clamp(true);
+          const simulationPrevalenceTextScale = d3
+            .scaleSequential(
+              d3.interpolateRgbBasis([
+                "#4f6a3d",
+                "#58713f",
+                "#80642c",
+                "#8c4c30",
+                "#793536",
+                "#5c2d36",
+              ]),
+            )
+            .domain([0, 0.35])
+            .clamp(true);
+          let appDataMode = "trade";
+          const appModeSwitchBounceMs = 550;
+          let appModeSwitchTimer = null;
+          let appModeSwitchLocked = false;
+          let simulationRunId = 0;
+          let updateNetworkForDateHandler = null;
+          let simulationRecomputeTimer = null;
+          let simulationState = {
+            status: "idle",
+            settings: null,
+            trajectory: null,
+            currentFrame: null,
+            currentDateKey: null,
+            metricMax: null,
+          };
+
+          function isSimulationModeActive() {
+            return appDataMode === "simulation";
+          }
+
+          function getNodeId(value) {
+            return typeof value === "object" ? value.id : value;
+          }
+
+          function getLinkKey(source, target) {
+            return `${getNodeId(source)}-${getNodeId(target)}`;
+          }
+
+          function formatCount(value) {
+            const num = Number(value) || 0;
+            return d3.format(",.0f")(num);
+          }
+
+          function formatSmall(value) {
+            const num = Number(value) || 0;
+            if (Math.abs(num) >= 100) return d3.format(",.0f")(num);
+            if (Math.abs(num) >= 10) return d3.format(",.1f")(num);
+            return d3.format(",.2f")(num);
+          }
+
+          function formatPct(value) {
+            const num = Number(value) || 0;
+            return `${(100 * num).toFixed(num >= 0.1 ? 1 : 2)}%`;
+          }
+
+          function transitionSelection(selection, duration = 300) {
+            return selection.interrupt().transition().duration(duration);
+          }
+
+          function renderSimulationDateMarker(
+            root,
+            { x, date, height, rangeWidth = 12, lineColor = "#9ca3af" },
+          ) {
+            if (!date) return;
+            const cx = x(date);
+            const rangeX = cx - rangeWidth / 2;
+
+            const range = root
+              .selectAll("rect.simulation-current-range")
+              .data([date]);
+            range
+              .enter()
+              .insert("rect", ":first-child")
+              .attr("class", "simulation-current-range")
+              .attr("x", rangeX)
+              .attr("y", 0)
+              .attr("width", rangeWidth)
+              .attr("height", height)
+              .attr("rx", 3)
+              .attr("ry", 3)
+              .style("fill", "rgba(107, 114, 128, 0.18)")
+              .merge(range)
+              .call((selection) =>
+                transitionSelection(selection)
+                  .attr("x", rangeX)
+                  .attr("width", rangeWidth)
+                  .attr("height", height),
+              );
+            range.exit().remove();
+
+            const line = root
+              .selectAll("line.simulation-current-line")
+              .data([date]);
+            line
+              .enter()
+              .append("line")
+              .attr("class", "simulation-current-line")
+              .attr("x1", cx)
+              .attr("x2", cx)
+              .attr("y1", 0)
+              .attr("y2", height)
+              .style("stroke", lineColor)
+              .merge(line)
+              .call((selection) =>
+                transitionSelection(selection)
+                  .attr("x1", cx)
+                  .attr("x2", cx)
+                  .attr("y2", height)
+                  .style("stroke", lineColor),
+              )
+              .raise();
+            line.exit().remove();
+          }
+
+          function measureSimulationCalloutText(root, text) {
+            const measuringText = root
+              .append("text")
+              .attr("class", "simulation-compartment-callout-text")
+              .attr("visibility", "hidden")
+              .text(text);
+            const measuredWidth =
+              measuringText.node()?.getComputedTextLength?.() || 0;
+            measuringText.remove();
+            return measuredWidth;
+          }
+
+          function renderSimulationCompartmentCallout(root, x, y, current, width, height) {
+            if (!current) return;
+            const summary = current.summary;
+            const cx = x(current.date);
+            const keys = ["S", "E", "I", "R"];
+            const labelPaddingX = 8;
+            const maxLabelWidth = Math.max(40, width - 8);
+            const labelHeight = 18;
+            const labelGap = 5;
+            const gap = 14;
+            const minLabelY = 2;
+            const maxLabelY = Math.max(minLabelY, height - labelHeight - 2);
+            let lower = 0;
+            const layout = keys.map((key) => {
+              const value = summary[key] || 0;
+              const share = summary.N ? value / summary.N : 0;
+              const labelText = `${key}: ${formatCount(value)} (${formatPct(share)})`;
+              const labelWidth = Math.min(
+                maxLabelWidth,
+                Math.ceil(
+                  measureSimulationCalloutText(root, labelText) +
+                    labelPaddingX * 2,
+                ),
+              );
+              const midpoint = lower + value / 2;
+              lower += value;
+              const anchorY = Math.max(0, Math.min(height, y(midpoint)));
+              return {
+                key,
+                value,
+                share,
+                color: simulationCompartmentColors[key],
+                anchorX: cx,
+                anchorY,
+                labelText,
+                labelWidth,
+                labelY: Math.max(
+                  minLabelY,
+                  Math.min(maxLabelY, anchorY - labelHeight / 2),
+                ),
+              };
+            });
+            const widestLabel = Math.max(...layout.map((item) => item.labelWidth));
+            const labelSide =
+              cx + gap + widestLabel <= width || cx - gap - widestLabel < 0
+                ? "right"
+                : "left";
+            layout.forEach((item) => {
+              item.labelX =
+                labelSide === "right"
+                  ? Math.min(width - item.labelWidth, cx + gap)
+                  : Math.max(0, cx - item.labelWidth - gap);
+            });
+
+            const orderedLayout = [...layout].sort((a, b) => a.labelY - b.labelY);
+            orderedLayout.forEach((item, index) => {
+              if (index === 0) return;
+              item.labelY = Math.max(
+                item.labelY,
+                orderedLayout[index - 1].labelY + labelHeight + labelGap,
+              );
+            });
+            const overflow =
+              orderedLayout.length > 0
+                ? orderedLayout[orderedLayout.length - 1].labelY - maxLabelY
+                : 0;
+            if (overflow > 0) {
+              orderedLayout.forEach((item) => {
+                item.labelY = Math.max(minLabelY, item.labelY - overflow);
+              });
+              orderedLayout.forEach((item, index) => {
+                if (index === 0) return;
+                item.labelY = Math.max(
+                  item.labelY,
+                  orderedLayout[index - 1].labelY + labelHeight + labelGap,
+                );
+              });
+            }
+
+            root.selectAll("g.simulation-current-callout").remove();
+
+            const group = root
+              .selectAll("g.simulation-compartment-callouts")
+              .data([d3.timeFormat("%Y-%m-%d")(current.date)]);
+            const enteredGroup = group
+              .enter()
+              .append("g")
+              .attr("class", "simulation-compartment-callouts");
+            const mergedGroup = enteredGroup.merge(group);
+
+            const points = mergedGroup
+              .selectAll("circle.simulation-compartment-callout-point")
+              .data(layout, (d) => d.key);
+            points
+              .enter()
+              .append("circle")
+              .attr("class", "simulation-compartment-callout-point")
+              .attr("cx", (d) => d.anchorX)
+              .attr("cy", (d) => d.anchorY)
+              .attr("r", 0)
+              .attr("fill", (d) => d.color)
+              .merge(points)
+              .call((selection) =>
+                transitionSelection(selection)
+                  .attr("cx", (d) => d.anchorX)
+                  .attr("cy", (d) => d.anchorY)
+                  .attr("r", 4.5)
+                  .attr("fill", (d) => d.color),
+              );
+            points.exit().remove();
+
+            const labels = mergedGroup
+              .selectAll("g.simulation-compartment-callout-label")
+              .data(layout, (d) => d.key);
+            const enteredLabels = labels
+              .enter()
+              .append("g")
+              .attr("class", "simulation-compartment-callout-label")
+              .style("opacity", 0);
+            enteredLabels
+              .append("line")
+              .attr("class", "simulation-compartment-callout-connector");
+            enteredLabels
+              .append("rect")
+              .attr("class", "simulation-compartment-callout-bg")
+              .attr("rx", 4)
+              .attr("ry", 4)
+              .attr("height", labelHeight);
+            enteredLabels
+              .append("text")
+              .attr("class", "simulation-compartment-callout-text")
+              .attr("x", labelPaddingX)
+              .attr("y", 13);
+
+            const mergedLabels = enteredLabels.merge(labels);
+            transitionSelection(mergedLabels)
+              .attr("transform", (d) => `translate(${d.labelX},${d.labelY})`)
+              .style("opacity", 1);
+            mergedLabels
+              .select("rect.simulation-compartment-callout-bg")
+              .attr("width", (d) => d.labelWidth)
+              .attr("height", labelHeight);
+            mergedLabels
+              .select("line.simulation-compartment-callout-connector")
+              .call((selection) =>
+                transitionSelection(selection)
+                  .attr("x1", (d) => (d.labelX < cx ? d.labelWidth : 0))
+                  .attr("y1", labelHeight / 2)
+                  .attr("x2", (d) => d.anchorX - d.labelX)
+                  .attr("y2", (d) => d.anchorY - d.labelY),
+              );
+            mergedLabels
+              .select("text.simulation-compartment-callout-text")
+              .text((d) => d.labelText);
+            labels
+              .exit()
+              .call((selection) =>
+                transitionSelection(selection).style("opacity", 0).remove(),
+              );
+            group.exit().remove();
+            mergedGroup.raise();
+          }
+
+          function getReadablePrevalenceTextColor(value) {
+            const color = d3.color(simulationPrevalenceScale(value));
+            if (!color) return "#172218";
+            const luminance =
+              (0.299 * color.r + 0.587 * color.g + 0.114 * color.b) / 255;
+            return luminance < 0.56 ? "#fff" : "#172218";
+          }
+
+          function clampNumber(value, min, max) {
+            return Math.min(max, Math.max(min, value));
+          }
+
+          function setTradeEdgeScales(links) {
+            const weightedLinks = links.filter((link) => link.weight > 0);
+            edgeExtent = d3.extent(weightedLinks, (d) => Math.log(d.weight));
+            if (edgeExtent[0] == null || edgeExtent[1] == null) {
+              edgeExtent = [0, 1];
+            }
+            edgeColor = d3
+              .scaleSequential(d3.interpolateSpectral)
+              .domain([edgeExtent[1], edgeExtent[0]]);
+          }
+
+          function createSeededRandom(seed) {
+            let state = Number(seed) || 1;
+            state = Math.abs(Math.floor(state)) % 2147483647;
+            if (state === 0) state = 1;
+            return function () {
+              state = (state * 16807) % 2147483647;
+              return (state - 1) / 2147483646;
+            };
+          }
+
+          function getCurrentSliderDate() {
+            const slider = document.getElementById("timeSlider");
+            if (!slider || !uniqueDates.length) {
+              return window.currentDate || uniqueDates[0] || null;
+            }
+            const idx = clampNumber(+slider.value || 0, 0, uniqueDates.length - 1);
+            return uniqueDates[idx];
+          }
+
+          function ensureSimulationControls() {
+            let panel = document.getElementById("simulationControls");
+            if (panel) return panel;
+
+            panel = document.createElement("div");
+            panel.id = "simulationControls";
+            panel.className = "simulation-controls-panel";
+            panel.hidden = true;
+            panel.innerHTML = `
+              <div class="simulation-controls-title">
+                <span class="simulation-controls-heading-text">
+                  <i class="fa-solid fa-flask"></i> Simulation Controls
+                </span>
+                <button
+                  class="simulation-controls-info has-tip"
+                  type="button"
+                  data-tip="Model picks disease states. Seed keeps runs repeatable. Seed regions and Initial % set starting infections. Contact beta sets local spread, Movement beta sets trade spread. Latency and Recovery set transition speed."
+                  data-tip-placement="left"
+                  aria-label="Simulation settings guide"
+                >
+                  <i class="fa-solid fa-circle-info" aria-hidden="true"></i>
+                </button>
+              </div>
+              <div class="simulation-control-grid">
+                <label>
+                  Model
+                  <select id="simulationModel">
+                    <option value="SEIR">SEIR</option>
+                    <option value="SIR">SIR</option>
+                    <option value="SIS">SIS</option>
+                    <option value="SEIRS">SEIRS</option>
+                  </select>
+                </label>
+                <label>
+                  Seed
+                  <input id="simulationSeed" type="number" min="1" max="999999" step="1" value="2026">
+                </label>
+                <label>
+                  Seed regions
+                  <input id="simulationSeedCount" type="number" min="1" max="8" step="1" value="2">
+                </label>
+                <label>
+                  Initial %
+                  <input id="simulationInitialPct" type="number" min="0.05" max="20" step="0.05" value="1">
+                </label>
+                <label>
+                  Contact beta
+                  <input id="simulationBeta" type="number" min="0" max="2" step="0.01" value="0.32">
+                </label>
+                <label>
+                  Movement beta
+                  <input id="simulationMovementBeta" type="number" min="0" max="2" step="0.01" value="0.08">
+                </label>
+                <label>
+                  Latency
+                  <input id="simulationSigma" type="number" min="0" max="1" step="0.01" value="0.22">
+                </label>
+                <label>
+                  Recovery
+                  <input id="simulationGamma" type="number" min="0" max="1" step="0.01" value="0.15">
+                </label>
+              </div>
+            `;
+
+            document.getElementById("col3")?.appendChild(panel);
+            return panel;
+          }
+
+          function readSimulationSettings() {
+            ensureSimulationControls();
+            return {
+              model: document.getElementById("simulationModel")?.value || "SEIR",
+              seed: Math.max(
+                1,
+                +(document.getElementById("simulationSeed")?.value || 2026),
+              ),
+              seedCount: clampNumber(
+                +(document.getElementById("simulationSeedCount")?.value || 2),
+                1,
+                8,
+              ),
+              initialPct: clampNumber(
+                +(document.getElementById("simulationInitialPct")?.value || 1),
+                0.05,
+                20,
+              ),
+              beta: clampNumber(
+                +(document.getElementById("simulationBeta")?.value || 0.32),
+                0,
+                2,
+              ),
+              movementBeta: clampNumber(
+                +(document.getElementById("simulationMovementBeta")?.value || 0.08),
+                0,
+                2,
+              ),
+              sigma: clampNumber(
+                +(document.getElementById("simulationSigma")?.value || 0.22),
+                0,
+                1,
+              ),
+              gamma: clampNumber(
+                +(document.getElementById("simulationGamma")?.value || 0.15),
+                0,
+                1,
+              ),
+            };
+          }
+
+          function ensureSimulationLoadingOverlay() {
+            let overlay = document.getElementById("simulationLoadingOverlay");
+            if (overlay) return overlay;
+
+            overlay = document.createElement("div");
+            overlay.id = "simulationLoadingOverlay";
+            overlay.className = "simulation-loading-overlay";
+            overlay.setAttribute("aria-hidden", "true");
+            overlay.innerHTML = `
+              <div class="simulation-loading-panel">
+                <div class="simulation-loading-header">
+                  <i class="fa-solid fa-flask"></i>
+                  <div>
+                    <div class="simulation-loading-title">Preparing simulation</div>
+                    <div id="simulationLoadingStage" class="simulation-loading-stage">Starting</div>
+                  </div>
+                  <div id="simulationLoadingPercent" class="simulation-loading-percent">0%</div>
+                </div>
+                <div class="simulation-progress-track">
+                  <div id="simulationProgressBar" class="simulation-progress-bar"></div>
+                </div>
+                <div id="simulationProgressItems" class="simulation-progress-items"></div>
+              </div>
+            `;
+            document.getElementById("col2")?.appendChild(overlay);
+            return overlay;
+          }
+
+          function setSimulationOverlay(progress, stage, activeKey) {
+            const overlay = ensureSimulationLoadingOverlay();
+            overlay.classList.add("is-visible");
+            overlay.setAttribute("aria-hidden", "false");
+            const pct = clampNumber(progress, 0, 100);
+            document.getElementById("simulationLoadingStage").textContent = stage;
+            document.getElementById("simulationLoadingPercent").textContent =
+              `${Math.round(pct)}%`;
+            document.getElementById("simulationProgressBar").style.width =
+              `${pct}%`;
+
+            const items = [
+              ["ledger", "Scanning trade ledger"],
+              ["holdings", "Estimating holdings"],
+              ["contacts", "Building movement contacts"],
+              ["states", "Integrating compartments"],
+              ["frames", "Building replay ledger"],
+              ["render", "Rendering panels"],
+            ];
+            const activeIndex = Math.max(
+              0,
+              items.findIndex((item) => item[0] === activeKey),
+            );
+            document.getElementById("simulationProgressItems").innerHTML = items
+              .map(([key, label], index) => {
+                const state =
+                  key === activeKey
+                    ? "is-running"
+                    : index < activeIndex
+                      ? "is-done"
+                      : "";
+                return `<div class="simulation-progress-item ${state}">
+                  <span class="simulation-progress-dot"></span>
+                  <span>${label}</span>
+                </div>`;
+              })
+              .join("");
+          }
+
+          function hideSimulationOverlay() {
+            const overlay = ensureSimulationLoadingOverlay();
+            overlay.classList.remove("is-visible");
+            overlay.setAttribute("aria-hidden", "true");
+          }
+
+          function delaySimulationStage() {
+            return new Promise((resolve) => {
+              requestAnimationFrame(() => setTimeout(resolve, 80));
+            });
+          }
+
+          function setSimulationPanelLabels(active) {
+            const labels = active
+              ? {
+                  distribution:
+                    '<i class="fa-solid fa-map-location-dot"></i> Spatial Spread:',
+                  clusters:
+                    '<i class="fa-solid fa-diagram-project"></i> Partition Exposure:',
+                  nodeDistribution:
+                    '<i class="fa-solid fa-chart-line"></i> Focus Trajectory:',
+                  nodeInsight:
+                    '<i class="fa-solid fa-stethoscope"></i> Focus Simulation:',
+                }
+              : {
+                  distribution:
+                    '<i class="fa-regular fa-chart-scatter-bubble"></i> Gravity Model:',
+                  clusters:
+                    '<i class="fa-regular fa-circle-nodes"></i> Trade Clusters:',
+                  nodeDistribution:
+                    '<i class="fa-regular fa-chart-scatter-bubble"></i> Gravity Model (Node):',
+                  nodeInsight:
+                    '<i class="fa-regular fa-circle-nodes"></i> Focus Insights:',
+                };
+
+            d3.select(".trade-distribution-label").html(labels.distribution);
+            d3.select(".trade-clusters-label").html(labels.clusters);
+            d3.select(".trade-node-distribution-label").html(
+              labels.nodeDistribution,
+            );
+            d3.select(".trade-nodeinsight-label").html(labels.nodeInsight);
+            d3.select(".inArboTitle").html(
+              active
+                ? '<i class="fa-solid fa-sitemap"></i> Main Exposure Backbone'
+                : '<i class="fa-solid fa-sitemap"></i> Major Export Structure',
+            );
+          }
+
+          function collectSimulationRegionIds(data) {
+            const ids = new Set();
+            for (let i = 1; i <= 40; i++) {
+              ids.add("CR" + (i < 10 ? "0" + i : i));
+            }
+            data.forEach((row) => {
+              const source = row.COROP_LEV;
+              const target = row.COROP_AFN;
+              if (source && source.toUpperCase() !== "NA") ids.add(source);
+              if (target && target.toUpperCase() !== "NA") ids.add(target);
+            });
+            return Array.from(ids).sort((a, b) => {
+              const aNum = parseInt(String(a).replace("CR", ""));
+              const bNum = parseInt(String(b).replace("CR", ""));
+              return aNum - bNum;
+            });
+          }
+
+          function buildSimulationLedger(data, ids) {
+            const ledgerByDate = new Map(
+              uniqueDates.map((date) => [date.getTime(), []]),
+            );
+            const totals = new Map(ids.map((id) => [id, 0]));
+
+            data.forEach((row) => {
+              const source = row.COROP_LEV;
+              const target = row.COROP_AFN;
+              const weight = Math.max(0, +row.AANTAL || 0);
+              if (
+                !source ||
+                !target ||
+                source.toUpperCase() === "NA" ||
+                target.toUpperCase() === "NA" ||
+                !weight
+              ) {
+                return;
+              }
+
+              const dateKey = row.time instanceof Date ? row.time.getTime() : null;
+              if (ledgerByDate.has(dateKey)) {
+                ledgerByDate.get(dateKey).push({ source, target, weight });
+              }
+              totals.set(source, (totals.get(source) || 0) + weight);
+              totals.set(target, (totals.get(target) || 0) + weight * 0.7);
+            });
+
+            return { ledgerByDate, totals };
+          }
+
+          function estimateSimulationHoldings(ids, totals) {
+            const positive = ids
+              .map((id) => Math.log1p(totals.get(id) || 0))
+              .filter((value) => value > 0);
+            const minLog = d3.min(positive) || 0;
+            const maxLog = d3.max(positive) || 1;
+            const span = maxLog - minLog || 1;
+            const holdings = new Map();
+
+            ids.forEach((id) => {
+              const score = Math.log1p(totals.get(id) || 0);
+              const scaled = score > 0 ? (score - minLog) / span : 0;
+              holdings.set(id, Math.round(450 + scaled * 9550));
+            });
+
+            return holdings;
+          }
+
+          function chooseSimulationSeeds(ids, holdings, settings) {
+            const rng = createSeededRandom(settings.seed);
+            const chosen = new Set();
+            const weightedIds = ids
+              .map((id) => ({ id, weight: Math.max(1, holdings.get(id) || 1) }))
+              .sort((a, b) => b.weight - a.weight);
+
+            while (chosen.size < settings.seedCount && chosen.size < ids.length) {
+              const remaining = weightedIds.filter((item) => !chosen.has(item.id));
+              const total = d3.sum(remaining, (item) => item.weight);
+              let draw = rng() * total;
+              let selected = remaining[0]?.id;
+              for (const item of remaining) {
+                draw -= item.weight;
+                if (draw <= 0) {
+                  selected = item.id;
+                  break;
+                }
+              }
+              if (selected) chosen.add(selected);
+            }
+
+            return Array.from(chosen);
+          }
+
+          function getSimulationFrameSummary(nodeStates) {
+            const summary = { S: 0, E: 0, I: 0, R: 0, N: 0, newInfections: 0 };
+            Object.values(nodeStates).forEach((state) => {
+              summary.S += state.S;
+              summary.E += state.E;
+              summary.I += state.I;
+              summary.R += state.R;
+              summary.N += state.N;
+              summary.newInfections += state.newInfections || 0;
+            });
+            summary.prevalence = summary.N ? summary.I / summary.N : 0;
+            summary.exposedShare = summary.N ? summary.E / summary.N : 0;
+            return summary;
+          }
+
+          function buildSimulationTrajectory(settings) {
+            if (!loadedCSVData || !uniqueDates.length) return null;
+
+            const ids = collectSimulationRegionIds(loadedCSVData);
+            const { ledgerByDate, totals } = buildSimulationLedger(
+              loadedCSVData,
+              ids,
+            );
+            const holdings = estimateSimulationHoldings(ids, totals);
+            const seedIds = chooseSimulationSeeds(ids, holdings, settings);
+            let current = new Map();
+
+            ids.forEach((id) => {
+              const N = holdings.get(id) || 450;
+              current.set(id, { S: N, E: 0, I: 0, R: 0, N });
+            });
+
+            seedIds.forEach((id) => {
+              const state = current.get(id);
+              if (!state) return;
+              const seeded = Math.max(1, (settings.initialPct / 100) * state.N);
+              state.I = Math.min(state.N, seeded);
+              state.S = Math.max(0, state.N - state.I);
+            });
+
+            const frameByKey = {};
+            const frames = [];
+
+            uniqueDates.forEach((date) => {
+              const records = ledgerByDate.get(date.getTime()) || [];
+              const incomingLoad = new Map(ids.map((id) => [id, 0]));
+              const outgoingLoad = new Map(ids.map((id) => [id, 0]));
+              const newInfectionByNode = new Map(ids.map((id) => [id, 0]));
+              const linkStates = new Map();
+
+              records.forEach((record) => {
+                const sourceState = current.get(record.source);
+                const targetState = current.get(record.target);
+                if (!sourceState || !targetState || !sourceState.N || !targetState.N) {
+                  return;
+                }
+                const sourcePrev = sourceState.I / sourceState.N;
+                const targetPrev = targetState.I / targetState.N;
+                const riskLoad = record.weight * sourcePrev * settings.movementBeta;
+                const key = getLinkKey(record.source, record.target);
+                const existing = linkStates.get(key) || {
+                  source: record.source,
+                  target: record.target,
+                  ledgerWeight: 0,
+                  riskLoad: 0,
+                  sourcePrevalence: sourcePrev,
+                  targetPrevalence: targetPrev,
+                };
+                existing.ledgerWeight += record.weight;
+                existing.riskLoad += riskLoad;
+                existing.sourcePrevalence = sourcePrev;
+                existing.targetPrevalence = targetPrev;
+                linkStates.set(key, existing);
+                incomingLoad.set(
+                  record.target,
+                  (incomingLoad.get(record.target) || 0) + riskLoad,
+                );
+                outgoingLoad.set(
+                  record.source,
+                  (outgoingLoad.get(record.source) || 0) + riskLoad,
+                );
+              });
+
+              const next = new Map();
+              ids.forEach((id) => {
+                const state = current.get(id);
+                const N = state.N || 1;
+                const prevalence = state.I / N;
+                const localForce = settings.beta * prevalence;
+                const movementForce = (incomingLoad.get(id) || 0) / N;
+                const force = localForce + movementForce;
+                const entering = Math.min(
+                  state.S,
+                  state.S * (1 - Math.exp(-force)),
+                );
+                newInfectionByNode.set(id, entering);
+                const localShare = force > 0 ? localForce / force : 0;
+                const localLoad = entering * localShare;
+                const exposedStep =
+                  settings.model === "SEIR" || settings.model === "SEIRS";
+                const toInfectious = exposedStep
+                  ? Math.min(state.E, state.E * settings.sigma)
+                  : entering;
+                const toExposed = exposedStep ? entering : 0;
+                const recovered = Math.min(state.I, state.I * settings.gamma);
+                const waning =
+                  settings.model === "SIS"
+                    ? recovered
+                    : settings.model === "SEIRS"
+                      ? Math.min(state.R, state.R * 0.02)
+                      : 0;
+
+                const S = Math.max(0, state.S - entering + waning);
+                const E = Math.max(
+                  0,
+                  exposedStep ? state.E + toExposed - toInfectious : 0,
+                );
+                const I = Math.max(0, state.I + toInfectious - recovered);
+                const R =
+                  settings.model === "SIS"
+                    ? 0
+                    : Math.max(0, state.R + recovered - waning);
+                next.set(id, { S, E, I, R, N });
+
+                if (localLoad > 0) {
+                  const key = getLinkKey(id, id);
+                  linkStates.set(key, {
+                    source: id,
+                    target: id,
+                    ledgerWeight: 0,
+                    riskLoad: localLoad,
+                    sourcePrevalence: prevalence,
+                    targetPrevalence: prevalence,
+                    local: true,
+                  });
+                }
+              });
+
+              current = next;
+
+              const nodeStates = {};
+              const nodeMetrics = {};
+              ids.forEach((id) => {
+                const state = current.get(id);
+                const incoming = incomingLoad.get(id) || 0;
+                const outgoing = outgoingLoad.get(id) || 0;
+                const prevalence = state.N ? state.I / state.N : 0;
+                const exposedShare = state.N ? state.E / state.N : 0;
+                const recoveredShare = state.N ? state.R / state.N : 0;
+                const newInfections = newInfectionByNode.get(id) || 0;
+                nodeStates[id] = {
+                  ...state,
+                  prevalence,
+                  exposedShare,
+                  recoveredShare,
+                  incomingExposure: incoming,
+                  outgoingPressure: outgoing,
+                  newInfections: Math.max(0, newInfections),
+                  rtProxy: outgoing / Math.max(1, state.I),
+                };
+                nodeMetrics[id] = {
+                  inDegree: incoming,
+                  outDegree: outgoing,
+                  betweenness: prevalence,
+                  pageRank: state.I,
+                  eigenvector: outgoing / Math.max(1, state.I),
+                };
+              });
+
+              const summary = getSimulationFrameSummary(nodeStates);
+              const frame = {
+                date,
+                key: date.toISOString(),
+                nodeStates,
+                linkStates,
+                nodeMetrics,
+                summary,
+                seedIds,
+              };
+              frameByKey[frame.key] = frame;
+              frames.push(frame);
+            });
+
+            const metricMax = {};
+            metricNames.forEach((metric) => {
+              metricMax[metric] =
+                d3.max(frames, (frame) =>
+                  d3.max(Object.values(frame.nodeMetrics), (node) => node[metric]),
+                ) || 1;
+            });
+
+            return {
+              settings,
+              ids,
+              holdings,
+              seedIds,
+              frames,
+              frameByKey,
+              metricMax,
+            };
+          }
+
+          function applySimulationFrame(dateObj) {
+            if (!isSimulationModeActive() || !simulationState.trajectory) {
+              return false;
+            }
+            const key = dateObj?.toISOString();
+            const frame =
+              simulationState.trajectory.frameByKey[key] ||
+              simulationState.trajectory.frames[0];
+            if (!frame) return false;
+
+            simulationState.currentFrame = frame;
+            simulationState.currentDateKey = frame.key;
+            simulationState.metricMax = simulationState.trajectory.metricMax;
+            hotspots = frame.nodeMetrics;
+            hotspotsMax = frame.metricMax || simulationState.metricMax;
+
+            allNodes.forEach((node) => {
+              const state = frame.nodeStates[node.id];
+              if (!state) return;
+              const partition =
+                window.allTemporalStats?.[frame.key]?.partition || {};
+              node.community = partition[node.id];
+              node.holding = state.N;
+              node.tradeTotal = state.N;
+              node.active = state.N > 0;
+              node.simulation = state;
+            });
+
+            allLinks.forEach((link) => {
+              const key = getLinkKey(link.source, link.target);
+              const simLink = frame.linkStates.get(key);
+              link.ledgerWeight = Math.max(0, +link.weight || 0);
+              link.simulation = simLink || {
+                source: getNodeId(link.source),
+                target: getNodeId(link.target),
+                ledgerWeight: link.ledgerWeight,
+                riskLoad: 0,
+                sourcePrevalence: 0,
+                targetPrevalence: 0,
+              };
+              link.weight = link.simulation.riskLoad;
+              link.disabled = false;
+            });
+
+            enabledLinks = allLinks.filter((link) => !link.disabled && link.weight > 0);
+            nonZeroLinks = allLinks.filter((link) => link.weight > 0);
+            activeNodes = allNodes.filter((node) => node.active);
+            edgeExtent = d3.extent(nonZeroLinks, (link) => Math.log(link.weight));
+            if (!edgeExtent[0] || !edgeExtent[1]) {
+              edgeExtent = [0, 1];
+            }
+            edgeColor = d3
+              .scaleSequential(d3.interpolateYlOrRd)
+              .domain([edgeExtent[0], edgeExtent[1]]);
+            return true;
+          }
+
+          function getSimulationSeries() {
+            const trajectory = simulationState.trajectory;
+            if (!trajectory) return [];
+            return trajectory.frames.map((frame) => ({
+              date: frame.date,
+              S: frame.summary.S,
+              E: frame.summary.E,
+              I: frame.summary.I,
+              R: frame.summary.R,
+              N: frame.summary.N,
+              prevalence: frame.summary.prevalence,
+              newInfections: frame.summary.newInfections,
+            }));
+          }
+
+          function renderSimulationStatsContainer() {
+            const frame = simulationState.currentFrame;
+            if (!frame) return;
+            const summary = frame.summary;
+            const peak = d3.max(
+              simulationState.trajectory.frames,
+              (item) => item.summary.prevalence,
+            );
+            const rows = [
+              ["fa-solid fa-users", "Holding", formatCount(summary.N)],
+              ["fa-solid fa-virus", "Infectious", formatCount(summary.I)],
+              ["fa-solid fa-temperature-high", "Prevalence", formatPct(summary.prevalence)],
+              ["fa-solid fa-arrow-trend-up", "New infections", formatCount(summary.newInfections)],
+              ["fa-solid fa-shield-heart", "Recovered", formatCount(summary.R)],
+              ["fa-solid fa-seedling", "Seeds", frame.seedIds.join(", ")],
+            ];
+            const container = d3.select(".statsContainer");
+            container
+              .classed("simulation-stats-container", true)
+              .style("border", selectedNodeData ? "1px dashed white" : "1px dashed #eb5757")
+              .style("background", selectedNodeData ? "rgba(255,255,255,0.05)" : "rgba(235,87,87,0.08)")
+              .html("");
+            rows.forEach(([icon, label, value]) => {
+              const item = container
+                .append("div")
+                .attr("class", "stat-item simulation-stat-item")
+                .style("color", selectedNodeData ? "white" : "gray");
+              item.append("div").attr("class", "stat-icon").html(`<i class="${icon}"></i>`);
+              item.append("span").attr("class", "stat-label").text(label);
+              item.append("span").attr("class", "stat-value").text(value);
+            });
+
+            const displayElement = document.getElementById("networkTransRiskScore");
+            if (displayElement) {
+              displayElement.style.display = "block";
+              displayElement.innerHTML = `
+                <i class="fa-solid fa-virus"></i> Simulation Prevalence:
+                <span class="current-sr">${formatPct(summary.prevalence)}</span>
+                <span class="initial-sr">(peak ${formatPct(peak || 0)})</span>
+              `;
+              const currentSpan = displayElement.querySelector(".current-sr");
+              const initialSpan = displayElement.querySelector(".initial-sr");
+              if (currentSpan) {
+                currentSpan.style.color = simulationPrevalenceTextScale(
+                  summary.prevalence,
+                );
+              }
+              if (initialSpan) {
+                initialSpan.style.color = simulationPrevalenceTextScale(peak || 0);
+              }
+            }
+          }
+
+          function renderSimulationGlobalStatsChart() {
+            const data = getSimulationSeries();
+            if (!data.length) return;
+            const container = d3.select("#globalStats");
+            const node = container.node();
+            const margin = { top: 68, right: 32, bottom: 30, left: 36 };
+            const width = Math.max(10, node.clientWidth - margin.left - margin.right);
+            const height = Math.max(10, node.clientHeight - margin.top - margin.bottom);
+            container
+              .selectAll(".simulation-panel-heading")
+              .data([null])
+              .join("div")
+              .attr("class", "simulation-panel-heading")
+              .html(
+                '<i class="fa-solid fa-chart-area"></i> Compartment Trajectory',
+              );
+            let svg = container.select("svg.simulation-global-chart");
+            if (svg.empty()) {
+              container.selectAll("svg").remove();
+              svg = container.append("svg").attr("class", "simulation-global-chart");
+            }
+            svg.attr("width", node.clientWidth).attr("height", node.clientHeight);
+            let g = svg.select("g.chart");
+            if (g.empty()) {
+              g = svg.append("g").attr("class", "chart");
+            }
+            g.attr("transform", `translate(${margin.left},${margin.top})`);
+            svg.selectAll(".simulation-chart-legend").remove();
+
+            const keys = ["S", "E", "I", "R"];
+            const x = d3
+              .scaleTime()
+              .domain(d3.extent(data, (d) => d.date))
+              .range([0, width]);
+            const y = d3
+              .scaleLinear()
+              .domain([0, d3.max(data, (d) => d.N) || 1])
+              .nice()
+              .range([height, 0]);
+            const stacked = d3.stack().keys(keys)(data);
+            const area = d3
+              .area()
+              .x((d) => x(d.data.date))
+              .y0((d) => y(d[0]))
+              .y1((d) => y(d[1]))
+              .curve(d3.curveMonotoneX);
+
+            const areaLayer = g
+              .selectAll("g.simulation-area-layer")
+              .data([null])
+              .join("g")
+              .attr("class", "simulation-area-layer");
+            const axisLayer = g
+              .selectAll("g.simulation-axis-layer")
+              .data([null])
+              .join("g")
+              .attr("class", "simulation-axis-layer");
+            const markerLayer = g
+              .selectAll("g.simulation-marker-layer")
+              .data([null])
+              .join("g")
+              .attr("class", "simulation-marker-layer");
+
+            areaLayer
+              .selectAll(".simulation-area")
+              .data(stacked, (d) => d.key)
+              .join(
+                (enter) =>
+                  enter
+                    .append("path")
+                    .attr("class", "simulation-area")
+                    .attr("fill", (d) => simulationCompartmentColors[d.key])
+                    .attr("fill-opacity", 0.72),
+                (update) => update,
+                (exit) => exit.remove(),
+              )
+              .attr("fill", (d) => simulationCompartmentColors[d.key])
+              .attr("d", area);
+
+            axisLayer
+              .selectAll("g.y-grid")
+              .data([null])
+              .join("g")
+              .attr("class", "y-grid")
+              .call(
+                d3
+                  .axisLeft(y)
+                  .ticks(4)
+                  .tickSize(-width)
+                  .tickFormat(d3.format("~s")),
+              )
+              .call((axis) => axis.select(".domain").remove());
+            axisLayer
+              .selectAll("g.x-axis")
+              .data([null])
+              .join("g")
+              .attr("class", "x-axis")
+              .attr("transform", `translate(0,${height})`)
+              .call(d3.axisBottom(x).ticks(4).tickFormat(d3.timeFormat("%b %Y")));
+
+            const current = simulationState.currentFrame;
+            if (current) {
+              renderSimulationDateMarker(markerLayer, {
+                x,
+                date: current.date,
+                height,
+                rangeWidth: 12,
+                lineColor: "#6b7280",
+              });
+              renderSimulationCompartmentCallout(
+                markerLayer,
+                x,
+                y,
+                current,
+                width,
+                height,
+              );
+            } else {
+              markerLayer.selectAll("*").remove();
+            }
+
+            const legend = svg
+              .append("g")
+              .attr("class", "simulation-chart-legend")
+              .attr("transform", `translate(${margin.left},42)`);
+            keys.forEach((key, index) => {
+              const item = legend
+                .append("g")
+                .attr("transform", `translate(${index * 42},0)`);
+              item
+                .append("rect")
+                .attr("width", 9)
+                .attr("height", 9)
+                .attr("rx", 2)
+                .attr("fill", simulationCompartmentColors[key]);
+              item
+                .append("text")
+                .attr("x", 13)
+                .attr("y", 9)
+                .text(key);
+            });
+            if (current) {
+              legend
+                .append("text")
+                .attr("class", "simulation-chart-date-legend")
+                .attr("x", keys.length * 42 + 10)
+                .attr("y", 9)
+                .text(d3.timeFormat("%d-%m-%Y")(current.date));
+            }
+          }
+
+          function renderSimulationNodeStatsChart() {
+            const frame = simulationState.currentFrame;
+            if (!frame) return;
+            const container = d3.select("#nodeStats");
+            const node = container.node();
+            const margin = { top: 58, right: 22, bottom: 24, left: 52 };
+            const width = Math.max(10, node.clientWidth - margin.left - margin.right);
+            const height = Math.max(10, node.clientHeight - margin.top - margin.bottom);
+            container
+              .selectAll(".simulation-panel-heading")
+              .data([null])
+              .join("div")
+              .attr("class", "simulation-panel-heading")
+              .html(
+                '<i class="fa-solid fa-temperature-high"></i> Highest Regional Prevalence',
+              );
+            let svg = container.select("svg.simulation-node-chart");
+            if (svg.empty()) {
+              container.selectAll("svg").remove();
+              svg = container.append("svg").attr("class", "simulation-node-chart");
+            }
+            svg.attr("width", node.clientWidth).attr("height", node.clientHeight);
+            let g = svg.select("g.chart");
+            if (g.empty()) g = svg.append("g").attr("class", "chart");
+            g.attr("transform", `translate(${margin.left},${margin.top})`);
+            svg.selectAll(".simulation-panel-title").remove();
+
+            const data = Object.entries(frame.nodeStates)
+              .map(([id, state]) => ({ id, ...state, statnaam: getStatnaam(id) }))
+              .sort((a, b) => b.prevalence - a.prevalence)
+              .slice(0, 12);
+            const x = d3
+              .scaleLinear()
+              .domain([0, d3.max(data, (d) => d.prevalence) || 0.01])
+              .range([0, width])
+              .nice();
+            const y = d3
+              .scaleBand()
+              .domain(data.map((d) => d.id))
+              .range([0, height])
+              .padding(0.24);
+
+            g.selectAll("g.x-grid")
+              .data([null])
+              .join("g")
+              .attr("class", "x-grid")
+              .call(d3.axisTop(x).ticks(4).tickFormat((d) => formatPct(d)))
+              .call((axis) => axis.select(".domain").remove());
+            g.selectAll("g.y-axis")
+              .data([null])
+              .join("g")
+              .attr("class", "y-axis")
+              .call(d3.axisLeft(y));
+
+            const bars = g.selectAll(".simulation-node-bar").data(data, (d) => d.id);
+            const entered = bars
+              .enter()
+              .append("g")
+              .attr("class", "simulation-node-bar")
+              .attr("transform", (d) => `translate(0,${y(d.id)})`)
+              .style("opacity", 0);
+            entered
+              .append("rect")
+              .attr("height", y.bandwidth())
+              .attr("rx", 3)
+              .attr("width", 0)
+              .attr("fill", (d) => simulationPrevalenceScale(d.prevalence));
+            entered
+              .append("text")
+              .attr("y", y.bandwidth() / 2 + 4)
+              .text((d) => `${formatPct(d.prevalence)} · ${formatCount(d.I)}`);
+
+            const mergedBars = entered.merge(bars);
+            transitionSelection(mergedBars)
+              .attr("transform", (d) => `translate(0,${y(d.id)})`)
+              .style("opacity", 1);
+            mergedBars
+              .select("rect")
+              .call((selection) =>
+                transitionSelection(selection)
+                  .attr("height", y.bandwidth())
+                  .attr("width", (d) => x(d.prevalence))
+                  .attr("fill", (d) => simulationPrevalenceScale(d.prevalence)),
+              );
+            mergedBars
+              .select("text")
+              .attr("y", y.bandwidth() / 2 + 4)
+              .text((d) => `${formatPct(d.prevalence)} · ${formatCount(d.I)}`)
+              .each(function (d) {
+                const label = d3.select(this);
+                const barEnd = x(d.prevalence);
+                const labelWidth = this.getComputedTextLength();
+                const padding = 6;
+                const fitsOutside = barEnd + padding + labelWidth <= width;
+                if (labelWidth > width - padding * 2) {
+                  label
+                    .attr("textLength", width - padding * 2)
+                    .attr("lengthAdjust", "spacingAndGlyphs");
+                }
+                if (fitsOutside) {
+                  label
+                    .attr("x", barEnd + padding)
+                    .attr("text-anchor", "start")
+                    .style("fill", "#172218");
+                } else {
+                  label
+                    .attr(
+                      "x",
+                      Math.max(padding, Math.min(width - padding, barEnd - padding)),
+                    )
+                    .attr("text-anchor", "end")
+                    .style("fill", getReadablePrevalenceTextColor(d.prevalence));
+                }
+              });
+            bars
+              .exit()
+              .call((selection) =>
+                transitionSelection(selection)
+                  .style("opacity", 0)
+                  .remove(),
+              );
+          }
+
+          function getSimulationPanelProjection(width, height) {
+            return d3
+              .geoIdentity()
+              .reflectY(true)
+              .fitSize([width, height], nlMapData);
+          }
+
+          function getSimulationLabelPoint(id, projection) {
+            const feature = nlLabelPoints?.features?.find(
+              (item) => item.properties.statcode === id,
+            );
+            if (!feature) return null;
+            const coords = feature.geometry.coordinates;
+            const [x, y] = projection(coords);
+            return { x, y, coords };
+          }
+
+          function getSimulationRegionCoords(id) {
+            const feature = nlLabelPoints?.features?.find(
+              (item) => item.properties.statcode === id,
+            );
+            return feature?.geometry?.coordinates || null;
+          }
+
+          function getSimulationSpatialNodes(frame, projection) {
+            return Object.entries(frame.nodeStates)
+              .map(([id, state]) => {
+                const point = getSimulationLabelPoint(id, projection);
+                if (!point) return null;
+                return {
+                  id,
+                  state,
+                  x: point.x,
+                  y: point.y,
+                  coords: point.coords,
+                  prevalence: state.prevalence || 0,
+                  infectious: state.I || 0,
+                  newInfections: state.newInfections || 0,
+                  incomingExposure: state.incomingExposure || 0,
+                  outgoingPressure: state.outgoingPressure || 0,
+                };
+              })
+              .filter(Boolean);
+          }
+
+          function getSimulationFocusSpatialStats(frame) {
+            const bands = [
+              { key: "0-25", min: 0, max: 25, incoming: 0, outgoing: 0 },
+              { key: "25-50", min: 25, max: 50, incoming: 0, outgoing: 0 },
+              { key: "50-100", min: 50, max: 100, incoming: 0, outgoing: 0 },
+              { key: "100+", min: 100, max: Infinity, incoming: 0, outgoing: 0 },
+            ];
+            const focalId = selectedNodeData?.id;
+            const focalCoords = getSimulationRegionCoords(focalId);
+            const focalPartition = getSimulationPartitionKey(focalId);
+            let crossPartition = 0;
+
+            if (!focalCoords) {
+              return {
+                bands,
+                totalRisk: 0,
+                topBand: "NA",
+                crossShare: 0,
+              };
+            }
+
+            frame?.linkStates?.forEach((link) => {
+              if (!(link.riskLoad > 0) || link.local) return;
+              const source = getNodeId(link.source);
+              const target = getNodeId(link.target);
+              const isOutgoing = source === focalId;
+              const isIncoming = target === focalId;
+              if (!isOutgoing && !isIncoming) return;
+
+              const partnerId = isOutgoing ? target : source;
+              const partnerCoords = getSimulationRegionCoords(partnerId);
+              if (!partnerCoords) return;
+              const distanceKm = computeDistance(focalCoords, partnerCoords);
+              const band =
+                bands.find(
+                  (item) => distanceKm >= item.min && distanceKm < item.max,
+                ) || bands[bands.length - 1];
+
+              if (isOutgoing) {
+                band.outgoing += link.riskLoad;
+              } else {
+                band.incoming += link.riskLoad;
+              }
+
+              if (getSimulationPartitionKey(partnerId) !== focalPartition) {
+                crossPartition += link.riskLoad;
+              }
+            });
+
+            bands.forEach((band) => {
+              band.total = band.incoming + band.outgoing;
+            });
+            const totalRisk = d3.sum(bands, (band) => band.total);
+            const topBand = [...bands].sort((a, b) => b.total - a.total)[0];
+            return {
+              bands,
+              totalRisk,
+              topBand: topBand?.total > 0 ? topBand.key : "NA",
+              crossShare: totalRisk ? crossPartition / totalRisk : 0,
+            };
+          }
+
+          function renderSimulationSpatialPatternPanel() {
+            const frame = simulationState.currentFrame;
+            if (!frame || selectedNodeData) return;
+            const container = d3.select("#tradeDistribution");
+            const node = container.node();
+            const margin = { top: 52, right: 12, bottom: 38, left: 12 };
+            const width = Math.max(10, node.clientWidth - margin.left - margin.right);
+            const height = Math.max(10, node.clientHeight - margin.top - margin.bottom);
+            let svg = container.select("svg.simulation-spatial-chart");
+            if (svg.empty()) {
+              container.selectAll("svg").remove();
+              svg = container.append("svg").attr("class", "simulation-spatial-chart");
+            }
+            svg.attr("width", node.clientWidth).attr("height", node.clientHeight);
+            let g = svg.select("g.chart");
+            if (g.empty()) g = svg.append("g").attr("class", "chart");
+            g.attr("transform", `translate(${margin.left},${margin.top})`);
+
+            if (!nlMapData || !nlLabelPoints) {
+              g.selectAll("*").remove();
+              renderEmpty(g, width, height, "Map data not loaded");
+              return;
+            }
+            g.selectAll(".empty-message").remove();
+
+            const projection = getSimulationPanelProjection(width, height);
+            const path = d3.geoPath().projection(projection);
+            const spatialNodes = getSimulationSpatialNodes(frame, projection);
+            const spatialById = new Map(spatialNodes.map((item) => [item.id, item]));
+            const flows = Array.from(frame.linkStates.values())
+              .filter((item) => !item.local && item.riskLoad > 0)
+              .map((item) => {
+                const source = spatialById.get(item.source);
+                const target = spatialById.get(item.target);
+                if (!source || !target) return null;
+                const distanceKm = computeDistance(source.coords, target.coords);
+                return {
+                  ...item,
+                  sourcePoint: source,
+                  targetPoint: target,
+                  distanceKm,
+                };
+              })
+              .filter(Boolean)
+              .sort((a, b) => b.riskLoad - a.riskLoad);
+            const visibleFlows = flows.slice(0, 18);
+            const flowWidth = d3
+              .scaleSqrt()
+              .domain([0, d3.max(flows, (item) => item.riskLoad) || 1])
+              .range([0.6, 4.2]);
+            const bubbleRadius = d3
+              .scaleSqrt()
+              .domain([0, d3.max(spatialNodes, (item) => item.newInfections) || 1])
+              .range([2.5, 11]);
+
+            const regions = g
+              .selectAll("path.simulation-spatial-region")
+              .data(nlMapData.features, (feature) => feature.properties.statcode);
+            regions
+              .enter()
+              .append("path")
+              .attr("class", "simulation-spatial-region")
+              .merge(regions)
+              .attr("d", path)
+              .attr("fill", (feature) => {
+                const state = frame.nodeStates[feature.properties.statcode];
+                return state
+                  ? simulationPrevalenceScale(state.prevalence || 0)
+                  : "rgba(23,34,24,0.04)";
+              })
+              .attr("stroke", "rgba(255,255,255,0.85)")
+              .attr("stroke-width", 0.7)
+              .attr("opacity", 0.86);
+            regions.exit().remove();
+
+            const flowPath = (item) => {
+              const sx = item.sourcePoint.x;
+              const sy = item.sourcePoint.y;
+              const tx = item.targetPoint.x;
+              const ty = item.targetPoint.y;
+              const dx = tx - sx;
+              const dy = ty - sy;
+              const length = Math.sqrt(dx * dx + dy * dy) || 1;
+              const bend = Math.min(26, length * 0.18);
+              const cx = (sx + tx) / 2 - (dy / length) * bend;
+              const cy = (sy + ty) / 2 + (dx / length) * bend;
+              return `M${sx},${sy}Q${cx},${cy} ${tx},${ty}`;
+            };
+
+            const flowLayer = g
+              .selectAll("g.simulation-spatial-flow-layer")
+              .data([null])
+              .join("g")
+              .attr("class", "simulation-spatial-flow-layer");
+            const flowPaths = flowLayer
+              .selectAll("path.simulation-spatial-flow")
+              .data(visibleFlows, (item) => `${item.source}-${item.target}`);
+            flowPaths
+              .enter()
+              .append("path")
+              .attr("class", "simulation-spatial-flow")
+              .attr("fill", "none")
+              .attr("stroke-linecap", "round")
+              .attr("stroke", (item) =>
+                simulationPrevalenceScale(item.sourcePrevalence || 0),
+              )
+              .attr("stroke-width", 0)
+              .attr("opacity", 0)
+              .merge(flowPaths)
+              .call((selection) =>
+                transitionSelection(selection)
+                  .attr("d", flowPath)
+                  .attr("stroke", (item) =>
+                    simulationPrevalenceScale(item.sourcePrevalence || 0),
+                  )
+                  .attr("stroke-width", (item) => flowWidth(item.riskLoad))
+                  .attr("opacity", 0.45),
+              );
+            flowPaths
+              .exit()
+              .call((selection) =>
+                transitionSelection(selection)
+                  .attr("stroke-width", 0)
+                  .attr("opacity", 0)
+                  .remove(),
+              );
+
+            const bubbles = g
+              .selectAll("circle.simulation-spatial-bubble")
+              .data(spatialNodes, (item) => item.id);
+            bubbles
+              .enter()
+              .append("circle")
+              .attr("class", "simulation-spatial-bubble")
+              .attr("cx", (item) => item.x)
+              .attr("cy", (item) => item.y)
+              .attr("r", 0)
+              .attr("fill", (item) => simulationPrevalenceScale(item.prevalence))
+              .attr("stroke", "#172218")
+              .attr("stroke-width", 0.7)
+              .attr("opacity", 0.88)
+              .merge(bubbles)
+              .call((selection) =>
+                transitionSelection(selection)
+                  .attr("cx", (item) => item.x)
+                  .attr("cy", (item) => item.y)
+                  .attr("r", (item) => bubbleRadius(item.newInfections))
+                  .attr("fill", (item) =>
+                    simulationPrevalenceScale(item.prevalence),
+                  ),
+              );
+            bubbles
+              .exit()
+              .call((selection) =>
+                transitionSelection(selection).attr("r", 0).remove(),
+              );
+
+            const totalMovement = d3.sum(flows, (item) => item.riskLoad);
+            const totalLocal = d3.sum(
+              Array.from(frame.linkStates.values()).filter((item) => item.local),
+              (item) => item.riskLoad,
+            );
+            const meanDistance =
+              totalMovement > 0
+                ? d3.sum(flows, (item) => item.riskLoad * item.distanceKm) /
+                  totalMovement
+                : 0;
+            const totalNewInfections = d3.sum(
+              spatialNodes,
+              (item) => item.newInfections,
+            );
+            const topShare =
+              totalNewInfections > 0
+                ? d3.sum(
+                    [...spatialNodes]
+                      .sort((a, b) => b.newInfections - a.newInfections)
+                      .slice(0, 5),
+                    (item) => item.newInfections,
+                  ) / totalNewInfections
+                : 0;
+            const kpis = [
+              ["Move", formatSmall(totalMovement)],
+              ["Local", formatSmall(totalLocal)],
+              ["Mean km", d3.format(".0f")(meanDistance)],
+              ["Top 5", formatPct(topShare)],
+            ];
+            const kpi = svg
+              .selectAll("g.simulation-spatial-kpi")
+              .data(kpis, (item) => item[0]);
+            const kpiEnter = kpi
+              .enter()
+              .append("g")
+              .attr("class", "simulation-spatial-kpi");
+            kpiEnter.append("text").attr("class", "simulation-kpi-label");
+            kpiEnter.append("text").attr("class", "simulation-kpi-value");
+            const kpiWidth = node.clientWidth / kpis.length;
+            const kpiMerged = kpiEnter.merge(kpi);
+            kpiMerged.attr(
+              "transform",
+              (item, index) =>
+                `translate(${index * kpiWidth + kpiWidth / 2},${node.clientHeight - 16})`,
+            );
+            kpiMerged
+              .select("text.simulation-kpi-label")
+              .attr("text-anchor", "middle")
+              .attr("y", -10)
+              .text((item) => item[0]);
+            kpiMerged
+              .select("text.simulation-kpi-value")
+              .attr("text-anchor", "middle")
+              .attr("y", 3)
+              .text((item) => item[1]);
+            kpi.exit().remove();
+          }
+
+          function getSimulationPartitionKey(id) {
+            const node = allNodes.find((item) => item.id === id);
+            const key = node?.community;
+            return key === undefined || key === null ? "NA" : String(key);
+          }
+
+          function getSimulationPartitionColor(key) {
+            return key === "NA" ? "#9ca3af" : nodeColor(Number(key));
+          }
+
+          function getSimulationPartitionDisplayKey(key) {
+            return key === "NA" ? "NA" : `P${key}`;
+          }
+
+          function getSimulationPartitionData(frame) {
+            const partitions = new Map();
+            Object.entries(frame.nodeStates).forEach(([id, state]) => {
+              const key = getSimulationPartitionKey(id);
+              if (!partitions.has(key)) {
+                partitions.set(key, {
+                  key,
+                  members: [],
+                  N: 0,
+                  E: 0,
+                  I: 0,
+                  R: 0,
+                  newInfections: 0,
+                  incomingExposure: 0,
+                  outgoingPressure: 0,
+                  nodeCount: 0,
+                });
+              }
+              const partition = partitions.get(key);
+              partition.members.push(id);
+              partition.N += state.N || 0;
+              partition.E += state.E || 0;
+              partition.I += state.I || 0;
+              partition.R += state.R || 0;
+              partition.newInfections += state.newInfections || 0;
+              partition.incomingExposure += state.incomingExposure || 0;
+              partition.outgoingPressure += state.outgoingPressure || 0;
+              partition.nodeCount += 1;
+            });
+            partitions.forEach((partition) => {
+              partition.prevalence = partition.N ? partition.I / partition.N : 0;
+              partition.members.sort((a, b) => {
+                const aNum = parseInt(String(a).replace("CR", ""), 10);
+                const bNum = parseInt(String(b).replace("CR", ""), 10);
+                return aNum - bNum || d3.ascending(a, b);
+              });
+            });
+
+            const matrix = new Map();
+            frame.linkStates.forEach((link) => {
+              if (!(link.riskLoad > 0)) return;
+              const sourceKey = getSimulationPartitionKey(link.source);
+              const targetKey = getSimulationPartitionKey(link.target);
+              const key = `${sourceKey}->${targetKey}`;
+              matrix.set(key, (matrix.get(key) || 0) + link.riskLoad);
+            });
+
+            const partitionList = Array.from(partitions.values()).sort(
+              (a, b) =>
+                b.I - a.I ||
+                b.newInfections - a.newInfections ||
+                d3.ascending(a.key, b.key),
+            );
+            return { partitions: partitionList, matrix };
+          }
+
+          function getSimulationPartitionMappingLayout(node) {
+            const compactHeight = clampNumber(node.clientHeight * 0.23, 46, 76);
+            const expandedHeight = Math.max(
+              compactHeight,
+              node.clientHeight - 92,
+            );
+            const columns = node.clientWidth >= 360 ? 2 : 1;
+            const maxRows = Math.max(1, Math.floor((compactHeight - 18) / 18));
+            const maxItems = Math.max(1, maxRows * columns);
+            const maxMembers = clampNumber(
+              Math.floor((node.clientWidth / columns - 70) / 34),
+              2,
+              7,
+            );
+            return {
+              compactHeight,
+              expandedHeight,
+              columns,
+              maxRows,
+              maxItems,
+              maxMembers,
+            };
+          }
+
+          function renderSimulationPartitionMapping(
+            container,
+            partitions,
+            layout,
+          ) {
+            let panel = container.select("div.simulation-partition-map");
+            if (!partitions.length) {
+              panel.remove();
+              container.classed("simulation-partition-map-expanded", false);
+              return;
+            }
+            if (panel.empty()) {
+              panel = container
+                .append("div")
+                .attr("class", "simulation-partition-map")
+                .attr("tabindex", "0")
+                .attr("role", "region")
+                .attr("aria-label", "Partition to CR regions");
+            }
+            panel
+              .on("mouseenter", () =>
+                container.classed("simulation-partition-map-expanded", true),
+              )
+              .on("mouseleave", () =>
+                container.classed("simulation-partition-map-expanded", false),
+              )
+              .on("focusin", () =>
+                container.classed("simulation-partition-map-expanded", true),
+              )
+              .on("focusout", () =>
+                container.classed("simulation-partition-map-expanded", false),
+              );
+
+            const maxVisibleItems =
+              partitions.length > layout.maxItems
+                ? Math.max(1, (layout.maxRows - 1) * layout.columns)
+                : layout.maxItems;
+            const visiblePartitions = partitions.slice(0, maxVisibleItems);
+            const hiddenPartitions = Math.max(
+              0,
+              partitions.length - visiblePartitions.length,
+            );
+            const renderRow = (partition, expanded) => {
+              const members = partition.members || [];
+              const visibleMembers = expanded
+                ? members
+                : members.slice(0, layout.maxMembers);
+              const hiddenMembers = expanded
+                ? 0
+                : Math.max(0, members.length - visibleMembers.length);
+              return `
+                <div class="simulation-partition-map-row">
+                  <span class="simulation-partition-map-key">
+                    <span class="simulation-partition-map-swatch" style="background:${getSimulationPartitionColor(partition.key)}"></span>
+                    ${getSimulationPartitionDisplayKey(partition.key)}
+                  </span>
+                  <span class="simulation-partition-map-regions">
+                    ${visibleMembers.join(" ")}${hiddenMembers ? ` +${hiddenMembers}` : ""}
+                  </span>
+                </div>
+              `;
+            };
+            const compactRows = visiblePartitions
+              .map((partition) => renderRow(partition, false))
+              .join("");
+            const fullRows = partitions
+              .map((partition) => renderRow(partition, true))
+              .join("");
+
+            panel
+              .style("--partition-map-compact-height", `${layout.compactHeight}px`)
+              .style("--partition-map-expanded-height", `${layout.expandedHeight}px`)
+              .style("--partition-map-columns", layout.columns)
+              .html(`
+                <div class="simulation-partition-map-header">
+                  <span class="simulation-partition-map-title">Partition -> CR regions</span>
+                  <span class="simulation-partition-map-hint">Hover to expand</span>
+                </div>
+                <div class="simulation-partition-map-compact">
+                  ${compactRows}
+                  ${
+                    hiddenPartitions
+                      ? `<div class="simulation-partition-map-more">+${hiddenPartitions} partitions</div>`
+                      : ""
+                  }
+                </div>
+                <div class="simulation-partition-map-full">
+                  ${fullRows}
+                </div>
+              `);
+          }
+
+          function getSelectedSimulationPartitionStats(frame) {
+            const key = getSimulationPartitionKey(selectedNodeData?.id);
+            const emptyPartition = {
+              key,
+              members: [],
+              N: 0,
+              E: 0,
+              I: 0,
+              R: 0,
+              newInfections: 0,
+              incomingExposure: 0,
+              outgoingPressure: 0,
+              nodeCount: 0,
+              prevalence: 0,
+            };
+            if (!frame) {
+              return {
+                key,
+                partition: emptyPartition,
+                within: 0,
+                incomingCross: 0,
+                outgoingCross: 0,
+              };
+            }
+
+            const { partitions } = getSimulationPartitionData(frame);
+            const partition =
+              partitions.find((item) => item.key === key) || emptyPartition;
+            let within = 0;
+            let incomingCross = 0;
+            let outgoingCross = 0;
+
+            frame.linkStates.forEach((link) => {
+              if (!(link.riskLoad > 0)) return;
+              const sourceKey = getSimulationPartitionKey(link.source);
+              const targetKey = getSimulationPartitionKey(link.target);
+              if (sourceKey === key && targetKey === key) {
+                within += link.riskLoad;
+                return;
+              }
+              if (targetKey === key) incomingCross += link.riskLoad;
+              if (sourceKey === key) outgoingCross += link.riskLoad;
+            });
+
+            return { key, partition, within, incomingCross, outgoingCross };
+          }
+
+          function renderSimulationPartitionStructurePanel() {
+            const frame = simulationState.currentFrame;
+            const container = d3.select("#tradeClusters");
+            if (!frame || selectedNodeData) {
+              container.select("div.simulation-partition-map").remove();
+              container.classed("simulation-partition-map-expanded", false);
+              return;
+            }
+            const node = container.node();
+            const { partitions, matrix } = getSimulationPartitionData(frame);
+            const mappingLayout = getSimulationPartitionMappingLayout(node);
+            const margin = {
+              top: 78,
+              right: 76,
+              bottom: partitions.length ? mappingLayout.compactHeight + 12 : 36,
+              left: 42,
+            };
+            const width = Math.max(10, node.clientWidth - margin.left - margin.right);
+            const height = Math.max(10, node.clientHeight - margin.top - margin.bottom);
+            let svg = container.select("svg.simulation-partition-chart");
+            if (svg.empty()) {
+              container.selectAll("svg").remove();
+              svg = container
+                .append("svg")
+                .attr("class", "simulation-partition-chart");
+            }
+            svg.attr("width", node.clientWidth).attr("height", node.clientHeight);
+            let g = svg.select("g.chart");
+            if (g.empty()) g = svg.append("g").attr("class", "chart");
+            g.attr("transform", `translate(${margin.left},${margin.top})`);
+
+            if (!partitions.length) {
+              renderSimulationPartitionMapping(
+                container,
+                partitions,
+                mappingLayout,
+              );
+              g.selectAll("*").remove();
+              renderEmpty(g, width, height, "No partition data");
+              return;
+            }
+            g.selectAll(".empty-message").remove();
+            renderSimulationPartitionMapping(
+              container,
+              partitions,
+              mappingLayout,
+            );
+
+            const keys = partitions.map((partition) => partition.key);
+            const matrixSize = Math.max(10, Math.min(width, height));
+            const matrixOffsetY = Math.max(0, (height - matrixSize) / 2);
+            const x = d3
+              .scaleBand()
+              .domain(keys)
+              .range([0, matrixSize])
+              .padding(0.06);
+            const y = d3.scaleBand().domain(keys).range([0, matrixSize]).padding(0.06);
+            const cells = keys.flatMap((source) =>
+              keys.map((target) => ({
+                source,
+                target,
+                value: matrix.get(`${source}->${target}`) || 0,
+              })),
+            );
+            const maxValue = d3.max(cells, (cell) => cell.value) || 1;
+            const color = d3
+              .scaleSequential(d3.interpolateYlOrRd)
+              .domain([0, maxValue]);
+
+            const cellSelection = g
+              .selectAll("rect.simulation-partition-cell")
+              .data(cells, (cell) => `${cell.source}->${cell.target}`);
+            cellSelection
+              .enter()
+              .append("rect")
+              .attr("class", "simulation-partition-cell")
+              .attr("x", (cell) => x(cell.target))
+              .attr("y", (cell) => matrixOffsetY + y(cell.source))
+              .attr("width", x.bandwidth())
+              .attr("height", y.bandwidth())
+              .attr("rx", 3)
+              .attr("ry", 3)
+              .attr("fill", "rgba(23,34,24,0.04)")
+              .merge(cellSelection)
+              .call((selection) =>
+                transitionSelection(selection)
+                  .attr("x", (cell) => x(cell.target))
+                  .attr("y", (cell) => matrixOffsetY + y(cell.source))
+                  .attr("width", x.bandwidth())
+                  .attr("height", y.bandwidth())
+                  .attr("fill", (cell) =>
+                    cell.value > 0 ? color(cell.value) : "rgba(23,34,24,0.04)",
+                  )
+                  .attr("stroke", (cell) =>
+                    cell.source === cell.target
+                      ? "rgba(23,34,24,0.42)"
+                      : "rgba(255,255,255,0.9)",
+                  )
+                  .attr("stroke-width", (cell) =>
+                    cell.source === cell.target ? 1.1 : 0.6,
+                  ),
+              );
+            cellSelection
+              .exit()
+              .call((selection) =>
+                transitionSelection(selection)
+                  .attr("opacity", 0)
+                  .remove(),
+              );
+
+            const displayKey = (key) => (key === "NA" ? "NA" : `P${key}`);
+            g.selectAll("text.simulation-partition-column-label")
+              .data(keys, (key) => key)
+              .join("text")
+              .attr("class", "simulation-partition-column-label")
+              .attr("x", (key) => x(key) + x.bandwidth() / 2)
+              .attr("y", matrixOffsetY - 8)
+              .attr("text-anchor", "middle")
+              .text(displayKey);
+            g.selectAll("text.simulation-partition-row-label")
+              .data(keys, (key) => key)
+              .join("text")
+              .attr("class", "simulation-partition-row-label")
+              .attr("x", -8)
+              .attr("y", (key) => matrixOffsetY + y(key) + y.bandwidth() / 2 + 3)
+              .attr("text-anchor", "end")
+              .text(displayKey);
+
+            const burdenMax = d3.max(partitions, (partition) => partition.I) || 1;
+            const burdenX = d3
+              .scaleLinear()
+              .domain([0, burdenMax])
+              .range([0, Math.max(18, margin.right - 24)]);
+            const burdenBars = g
+              .selectAll("rect.simulation-partition-burden")
+              .data(partitions, (partition) => partition.key);
+            burdenBars
+              .enter()
+              .append("rect")
+              .attr("class", "simulation-partition-burden")
+              .attr("x", matrixSize + 10)
+              .attr("y", (partition) => matrixOffsetY + y(partition.key))
+              .attr("height", y.bandwidth())
+              .attr("width", 0)
+              .attr("rx", 3)
+              .attr("fill", (partition) =>
+                simulationPrevalenceScale(partition.prevalence),
+              )
+              .merge(burdenBars)
+              .call((selection) =>
+                transitionSelection(selection)
+                  .attr("x", matrixSize + 10)
+                  .attr("y", (partition) => matrixOffsetY + y(partition.key))
+                  .attr("height", y.bandwidth())
+                  .attr("width", (partition) => burdenX(partition.I))
+                  .attr("fill", (partition) =>
+                    simulationPrevalenceScale(partition.prevalence),
+                  ),
+              );
+            burdenBars
+              .exit()
+              .call((selection) =>
+                transitionSelection(selection)
+                  .attr("width", 0)
+                  .remove(),
+              );
+
+            g.selectAll("text.simulation-partition-burden-label")
+              .data(partitions, (partition) => partition.key)
+              .join("text")
+              .attr("class", "simulation-partition-burden-label")
+              .attr("x", matrixSize + margin.right - 10)
+              .attr(
+                "y",
+                (partition) =>
+                  matrixOffsetY + y(partition.key) + y.bandwidth() / 2 + 3,
+              )
+              .attr("text-anchor", "end")
+              .text((partition) => formatSmall(partition.I));
+
+            const total = d3.sum(cells, (cell) => cell.value);
+            const within = d3.sum(cells, (cell) =>
+              cell.source === cell.target ? cell.value : 0,
+            );
+            const between = total - within;
+            const crossSource = d3.rollups(
+              cells.filter((cell) => cell.source !== cell.target),
+              (values) => d3.sum(values, (cell) => cell.value),
+              (cell) => cell.source,
+            ).sort((a, b) => b[1] - a[1])[0];
+            const summaryItems = [
+              ["Within", formatPct(total ? within / total : 0)],
+              ["Between", formatPct(total ? between / total : 0)],
+              [
+                "Bridge",
+                crossSource && crossSource[1] > 0 ? displayKey(crossSource[0]) : "NA",
+              ],
+            ];
+            const summary = svg
+              .selectAll("g.simulation-partition-summary")
+              .data(summaryItems, (item) => item[0]);
+            const summaryEnter = summary
+              .enter()
+              .append("g")
+              .attr("class", "simulation-partition-summary");
+            summaryEnter.append("text").attr("class", "simulation-kpi-label");
+            summaryEnter.append("text").attr("class", "simulation-kpi-value");
+            const summaryWidth = Math.min(82, node.clientWidth / 3);
+            const summaryMerged = summaryEnter.merge(summary);
+            summaryMerged.attr(
+              "transform",
+              (item, index) => `translate(${16 + index * summaryWidth},50)`,
+            );
+            summaryMerged
+              .select("text.simulation-kpi-label")
+              .attr("x", 0)
+              .attr("y", -9)
+              .text((item) => item[0]);
+            summaryMerged
+              .select("text.simulation-kpi-value")
+              .attr("x", 0)
+              .attr("y", 5)
+              .text((item) => item[1]);
+            summary.exit().remove();
+          }
+
+          function styleSimulationFocusChartChrome(root) {
+            root
+              .selectAll(".simulation-focus-axis text")
+              .attr("fill", "rgba(255,255,255,0.95)");
+            root
+              .selectAll(".simulation-focus-axis path, .simulation-focus-axis line")
+              .attr("stroke", "rgba(255,255,255,0.62)");
+            root
+              .selectAll(".simulation-focus-grid line")
+              .attr("stroke", "rgba(255,255,255,0.2)")
+              .attr("stroke-dasharray", "3 3");
+            root.selectAll(".simulation-focus-grid path").attr("stroke", "none");
+            root.selectAll(".simulation-focus-grid text").attr("fill", "none");
+          }
+
+          function renderSimulationCompartmentLegend(svg, keys, x, y) {
+            svg.selectAll(".simulation-focus-legend").remove();
+            const legend = svg
+              .append("g")
+              .attr("class", "simulation-focus-legend")
+              .attr("transform", `translate(${x},${y})`);
+
+            keys.forEach((key, index) => {
+              const item = legend
+                .append("g")
+                .attr("transform", `translate(${index * 40},0)`);
+              item
+                .append("line")
+                .attr("x1", 0)
+                .attr("x2", 14)
+                .attr("y1", 6)
+                .attr("y2", 6)
+                .attr("stroke", simulationCompartmentColors[key])
+                .attr("stroke-width", key === "I" ? 2.8 : 2);
+              item
+                .append("text")
+                .attr("x", 20)
+                .attr("y", 10)
+                .text(key);
+            });
+          }
+
+          function renderSimulationFocusTrajectory() {
+            if (!selectedNodeData || !simulationState.trajectory) return;
+            const container = d3.select("#tradeNodeDistribution");
+            const node = container.node();
+            const margin = { top: 74, right: 18, bottom: 24, left: 42 };
+            const width = Math.max(10, node.clientWidth - margin.left - margin.right);
+            const height = Math.max(10, node.clientHeight - margin.top - margin.bottom);
+            const data = simulationState.trajectory.frames.map((frame) => {
+              const state = frame.nodeStates[selectedNodeData.id];
+              return { date: frame.date, ...state };
+            });
+            let svg = container.select("svg.simulation-focus-chart");
+            if (svg.empty()) {
+              container.selectAll("svg").remove();
+              svg = container.append("svg").attr("class", "simulation-focus-chart");
+            }
+            svg.attr("width", node.clientWidth).attr("height", node.clientHeight);
+            svg.selectAll(".simulation-focus-legend").remove();
+            let g = svg.select("g.chart");
+            if (g.empty()) g = svg.append("g").attr("class", "chart");
+            g.attr("transform", `translate(${margin.left},${margin.top})`);
+
+            const x = d3
+              .scaleTime()
+              .domain(d3.extent(data, (d) => d.date))
+              .range([0, width]);
+            const y = d3
+              .scaleLinear()
+              .domain([0, d3.max(data, (d) => d.N) || 1])
+              .nice()
+              .range([height, 0]);
+            const line = (key) =>
+              d3
+                .line()
+                .x((d) => x(d.date))
+                .y((d) => y(d[key]))
+                .curve(d3.curveMonotoneX);
+
+            g.selectAll("g.simulation-focus-grid.x-grid")
+              .data([null])
+              .join("g")
+              .attr("class", "simulation-focus-grid x-grid")
+              .attr("transform", `translate(0,${height})`)
+              .call(
+                d3
+                  .axisBottom(x)
+                  .ticks(4)
+                  .tickSize(-height)
+                  .tickFormat(""),
+              );
+            g.selectAll("g.simulation-focus-grid.y-grid")
+              .data([null])
+              .join("g")
+              .attr("class", "simulation-focus-grid y-grid")
+              .call(
+                d3
+                  .axisLeft(y)
+                  .ticks(4)
+                  .tickSize(-width)
+                  .tickFormat(""),
+              );
+            g.selectAll("g.simulation-focus-axis.x-axis")
+              .data([null])
+              .join("g")
+              .attr("class", "simulation-focus-axis x-axis")
+              .attr("transform", `translate(0,${height})`)
+              .call(d3.axisBottom(x).ticks(4).tickFormat(d3.timeFormat("%b")));
+            g.selectAll("g.simulation-focus-axis.y-axis")
+              .data([null])
+              .join("g")
+              .attr("class", "simulation-focus-axis y-axis")
+              .call(d3.axisLeft(y).ticks(4).tickFormat(d3.format("~s")));
+            styleSimulationFocusChartChrome(g);
+            const seriesLayer = g
+              .selectAll("g.simulation-focus-series-layer")
+              .data([null])
+              .join("g")
+              .attr("class", "simulation-focus-series-layer");
+            seriesLayer
+              .selectAll("path.simulation-focus-trajectory-line")
+              .data(["S", "E", "I", "R"], (key) => key)
+              .join(
+                (enter) =>
+                  enter
+                    .append("path")
+                    .attr("class", "simulation-focus-trajectory-line")
+                    .attr("fill", "none"),
+                (update) => update,
+                (exit) => exit.remove(),
+              )
+              .attr("stroke", (key) => simulationCompartmentColors[key])
+              .attr("stroke-width", (key) => (key === "I" ? 2.4 : 1.6))
+              .call((selection) =>
+                transitionSelection(selection).attr("d", (key) => line(key)(data)),
+              );
+
+            const current = simulationState.currentFrame;
+            if (current) {
+              const markerLayer = g
+                .selectAll("g.simulation-marker-layer")
+                .data([null])
+                .join("g")
+                .attr("class", "simulation-marker-layer");
+              renderSimulationDateMarker(markerLayer, {
+                x,
+                date: current.date,
+                height,
+                rangeWidth: 10,
+                lineColor: "#ffffff",
+              });
+            }
+
+            renderSimulationCompartmentLegend(svg, ["S", "E", "I", "R"], margin.left, 44);
+          }
+
+          function getSimulationNodeInsightView(view) {
+            const selectValue =
+              document.getElementById("tradeNodeInsightSelect")?.value;
+            const selectedView =
+              view ||
+              window.currentSelectedTradeNodeInsight ||
+              selectValue ||
+              "partition";
+            const aliases = {
+              compartments: "partition",
+              trajectory: "spatial",
+            };
+            const normalizedView = aliases[selectedView] || selectedView;
+            return ["partition", "exposure", "spatial"].includes(normalizedView)
+              ? normalizedView
+              : "partition";
+          }
+
+          function getSelectedSimulationNodeSeries() {
+            if (!selectedNodeData || !simulationState.trajectory) return [];
+            return simulationState.trajectory.frames
+              .map((frame) => {
+                const state = frame.nodeStates[selectedNodeData.id];
+                return state ? { date: frame.date, ...state } : null;
+              })
+              .filter(Boolean);
+          }
+
+          function renderSimulationInsightLegend(svg, items, x, y) {
+            svg.selectAll(".simulation-focus-legend").remove();
+            const legend = svg
+              .append("g")
+              .attr("class", "simulation-focus-legend")
+              .attr("transform", `translate(${x},${y})`);
+
+            items.forEach((item, index) => {
+              const legendItem = legend
+                .append("g")
+                .attr("transform", `translate(${index * item.width},0)`);
+              legendItem
+                .append("line")
+                .attr("x1", 0)
+                .attr("x2", 18)
+                .attr("y1", 6)
+                .attr("y2", 6)
+                .attr("stroke", item.color)
+                .attr("stroke-width", 2.4);
+              legendItem
+                .append("text")
+                .attr("x", 24)
+                .attr("y", 10)
+                .text(item.label);
+            });
+          }
+
+          function setSimulationNodeInsightSummary(selectedView, state) {
+            const sumDiv = document.getElementById("tradeNodeInsightSummary");
+            if (!sumDiv) return;
+
+            const baseRows = `
+                <div><strong>[${selectedNodeData.id}]</strong> ${selectedNodeData.statnaam || ""}</div>
+                <div>
+                  <span style="color:${simulationCompartmentColors.I}; font-weight:600;">I:</span> ${formatCount(state.I)}
+                  &nbsp; <span style="color:${simulationCompartmentColors.E}; font-weight:600;">E:</span> ${formatCount(state.E)}
+                  &nbsp; <span style="opacity:0.85;">Prev:</span> ${formatPct(state.prevalence)}
+                </div>
+              `;
+
+            if (selectedView === "exposure") {
+              sumDiv.innerHTML = `
+                ${baseRows}
+                <div style="opacity:0.85;">
+                  Incoming exposure: ${formatSmall(state.incomingExposure)}
+                  &nbsp; Outgoing pressure: ${formatSmall(state.outgoingPressure)}
+                  &nbsp; New infections: ${formatCount(state.newInfections)}
+                </div>
+              `;
+              return;
+            }
+
+            if (selectedView === "partition") {
+              const stats = getSelectedSimulationPartitionStats(
+                simulationState.currentFrame,
+              );
+              const partition = stats.partition;
+              const crossTotal = stats.incomingCross + stats.outgoingCross;
+              const total = stats.within + crossTotal;
+              sumDiv.innerHTML = `
+                ${baseRows}
+                <div style="opacity:0.85;">
+                  Partition: ${getSimulationPartitionDisplayKey(stats.key)}
+                  &nbsp; Nodes: ${partition.nodeCount}
+                  &nbsp; P prevalence: ${formatPct(partition.prevalence || 0)}
+                  &nbsp; Cross load: ${formatPct(total ? crossTotal / total : 0)}
+                </div>
+              `;
+              return;
+            }
+
+            if (selectedView === "spatial") {
+              const stats = getSimulationFocusSpatialStats(
+                simulationState.currentFrame,
+              );
+              sumDiv.innerHTML = `
+                ${baseRows}
+                <div style="opacity:0.85;">
+                  Spatial load: ${formatSmall(stats.totalRisk)}
+                  &nbsp; Main band: ${stats.topBand}
+                  &nbsp; Cross partition: ${formatPct(stats.crossShare)}
+                </div>
+              `;
+              return;
+            }
+
+            sumDiv.innerHTML = `
+              ${baseRows}
+              <div style="opacity:0.85;">
+                S: ${formatCount(state.S)}
+                &nbsp; R: ${formatCount(state.R)}
+                &nbsp; Holding: ${formatCount(state.N)}
+              </div>
+            `;
+          }
+
+          function prepareSimulationNodeInsightChart(svg, containerNode) {
+            const container = d3.select("#tradeNodeInsight");
+            const labelNode = container.select(".trade-nodeinsight-label").node();
+            const controlsNode = document.getElementById(
+              "tradeNodeInsightControls",
+            );
+            const summaryNode = document.getElementById("tradeNodeInsightSummary");
+            const overlayH =
+              (labelNode ? labelNode.getBoundingClientRect().height : 0) +
+              (controlsNode ? controlsNode.getBoundingClientRect().height : 0) +
+              (summaryNode ? summaryNode.getBoundingClientRect().height : 0) +
+              22;
+            const margin = {
+              top: Math.max(overlayH, 104),
+              right: 22,
+              bottom: 28,
+              left: 54,
+            };
+            const width = Math.max(
+              10,
+              containerNode.clientWidth - margin.left - margin.right,
+            );
+            const height = Math.max(
+              10,
+              containerNode.clientHeight - margin.top - margin.bottom,
+            );
+            let g = svg.select("g.simulation-nodeinsight-chart");
+            if (g.empty()) {
+              g = svg.append("g").attr("class", "simulation-nodeinsight-chart");
+            }
+            g
+              .attr("transform", `translate(${margin.left},${margin.top})`);
+            return { g, margin, width, height };
+          }
+
+          function renderSimulationCompartmentInsight(g, width, height, state) {
+            const data = ["S", "E", "I", "R"].map((key) => ({
+              key,
+              value: state.N ? state[key] / state.N : 0,
+            }));
+            const x = d3
+              .scaleBand()
+              .domain(data.map((d) => d.key))
+              .range([0, width])
+              .padding(0.32);
+            const y = d3.scaleLinear().domain([0, 1]).range([height, 0]);
+            g.selectAll("g.simulation-focus-grid.y-grid")
+              .data([null])
+              .join("g")
+              .attr("class", "simulation-focus-grid y-grid")
+              .call(
+                d3
+                  .axisLeft(y)
+                  .ticks(3)
+                  .tickSize(-width)
+                  .tickFormat(""),
+              );
+            g.selectAll("g.simulation-focus-axis.x-axis")
+              .data([null])
+              .join("g")
+              .attr("class", "simulation-focus-axis x-axis")
+              .attr("transform", `translate(0,${height})`)
+              .call(d3.axisBottom(x));
+            g.selectAll("g.simulation-focus-axis.y-axis")
+              .data([null])
+              .join("g")
+              .attr("class", "simulation-focus-axis y-axis")
+              .call(d3.axisLeft(y).ticks(3).tickFormat(d3.format(".0%")));
+            styleSimulationFocusChartChrome(g);
+            const bars = g.selectAll("rect.simulation-focus-bar").data(data, (d) => d.key);
+            bars
+              .enter()
+              .append("rect")
+              .attr("class", "simulation-focus-bar")
+              .attr("x", (d) => x(d.key))
+              .attr("y", height)
+              .attr("width", x.bandwidth())
+              .attr("height", 0)
+              .attr("rx", 4)
+              .attr("fill", (d) => simulationCompartmentColors[d.key])
+              .merge(bars)
+              .call((selection) =>
+                transitionSelection(selection)
+                  .attr("x", (d) => x(d.key))
+                  .attr("y", (d) => y(d.value))
+                  .attr("width", x.bandwidth())
+                  .attr("height", (d) => height - y(d.value))
+                  .attr("fill", (d) => simulationCompartmentColors[d.key]),
+              );
+            bars
+              .exit()
+              .call((selection) =>
+                transitionSelection(selection)
+                  .attr("y", height)
+                  .attr("height", 0)
+                  .remove(),
+              );
+          }
+
+          function renderSimulationPartitionInsight(g, width, height, state) {
+            const stats = getSelectedSimulationPartitionStats(
+              simulationState.currentFrame,
+            );
+            const partition = stats.partition;
+            if (!partition.N) {
+              g.selectAll("*").remove();
+              renderEmpty(g, width, height, "No partition data");
+              return;
+            }
+            g.selectAll(".empty-message").remove();
+
+            const incomingBase = stats.incomingCross + stats.within;
+            const outgoingBase = stats.outgoingCross + stats.within;
+            const data = [
+              {
+                key: "P prev",
+                value: partition.prevalence || 0,
+                color: simulationPrevalenceScale(partition.prevalence || 0),
+              },
+              {
+                key: "Focal I",
+                value: partition.I ? (state.I || 0) / partition.I : 0,
+                color: "#4f83cc",
+              },
+              {
+                key: "In cross",
+                value: incomingBase ? stats.incomingCross / incomingBase : 0,
+                color: "#f2c94c",
+              },
+              {
+                key: "Out cross",
+                value: outgoingBase ? stats.outgoingCross / outgoingBase : 0,
+                color: "#eb5757",
+              },
+            ];
+            const x = d3
+              .scaleBand()
+              .domain(data.map((d) => d.key))
+              .range([0, width])
+              .padding(0.28);
+            const y = d3.scaleLinear().domain([0, 1]).range([height, 0]);
+
+            g.selectAll("g.simulation-focus-grid.y-grid")
+              .data([null])
+              .join("g")
+              .attr("class", "simulation-focus-grid y-grid")
+              .call(
+                d3
+                  .axisLeft(y)
+                  .ticks(3)
+                  .tickSize(-width)
+                  .tickFormat(""),
+              );
+            g.selectAll("g.simulation-focus-axis.x-axis")
+              .data([null])
+              .join("g")
+              .attr("class", "simulation-focus-axis x-axis")
+              .attr("transform", `translate(0,${height})`)
+              .call(d3.axisBottom(x));
+            g.selectAll("g.simulation-focus-axis.y-axis")
+              .data([null])
+              .join("g")
+              .attr("class", "simulation-focus-axis y-axis")
+              .call(d3.axisLeft(y).ticks(3).tickFormat(d3.format(".0%")));
+            styleSimulationFocusChartChrome(g);
+
+            const bars = g
+              .selectAll("rect.simulation-focus-bar")
+              .data(data, (d) => d.key);
+            bars
+              .enter()
+              .append("rect")
+              .attr("class", "simulation-focus-bar")
+              .attr("x", (d) => x(d.key))
+              .attr("y", height)
+              .attr("width", x.bandwidth())
+              .attr("height", 0)
+              .attr("rx", 4)
+              .attr("fill", (d) => d.color)
+              .merge(bars)
+              .call((selection) =>
+                transitionSelection(selection)
+                  .attr("x", (d) => x(d.key))
+                  .attr("y", (d) => y(d.value))
+                  .attr("width", x.bandwidth())
+                  .attr("height", (d) => height - y(d.value))
+                  .attr("fill", (d) => d.color),
+              );
+            bars
+              .exit()
+              .call((selection) =>
+                transitionSelection(selection)
+                  .attr("y", height)
+                  .attr("height", 0)
+                  .remove(),
+              );
+
+            const labels = g
+              .selectAll("text.simulation-focus-bar-label")
+              .data(data, (d) => d.key);
+            labels
+              .enter()
+              .append("text")
+              .attr("class", "simulation-focus-bar-label")
+              .attr("x", (d) => x(d.key) + x.bandwidth() / 2)
+              .attr("y", height - 6)
+              .attr("text-anchor", "middle")
+              .attr("fill", "rgba(255,255,255,0.95)")
+              .text((d) => formatPct(d.value))
+              .merge(labels)
+              .text((d) => formatPct(d.value))
+              .call((selection) =>
+                transitionSelection(selection)
+                  .attr("x", (d) => x(d.key) + x.bandwidth() / 2)
+                  .attr("y", (d) => Math.max(12, y(d.value) - 6)),
+              );
+            labels
+              .exit()
+              .call((selection) =>
+                transitionSelection(selection).attr("y", height - 6).remove(),
+              );
+          }
+
+          function renderSimulationExposureInsight(g, width, height, state) {
+            const data = [
+              {
+                key: "Incoming",
+                value: state.incomingExposure || 0,
+                color: "#f2c94c",
+              },
+              {
+                key: "Outgoing",
+                value: state.outgoingPressure || 0,
+                color: "#eb5757",
+              },
+              {
+                key: "New cases",
+                value: state.newInfections || 0,
+                color: "#4f83cc",
+              },
+            ];
+            const x = d3
+              .scaleBand()
+              .domain(data.map((d) => d.key))
+              .range([0, width])
+              .padding(0.3);
+            const y = d3
+              .scaleLinear()
+              .domain([0, d3.max(data, (d) => d.value) || 1])
+              .nice()
+              .range([height, 0]);
+            g.selectAll("g.simulation-focus-grid.y-grid")
+              .data([null])
+              .join("g")
+              .attr("class", "simulation-focus-grid y-grid")
+              .call(
+                d3
+                  .axisLeft(y)
+                  .ticks(4)
+                  .tickSize(-width)
+                  .tickFormat(""),
+              );
+            g.selectAll("g.simulation-focus-axis.x-axis")
+              .data([null])
+              .join("g")
+              .attr("class", "simulation-focus-axis x-axis")
+              .attr("transform", `translate(0,${height})`)
+              .call(d3.axisBottom(x));
+            g.selectAll("g.simulation-focus-axis.y-axis")
+              .data([null])
+              .join("g")
+              .attr("class", "simulation-focus-axis y-axis")
+              .call(d3.axisLeft(y).ticks(4).tickFormat(d3.format("~s")));
+            styleSimulationFocusChartChrome(g);
+            const bars = g.selectAll("rect.simulation-focus-bar").data(data, (d) => d.key);
+            bars
+              .enter()
+              .append("rect")
+              .attr("class", "simulation-focus-bar")
+              .attr("x", (d) => x(d.key))
+              .attr("y", height)
+              .attr("width", x.bandwidth())
+              .attr("height", 0)
+              .attr("rx", 4)
+              .attr("fill", (d) => d.color)
+              .merge(bars)
+              .call((selection) =>
+                transitionSelection(selection)
+                  .attr("x", (d) => x(d.key))
+                  .attr("y", (d) => y(d.value))
+                  .attr("width", x.bandwidth())
+                  .attr("height", (d) => height - y(d.value))
+                  .attr("fill", (d) => d.color),
+              );
+            bars
+              .exit()
+              .call((selection) =>
+                transitionSelection(selection)
+                  .attr("y", height)
+                  .attr("height", 0)
+                  .remove(),
+              );
+
+            const labels = g
+              .selectAll("text.simulation-focus-bar-label")
+              .data(data, (d) => d.key);
+            labels
+              .enter()
+              .append("text")
+              .attr("class", "simulation-focus-bar-label")
+              .attr("x", (d) => x(d.key) + x.bandwidth() / 2)
+              .attr("y", height - 6)
+              .attr("text-anchor", "middle")
+              .text((d) => formatSmall(d.value))
+              .merge(labels)
+              .text((d) => formatSmall(d.value))
+              .call((selection) =>
+                transitionSelection(selection)
+                  .attr("x", (d) => x(d.key) + x.bandwidth() / 2)
+                  .attr("y", (d) => Math.max(12, y(d.value) - 6)),
+              );
+            labels
+              .exit()
+              .call((selection) =>
+                transitionSelection(selection).attr("y", height - 6).remove(),
+              );
+          }
+
+          function renderSimulationSpatialInsight(g, width, height, frame) {
+            const stats = getSimulationFocusSpatialStats(frame);
+            if (!stats.totalRisk) {
+              g.selectAll("*").remove();
+              renderEmpty(g, width, height, "No spatial exposure");
+              return;
+            }
+            g.selectAll(".empty-message").remove();
+
+            const data = stats.bands;
+            const x = d3
+              .scaleBand()
+              .domain(data.map((d) => d.key))
+              .range([0, width])
+              .padding(0.28);
+            const y = d3
+              .scaleLinear()
+              .domain([0, d3.max(data, (d) => d.total) || 1])
+              .nice()
+              .range([height, 0]);
+
+            g.selectAll("g.simulation-focus-grid.y-grid")
+              .data([null])
+              .join("g")
+              .attr("class", "simulation-focus-grid y-grid")
+              .call(
+                d3
+                  .axisLeft(y)
+                  .ticks(4)
+                  .tickSize(-width)
+                  .tickFormat(""),
+              );
+            g.selectAll("g.simulation-focus-axis.x-axis")
+              .data([null])
+              .join("g")
+              .attr("class", "simulation-focus-axis x-axis")
+              .attr("transform", `translate(0,${height})`)
+              .call(d3.axisBottom(x));
+            g.selectAll("g.simulation-focus-axis.y-axis")
+              .data([null])
+              .join("g")
+              .attr("class", "simulation-focus-axis y-axis")
+              .call(d3.axisLeft(y).ticks(4).tickFormat(d3.format("~s")));
+            styleSimulationFocusChartChrome(g);
+
+            const layer = g
+              .selectAll("g.simulation-spatial-stack-layer")
+              .data([null])
+              .join("g")
+              .attr("class", "simulation-spatial-stack-layer");
+            const incomingBars = layer
+              .selectAll("rect.simulation-spatial-incoming-bar")
+              .data(data, (d) => d.key);
+            incomingBars
+              .enter()
+              .append("rect")
+              .attr("class", "simulation-spatial-incoming-bar")
+              .attr("x", (d) => x(d.key))
+              .attr("y", height)
+              .attr("width", x.bandwidth())
+              .attr("height", 0)
+              .attr("rx", 4)
+              .attr("fill", "#f2c94c")
+              .merge(incomingBars)
+              .call((selection) =>
+                transitionSelection(selection)
+                  .attr("x", (d) => x(d.key))
+                  .attr("y", (d) => y(d.incoming))
+                  .attr("width", x.bandwidth())
+                  .attr("height", (d) => height - y(d.incoming)),
+              );
+            incomingBars.exit().remove();
+
+            const outgoingBars = layer
+              .selectAll("rect.simulation-spatial-outgoing-bar")
+              .data(data, (d) => d.key);
+            outgoingBars
+              .enter()
+              .append("rect")
+              .attr("class", "simulation-spatial-outgoing-bar")
+              .attr("x", (d) => x(d.key))
+              .attr("y", height)
+              .attr("width", x.bandwidth())
+              .attr("height", 0)
+              .attr("rx", 4)
+              .attr("fill", "#eb5757")
+              .merge(outgoingBars)
+              .call((selection) =>
+                transitionSelection(selection)
+                  .attr("x", (d) => x(d.key))
+                  .attr("y", (d) => y(d.total))
+                  .attr("width", x.bandwidth())
+                  .attr("height", (d) =>
+                    Math.max(0, y(d.incoming) - y(d.total)),
+                  ),
+              );
+            outgoingBars.exit().remove();
+
+            const labels = g
+              .selectAll("text.simulation-focus-bar-label")
+              .data(data, (d) => d.key);
+            labels
+              .enter()
+              .append("text")
+              .attr("class", "simulation-focus-bar-label")
+              .attr("x", (d) => x(d.key) + x.bandwidth() / 2)
+              .attr("y", height - 6)
+              .attr("text-anchor", "middle")
+              .attr("fill", "rgba(255,255,255,0.95)")
+              .text((d) => formatSmall(d.total))
+              .merge(labels)
+              .text((d) => (d.total > 0 ? formatSmall(d.total) : ""))
+              .call((selection) =>
+                transitionSelection(selection)
+                  .attr("x", (d) => x(d.key) + x.bandwidth() / 2)
+                  .attr("y", (d) => Math.max(12, y(d.total) - 6)),
+              );
+            labels.exit().remove();
+
+            const legendData = [
+              { key: "Incoming", color: "#f2c94c" },
+              { key: "Outgoing", color: "#eb5757" },
+            ];
+            const legend = g
+              .selectAll("g.simulation-focus-inline-legend")
+              .data([null])
+              .join("g")
+              .attr("class", "simulation-focus-inline-legend")
+              .attr("transform", "translate(0,-16)");
+            const items = legend
+              .selectAll("g.simulation-focus-inline-legend-item")
+              .data(legendData, (d) => d.key)
+              .join("g")
+              .attr("class", "simulation-focus-inline-legend-item")
+              .attr("transform", (d, index) => `translate(${index * 86},0)`);
+            items
+              .selectAll("rect")
+              .data((d) => [d])
+              .join("rect")
+              .attr("width", 14)
+              .attr("height", 8)
+              .attr("rx", 2)
+              .attr("fill", (d) => d.color);
+            items
+              .selectAll("text")
+              .data((d) => [d])
+              .join("text")
+              .attr("x", 20)
+              .attr("y", 8)
+              .attr("fill", "rgba(255,255,255,0.95)")
+              .style("font-size", "10px")
+              .style("font-weight", 700)
+              .text((d) => d.key);
+          }
+
+          function renderSimulationTrajectoryInsight(svg, g, margin, width, height, series) {
+            svg.selectAll(".simulation-focus-legend").remove();
+            if (!series.length) {
+              renderEmpty(g, width, height, "No simulation trajectory");
+              return;
+            }
+
+            const x = d3
+              .scaleTime()
+              .domain(d3.extent(series, (d) => d.date))
+              .range([0, width]);
+            const y = d3
+              .scaleLinear()
+              .domain([
+                0,
+                d3.max(series, (d) =>
+                  Math.max(
+                    d.prevalence || 0,
+                    d.exposedShare || 0,
+                    d.recoveredShare || 0,
+                  ),
+                ) || 0.01,
+              ])
+              .nice()
+              .range([height, 0]);
+            const line = (key) =>
+              d3
+                .line()
+                .defined((d) => Number.isFinite(d[key]))
+                .x((d) => x(d.date))
+                .y((d) => y(d[key]))
+                .curve(d3.curveMonotoneX);
+
+            g.selectAll("g.simulation-focus-grid.x-grid")
+              .data([null])
+              .join("g")
+              .attr("class", "simulation-focus-grid x-grid")
+              .attr("transform", `translate(0,${height})`)
+              .call(
+                d3
+                  .axisBottom(x)
+                  .ticks(4)
+                  .tickSize(-height)
+                  .tickFormat(""),
+              );
+            g.selectAll("g.simulation-focus-grid.y-grid")
+              .data([null])
+              .join("g")
+              .attr("class", "simulation-focus-grid y-grid")
+              .call(
+                d3
+                  .axisLeft(y)
+                  .ticks(4)
+                  .tickSize(-width)
+                  .tickFormat(""),
+              );
+            g.selectAll("g.simulation-focus-axis.x-axis")
+              .data([null])
+              .join("g")
+              .attr("class", "simulation-focus-axis x-axis")
+              .attr("transform", `translate(0,${height})`)
+              .call(d3.axisBottom(x).ticks(4).tickFormat(d3.timeFormat("%b")));
+            g.selectAll("g.simulation-focus-axis.y-axis")
+              .data([null])
+              .join("g")
+              .attr("class", "simulation-focus-axis y-axis")
+              .call(d3.axisLeft(y).ticks(4).tickFormat(d3.format(".0%")));
+            styleSimulationFocusChartChrome(g);
+
+            const lineData = [
+              { key: "prevalence", color: simulationCompartmentColors.I },
+              { key: "exposedShare", color: simulationCompartmentColors.E },
+              { key: "recoveredShare", color: simulationCompartmentColors.R },
+            ];
+            const seriesLayer = g
+              .selectAll("g.simulation-trajectory-layer")
+              .data([null])
+              .join("g")
+              .attr("class", "simulation-trajectory-layer");
+            seriesLayer
+              .selectAll("path.simulation-trajectory-line")
+              .data(lineData, (d) => d.key)
+              .join(
+                (enter) =>
+                  enter
+                    .append("path")
+                    .attr("class", "simulation-trajectory-line")
+                    .attr("fill", "none"),
+                (update) => update,
+                (exit) => exit.remove(),
+              )
+              .attr("stroke", (d) => d.color)
+              .attr("stroke-width", (d) => (d.key === "prevalence" ? 2.6 : 1.8))
+              .attr("d", (d) => line(d.key)(series));
+
+            const current = simulationState.currentFrame;
+            if (current) {
+              const markerLayer = g
+                .selectAll("g.simulation-marker-layer")
+                .data([null])
+                .join("g")
+                .attr("class", "simulation-marker-layer");
+              renderSimulationDateMarker(markerLayer, {
+                x,
+                date: current.date,
+                height,
+                rangeWidth: 10,
+                lineColor: "#ffffff",
+              });
+            }
+          }
+
+          function renderSimulationNodeInsight(view) {
+            if (!selectedNodeData || !simulationState.currentFrame) return;
+            const state = simulationState.currentFrame.nodeStates[selectedNodeData.id];
+            if (!state) return;
+            const selectedView = getSimulationNodeInsightView(view);
+            window.currentSelectedTradeNodeInsight = selectedView;
+            const select = document.getElementById("tradeNodeInsightSelect");
+            if (select && select.value !== selectedView) {
+              select.value = selectedView;
+            }
+            setSimulationNodeInsightSummary(selectedView, state);
+
+            const container = d3.select("#tradeNodeInsight");
+            const node = container.node();
+            let svg = container.select("svg.trade-nodeinsight-svg");
+            if (svg.empty()) {
+              svg = container.append("svg").attr("class", "trade-nodeinsight-svg");
+            }
+            svg.classed("simulation-nodeinsight-svg", true);
+            svg.attr("width", node.clientWidth).attr("height", node.clientHeight);
+            const previousView = svg.attr("data-simulation-view");
+            if (previousView !== selectedView) {
+              svg.selectAll("*").remove();
+            }
+            svg.attr("data-simulation-view", selectedView);
+            const { g, width, height } = prepareSimulationNodeInsightChart(svg, node);
+
+            if (selectedView === "exposure") {
+              renderSimulationExposureInsight(g, width, height, state);
+              return;
+            }
+
+            if (selectedView === "spatial") {
+              renderSimulationSpatialInsight(
+                g,
+                width,
+                height,
+                simulationState.currentFrame,
+              );
+              return;
+            }
+
+            renderSimulationPartitionInsight(g, width, height, state);
+          }
+
+          function applySimulationNodeStyles() {
+            if (!isSimulationModeActive()) return;
+            d3.selectAll(".nodeGroup").each(function (d) {
+              const state = d.simulation;
+              if (!state) return;
+              d3.select(this)
+                .select("circle.primary")
+                .attr("fill", simulationPrevalenceScale(state.prevalence))
+                .attr("stroke", state.prevalence > 0.05 ? "#7f1d1d" : null)
+                .attr("stroke-width", state.prevalence > 0.05 ? 1.8 : null);
+            });
+            applySimulationMapPrevalence();
+          }
+
+          function applySimulationMapPrevalence() {
+            if (!nlMapData) return;
+            d3.selectAll(".map path").attr("fill", function (feature) {
+              if (!isSimulationModeActive()) return "none";
+              const id = feature?.properties?.statcode;
+              const state = simulationState.currentFrame?.nodeStates[id];
+              return state ? simulationPrevalenceScale(state.prevalence) : "none";
+            }).attr("fill-opacity", isSimulationModeActive() ? 0.5 : null);
+          }
+
+          function renderSimulationPanels() {
+            if (!isSimulationModeActive()) return;
+            renderSimulationStatsContainer();
+            renderSimulationGlobalStatsChart();
+            renderSimulationNodeStatsChart();
+            renderSimulationSpatialPatternPanel();
+            renderSimulationPartitionStructurePanel();
+            if (selectedNodeData) {
+              renderSimulationFocusTrajectory();
+              renderSimulationNodeInsight(window.currentSelectedTradeNodeInsight);
+            }
+            applySimulationNodeStyles();
+          }
+
+          function clearSimulationRenderState() {
+            d3.selectAll(
+              [
+                "svg.simulation-global-chart",
+                "svg.simulation-node-chart",
+                "svg.simulation-spatial-chart",
+                "svg.simulation-partition-chart",
+                "svg.simulation-focus-chart",
+              ].join(", "),
+            ).remove();
+            d3.selectAll("g.trade-donut.simulation-donut").remove();
+            d3.selectAll(
+              ".simulation-chart-legend, .simulation-panel-title, .simulation-panel-heading",
+            ).remove();
+            d3.selectAll(".simulation-focus-pill").remove();
+            d3.selectAll(".simulation-partition-map").remove();
+            resetFocusInsightRenderState();
+            d3.selectAll(".nodeGroup circle.primary")
+              .attr("fill", (d) => nodeColor(d.community))
+              .attr("stroke", null)
+              .attr("stroke-width", null);
+            d3.selectAll(".map path").attr("fill", "none").attr("fill-opacity", null);
+          }
+
+          function resetFocusInsightRenderState(clearSummary = false) {
+            const insightSvg = d3.select("#tradeNodeInsight svg.trade-nodeinsight-svg");
+            if (!insightSvg.empty()) {
+              insightSvg
+                .interrupt()
+                .attr("data-simulation-view", null)
+                .classed("simulation-nodeinsight-svg", false);
+              insightSvg.selectAll("*").interrupt().remove();
+            }
+            if (clearSummary) {
+              const summary = document.getElementById("tradeNodeInsightSummary");
+              if (summary) summary.innerHTML = "";
+            }
+          }
+
+          function setTradeInsightOptionsForMode(active) {
+            const select = document.getElementById("tradeNodeInsightSelect");
+            if (!select) return;
+            const mode = active ? "simulation" : "trade";
+            if (select.dataset.mode === mode) return;
+            select.dataset.mode = mode;
+            select.innerHTML = active
+              ? `
+                <option value="partition">Partition load</option>
+                <option value="exposure">Exposure balance</option>
+                <option value="spatial">Spatial pattern</option>
+              `
+              : `
+                <option value="partnerBalance">Partner balance</option>
+                <option value="distanceProfile">Distance profile</option>
+                <option value="communityMix">Community mixing</option>
+              `;
+            select.value = active ? "partition" : "partnerBalance";
+            window.currentSelectedTradeNodeInsight = select.value;
+          }
+
+          function syncModeSwitcherRadios() {
+            const activeValue = isSimulationModeActive()
+              ? "simulation"
+              : "trade-ledger";
+            document
+              .querySelectorAll('.mode-switcher input[name="modeType"]')
+              .forEach((element) => {
+                element.checked = element.value === activeValue;
+              });
+          }
+
+          function setModeSwitcherDisabled(disabled) {
+            document
+              .querySelectorAll('.mode-switcher input[name="modeType"]')
+              .forEach((element) => {
+                element.disabled = disabled;
+              });
+            d3.selectAll(".mode-switcher-frame").classed(
+              "disabled",
+              disabled || appModeSwitchLocked,
+            );
+          }
+
+          function releaseAppModeSwitchBounce() {
+            appModeSwitchLocked = false;
+            window.isSwitchingAppMode = false;
+            if (simulationState.status !== "running" && !window.isSwitchingCSV) {
+              setModeSwitcherDisabled(false);
+              enableAllButtons(0);
+              enableAllCheckboxes(0);
+            }
+          }
+
+          function beginAppModeSwitchBounce() {
+            if (appModeSwitchLocked) return false;
+            appModeSwitchLocked = true;
+            window.isSwitchingAppMode = true;
+            clearTimeout(appModeSwitchTimer);
+            disableAllButtons();
+            disableAllCheckboxes();
+            d3.selectAll(".mode-switcher-frame").classed("disabled", true);
+            appModeSwitchTimer = setTimeout(
+              releaseAppModeSwitchBounce,
+              appModeSwitchBounceMs,
+            );
+            return true;
+          }
+
+          function canSwitchAppDataMode() {
+            const mapGraphButton = document.getElementById("toggleModeButton");
+            return (
+              !appModeSwitchLocked &&
+              !window.isSwitchingCSV &&
+              !window.isPlaying &&
+              !window.isDoingTemporalUpdate &&
+              simulationState.status !== "running" &&
+              !mapGraphButton?.disabled
+            );
+          }
+
+          function setSimulationInputsDisabled(disabled) {
+            ensureSimulationControls()
+              .querySelectorAll("input, select")
+              .forEach((element) => {
+                element.disabled = disabled;
+              });
+            setModeSwitcherDisabled(disabled);
+          }
+
+          function configureSimulationModeUi(active) {
+            const controls = ensureSimulationControls();
+            controls.hidden = !active;
+            controls.style.display = active && !selectedNodeData ? "block" : "none";
+            document.body.classList.toggle("simulation-mode-active", active);
+            if (!active) {
+              document.body.classList.remove("focus-mode-active");
+            }
+            setSimulationPanelLabels(active);
+            setTradeInsightOptionsForMode(active);
+            if (active && selectedNodeData) {
+              resetFocusInsightRenderState(true);
+            }
+            if (!selectedNodeData) {
+              d3.select("#globalStatsControls").style("display", active ? "none" : "block");
+              d3.select("#nodeStatsControls").style("display", active ? "none" : "block");
+            }
+          }
+
+          function refreshCurrentNetworkFrame() {
+            const date = getCurrentSliderDate();
+            if (!date || !updateNetworkForDateHandler || !loadedCSVData) return;
+            updateNetworkForDateHandler(date, loadedCSVData);
+            updateCurrentDateDisplay(date);
+          }
+
+          async function recomputeSimulationTrajectory(reason = "Simulation run") {
+            if (!loadedCSVData || !uniqueDates.length) return;
+            const runId = ++simulationRunId;
+            simulationState.status = "running";
+            setSimulationInputsDisabled(true);
+            disableAllButtons();
+            disableAllCheckboxes();
+
+            const stage = async (progress, key, label) => {
+              if (runId !== simulationRunId) return false;
+              setSimulationOverlay(progress, label, key);
+              await delaySimulationStage();
+              return runId === simulationRunId;
+            };
+
+            if (!(await stage(6, "ledger", reason))) return;
+            const settings = readSimulationSettings();
+            if (!(await stage(18, "holdings", "Estimating regional holdings"))) return;
+            if (!(await stage(34, "contacts", "Building movement contacts"))) return;
+            if (!(await stage(48, "states", "Integrating compartment states"))) return;
+            const trajectory = buildSimulationTrajectory(settings);
+            if (!(await stage(78, "frames", "Building replay ledger"))) return;
+
+            simulationState = {
+              status: "ready",
+              settings,
+              trajectory,
+              currentFrame: null,
+              currentDateKey: null,
+              metricMax: trajectory?.metricMax || null,
+            };
+
+            if (!(await stage(94, "render", "Rendering simulation view"))) return;
+            refreshCurrentNetworkFrame();
+            renderSimulationPanels();
+            setSimulationOverlay(100, "Simulation ready", "render");
+            await delaySimulationStage();
+            hideSimulationOverlay();
+            setSimulationInputsDisabled(false);
+            enableAllButtons(0);
+            enableAllCheckboxes(0);
+          }
+
+          function scheduleSimulationRecompute(reason = "Settings changed") {
+            if (!isSimulationModeActive()) return;
+            clearTimeout(simulationRecomputeTimer);
+            simulationRecomputeTimer = setTimeout(() => {
+              recomputeSimulationTrajectory(reason);
+            }, 180);
+          }
+
+          function setAppDataMode(mode) {
+            const nextMode = mode === "simulation" ? "simulation" : "trade";
+            if (nextMode === appDataMode && nextMode !== "simulation") {
+              syncModeSwitcherRadios();
+              return false;
+            }
+            if (!canSwitchAppDataMode() || !beginAppModeSwitchBounce()) {
+              syncModeSwitcherRadios();
+              return false;
+            }
+            const wasSimulationRunning = simulationState.status === "running";
+            appDataMode = nextMode;
+            syncModeSwitcherRadios();
+            configureSimulationModeUi(isSimulationModeActive());
+
+            if (isSimulationModeActive()) {
+              recomputeSimulationTrajectory("Preparing simulation trajectory");
+              return true;
+            }
+
+            simulationRunId += 1;
+            clearTimeout(simulationRecomputeTimer);
+            simulationState = {
+              status: "idle",
+              settings: null,
+              trajectory: null,
+              currentFrame: null,
+              currentDateKey: null,
+              metricMax: null,
+            };
+            hideSimulationOverlay();
+            clearSimulationRenderState();
+            refreshCurrentNetworkFrame();
+            updateNetwork(true);
+            applySimulationMapPrevalence();
+            setSimulationInputsDisabled(false);
+            if (wasSimulationRunning) {
+              enableAllButtons(0);
+              enableAllCheckboxes(0);
+            }
+            return true;
+          }
+
+          function bindSimulationUi() {
+            const panel = ensureSimulationControls();
+            if (!panel.dataset.bound) {
+              panel.dataset.bound = "true";
+              panel.querySelectorAll("input, select").forEach((element) => {
+                const handleSettingChange = () => {
+                  scheduleSimulationRecompute("Recomputing simulation");
+                };
+                element.addEventListener("change", handleSettingChange);
+                element.addEventListener("input", handleSettingChange);
+              });
+            }
+
+            document
+              .querySelectorAll('.mode-switcher input[name="modeType"]')
+              .forEach((radio) => {
+                if (radio.dataset.bound) return;
+                radio.dataset.bound = "true";
+                radio.addEventListener("change", (event) => {
+                  if (!event.target.checked) return;
+                  setAppDataMode(
+                    event.target.value === "simulation" ? "simulation" : "trade",
+                  );
+                });
+              });
+          }
     
           // Cache loaded assets in memory.
           const assetCache = {};
@@ -286,6 +3578,13 @@
           }
     
           function updateNetworkStats(force = false) {
+            if (isSimulationModeActive() && simulationState.currentFrame) {
+              hotspots = simulationState.currentFrame.nodeMetrics;
+              hotspotsMax = simulationState.metricMax;
+              renderSimulationStatsContainer();
+              return;
+            }
+
             // Initialize aggregate stats.
             let totalNodes,
               totalEdges,
@@ -465,6 +3764,7 @@
                 })
                 .on("end", function () {}),
             );
+            container.classed("simulation-stats-container", false);
     
             // Clear previous content.
             container.html("");
@@ -544,6 +3844,11 @@
           }
     
           function updateGlobalStatsChart(selectedStat) {
+            if (isSimulationModeActive() && simulationState.trajectory) {
+              renderSimulationGlobalStatsChart();
+              return;
+            }
+
             const container = d3.select("#globalStats");
             let svg = container.select("svg");
             const margin = { top: 40, right: 30, bottom: 40, left: 10 };
@@ -903,8 +4208,14 @@
           }
     
           function updateNodeStatsChart(selectedMetric) {
+            if (isSimulationModeActive() && simulationState.currentFrame) {
+              renderSimulationNodeStatsChart();
+              return;
+            }
+
             const margin = { top: 40, right: 30, bottom: 40, left: 10 };
             const container = d3.select("#nodeStats");
+            container.selectAll(".simulation-panel-heading").remove();
             const containerWidth = container.node().clientWidth;
             const containerHeight = container.node().clientHeight;
             const width = containerWidth - margin.left - margin.right;
@@ -2534,10 +5845,7 @@
           }
     
           function initAesthetics() {
-            edgeExtent = d3.extent(nonZeroLinks, (d) => Math.log(d.weight));
-            edgeColor = d3
-              .scaleSequential(d3.interpolateSpectral)
-              .domain([edgeExtent[1], edgeExtent[0]]);
+            setTradeEdgeScales(nonZeroLinks);
             nodeColor = d3.scaleOrdinal(d3.schemeCategory10);
             nodeSize = d3
               .scaleSqrt()
@@ -2593,12 +5901,16 @@
                 ? ((selfTrade / outgoingTrade) * 100).toFixed(1)
                 : "NA";
     
-            // Update community ID from current allNodes data.
-            communityID = allNodes.find((n) => n.id === d.id).community;
-            // If community ID is not found, display NA.
+            const currentNode = allNodes.find((n) => n.id === d.id);
+            let communityID = currentNode ? currentNode.community : "NA";
             if (communityID === undefined) communityID = "NA";
-    
-            const noteLabel = `Community ID: ${communityID}\nIncoming Trade: ${incomingTrade}\nOutgoing Trade: ${outgoingTrade}\nSelf-Trade Ratio: ${selfTradeRatio}${selfTradeRatio !== "NA" ? "%" : ""}`;
+
+            const simState = isSimulationModeActive()
+              ? simulationState.currentFrame?.nodeStates[d.id]
+              : null;
+            const noteLabel = simState
+              ? `Holding: ${formatCount(simState.N)}\nSusceptible: ${formatCount(simState.S)}\nExposed: ${formatCount(simState.E)}\nInfectious: ${formatCount(simState.I)} (${formatPct(simState.prevalence)})\nRecovered: ${formatCount(simState.R)}\nIncoming Exposure: ${formatSmall(simState.incomingExposure)}\nOutgoing Pressure: ${formatSmall(simState.outgoingPressure)}`
+              : `Community ID: ${communityID}\nIncoming Trade: ${incomingTrade}\nOutgoing Trade: ${outgoingTrade}\nSelf-Trade Ratio: ${selfTradeRatio}${selfTradeRatio !== "NA" ? "%" : ""}`;
     
             const annotations = [
               {
@@ -2656,7 +5968,9 @@
             const drawHeight = radarChartHeight - radarChartPadding * 2;
             const radarRadius = Math.min(drawWidth, drawHeight) / 2 - 10;
     
-            const axisLabels = ["ID", "OD", "BT", "PR", "EC"]; // EC: Eigenvector Centrality.
+            const axisLabels = isSimulationModeActive()
+              ? ["S", "E", "I", "R", "XP"]
+              : ["ID", "OD", "BT", "PR", "EC"];
             // First, clear the existing labels.
             drawRadialAxisLabels(
               centerX,
@@ -2670,6 +5984,32 @@
           // Global variable to store previous radar points for each node id.
           if (!window.prevRadarPoints) window.prevRadarPoints = {};
           if (!window.prevRadarVertices) window.prevRadarVertices = {};
+
+          function getRadarValuesForNode(d) {
+            if (isSimulationModeActive()) {
+              const state = simulationState.currentFrame?.nodeStates[d.id];
+              if (!state) return null;
+              return [
+                state.N ? state.S / state.N : 0,
+                state.exposedShare || 0,
+                state.prevalence || 0,
+                state.recoveredShare || 0,
+                Math.min(1, (state.incomingExposure + state.outgoingPressure) / Math.max(1, state.N)),
+              ];
+            }
+
+            const nodeMetrics = hotspots[d.id];
+            if (!nodeMetrics) return null;
+            return [
+              Math.log(nodeMetrics.inDegree + 1) /
+                Math.log(hotspotsMax.inDegree + 1),
+              Math.log(nodeMetrics.outDegree + 1) /
+                Math.log(hotspotsMax.outDegree + 1),
+              nodeMetrics.betweenness / hotspotsMax.betweenness,
+              nodeMetrics.pageRank / hotspotsMax.pageRank,
+              nodeMetrics.eigenvector / hotspotsMax.eigenvector,
+            ];
+          }
     
           function drawRadarChart(noteContent, offsets, d) {
             // Define dimensions.
@@ -2769,20 +6109,8 @@
             // Get the drawing group.
             const drawingGroup = radarSVG.select("g.radar-drawing");
     
-            // Normalize hotspot metrics
-            const nodeMetrics = hotspots[d.id];
-            if (!nodeMetrics) return;
-    
-            const normIn =
-              Math.log(nodeMetrics.inDegree + 1) /
-              Math.log(hotspotsMax.inDegree + 1);
-            const normOut =
-              Math.log(nodeMetrics.outDegree + 1) /
-              Math.log(hotspotsMax.outDegree + 1);
-            const normBet = nodeMetrics.betweenness / hotspotsMax.betweenness;
-            const normPR = nodeMetrics.pageRank / hotspotsMax.pageRank;
-            const normEigen = nodeMetrics.eigenvector / hotspotsMax.eigenvector; // New metric.
-            const values = [normIn, normOut, normBet, normPR, normEigen];
+            const values = getRadarValuesForNode(d);
+            if (!values) return;
     
             // Radar chart geometry
             const radarRadius = Math.min(drawWidth, drawHeight) / 2;
@@ -3044,11 +6372,14 @@
     
             const titleStringSource = getStatnaam(d.source.id);
             const titleStringTarget = getStatnaam(d.target.id);
+            const noteLabel = isSimulationModeActive()
+              ? `Exposure load: ${formatSmall(d.weight)}\nLedger animals: ${formatSmall(d.simulation?.ledgerWeight || d.ledgerWeight || 0)}\nSource prevalence: ${formatPct(d.simulation?.sourcePrevalence || 0)}\nTarget prevalence: ${formatPct(d.simulation?.targetPrevalence || 0)}`
+              : `Trade volume: ${d.weight}`;
             const annotations = [
               {
                 note: {
                   title: `${titleStringSource} → ${titleStringTarget}`,
-                  label: `Trade volume: ${d.weight}`,
+                  label: noteLabel,
                   wrapSplitter: /\n/,
                   wrap: 0.5 * w - 60,
                   bgPadding: { top: 6, left: 6, right: 4, bottom: 4 },
@@ -3446,6 +6777,7 @@
             }
             clearSelection(wasSelected && !wasSameNode);
             selectedNodeData = d;
+            document.body.classList.add("focus-mode-active");
     
             // Change the whole page background to black with transition
             d3.select("body")
@@ -3456,6 +6788,7 @@
             // Hide the global stats display.
             d3.select("#globalStats").style("visibility", "hidden");
             d3.select("#globalStatsControls").style("display", "none");
+            d3.select("#simulationControls").style("display", "none");
     
             // Hide the node stats display.
             d3.select("#nodeStats").style("visibility", "hidden");
@@ -3541,6 +6874,7 @@
     
             // If clicked, change date display text to white
             d3.select("#currentDateWidget").style("color", "white");
+            d3.select("#timeAuthorCredit").style("color", "white");
     
             linkSelection
               .attr("display", function (linkData) {
@@ -3678,7 +7012,10 @@
     
             // Switch containers to dark mode with glowing borders
             d3.select(".header-row-1").classed(classStringB, true);
-            d3.selectAll(".csv-switcher").classed(classStringC, true);
+            d3.selectAll(".csv-switcher, .mode-switcher-frame").classed(
+              classStringC,
+              true,
+            );
             d3.select("#col2").classed(classStringA, true);
             d3.select("#tradeNodeDistribution").classed(classStringA, true);
             d3.select("#tradeNodeInsight").classed(classStringA, true);
@@ -3701,6 +7038,7 @@
           function clearSelection(flag) {
             clearHoveredLinkState();
             selectedNodeData = null;
+            document.body.classList.remove("focus-mode-active");
     
             const colorScale = d3
               .scaleSequential(d3.interpolateSpectral)
@@ -3715,11 +7053,11 @@
             if (!selectedNodeData) {
               d3.select(".header-row-1").classed("header-row-dark", false);
               d3.select(".header-row-1").classed("header-row-dark-instant", false);
-              d3.selectAll(".csv-switcher").classed(
+              d3.selectAll(".csv-switcher, .mode-switcher-frame").classed(
                 "glowing-border-switcher",
                 false,
               );
-              d3.selectAll(".csv-switcher").classed(
+              d3.selectAll(".csv-switcher, .mode-switcher-frame").classed(
                 "glowing-border-switcher-instant",
                 false,
               );
@@ -3776,11 +7114,21 @@
     
             // Display the global stats display.
             d3.select("#globalStats").style("visibility", "visible");
-            d3.select("#globalStatsControls").style("display", "block");
+            d3.select("#globalStatsControls").style(
+              "display",
+              isSimulationModeActive() ? "none" : "block",
+            );
+            d3.select("#simulationControls").style(
+              "display",
+              isSimulationModeActive() ? "block" : "none",
+            );
     
             // Display the node stats display.
             d3.select("#nodeStats").style("visibility", "visible");
-            d3.select("#nodeStatsControls").style("display", "block");
+            d3.select("#nodeStatsControls").style(
+              "display",
+              isSimulationModeActive() ? "none" : "block",
+            );
     
             // Show the network level gravity model and metadata groups.
             d3.select("#tradeDistribution").style("display", "block");
@@ -3834,11 +7182,15 @@
             // If unclicked, change "?" button color back to green
             d3.select(".hotspotInfoButton i").style("color", "green");
     
-            // If unclicked, change stats color back to green
-            d3.select(".statsContainer")
-              .style("border", "1px dashed green")
-              .style("background", "rgba(0, 255, 0, 0.03)");
-            d3.selectAll(".stat-item").style("color", "gray");
+            if (isSimulationModeActive() && simulationState.currentFrame) {
+              renderSimulationStatsContainer();
+            } else {
+              d3.select(".statsContainer")
+                .classed("simulation-stats-container", false)
+                .style("border", "1px dashed green")
+                .style("background", "rgba(0, 255, 0, 0.03)");
+              d3.selectAll(".stat-item").style("color", "gray");
+            }
     
             // If unclicked, change layer, restore and screenshot buttons back to green and their text to white
             d3.select(".help-overlay-button").style("color", "white");
@@ -3879,10 +7231,12 @@
     
             // If unclicked, change the date display text back to gray
             d3.select("#currentDateWidget").style("color", "gray");
+            d3.select("#timeAuthorCredit").style("color", "gray");
     
             // If unclicked, change link colors back, remove arrowheads and glowing filter
             linkSelection
-              .attr("display", "block")
+              .interrupt()
+              .attr("display", (d) => (d.weight > 0 ? "block" : "none"))
               .attr("class", "link")
               .attr("marker-end", null)
               .attr("stroke", (d) => {
@@ -3892,7 +7246,8 @@
               .attr("stroke-width", (d) =>
                 d.weight <= 0 ? 0 : Math.sqrt(d.weight),
               )
-              .attr("opacity", 0.5)
+              .attr("opacity", null)
+              .style("opacity", null)
               .attr("filter", null);
     
             // Hide the trade information panel
@@ -3947,8 +7302,108 @@
             const dy = coords1[1] - coords2[1];
             return Math.sqrt(dx * dx + dy * dy) / 1000;
           }
-    
+
+          function updateSimulationLedgerTable() {
+            const tradePanelDiv = document.getElementById("tradePanel");
+            if (!tradePanelDiv) return;
+            if (!selectedNodeData) {
+              tradePanelDiv.innerHTML = "";
+              return;
+            }
+
+            const focalId = selectedNodeData.id;
+            const outgoing = allLinks
+              .filter((link) => getNodeId(link.source) === focalId && link.weight > 0)
+              .sort((a, b) => b.weight - a.weight);
+            const incoming = allLinks
+              .filter((link) => getNodeId(link.target) === focalId && link.weight > 0)
+              .sort((a, b) => b.weight - a.weight);
+            const allOutgoingEnabled = outgoing.every((link) => !link.disabled);
+            const allIncomingEnabled = incoming.every((link) => !link.disabled);
+
+            function renderRows(rows, section) {
+              if (!rows.length) {
+                return `<div class="trade-item no-trades">No ${section} exposure.</div>`;
+              }
+              return rows
+                .map((link) => {
+                  const sourceId = getNodeId(link.source);
+                  const targetId = getNodeId(link.target);
+                  const partnerId = section === "outgoing" ? targetId : sourceId;
+                  const partnerName = getStatnaam(partnerId);
+                  const state = link.simulation || {};
+                  const prevalence =
+                    section === "outgoing"
+                      ? state.targetPrevalence
+                      : state.sourcePrevalence;
+                  const barWidth = Math.min(
+                    50,
+                    Math.max(2, (prevalence || 0) * 180),
+                  );
+                  const icon =
+                    sourceId === targetId
+                      ? "fa-solid fa-repeat"
+                      : section === "outgoing"
+                        ? "fa-solid fa-arrow-right-from-line"
+                        : "fa-solid fa-arrow-left-to-line";
+                  return `
+                    <div class="trade-item">
+                      <div class="trade-item-main">
+                        <span class="${section === "outgoing" ? "trade-dest" : "trade-src"}">
+                          <span class="trade-icon"><i class="${icon}"></i></span>
+                          <span class="trade-distance">
+                            <svg class="distance-bar" viewBox="0 0 50 10" width="50" height="10" aria-hidden="true" focusable="false">
+                              <rect x="0" y="0" width="50" height="10" fill="rgba(255,255,255,0.18)"></rect>
+                              <rect x="0" y="0" width="${barWidth}" height="10" fill="${simulationPrevalenceScale(prevalence || 0)}"></rect>
+                            </svg>
+                          </span>
+                          <span class="trade-route-label">[${partnerId}] ${partnerName}</span>
+                        </span>
+                        <span class="trade-volume">${formatSmall(link.weight)}</span>
+                      </div>
+                      <input type="checkbox" class="trade-checkbox" data-section="${section}" data-source="${sourceId}" data-target="${targetId}" ${!link.disabled ? "checked" : ""}>
+                    </div>
+                  `;
+                })
+                .join("");
+            }
+
+            const state =
+              simulationState.currentFrame?.nodeStates[selectedNodeData.id] || {};
+            tradePanelDiv.innerHTML = `
+              <div class="trade-info-header">
+                <i class="fa-solid fa-location-crosshairs"></i> [${focalId}] ${selectedNodeData.statnaam}
+                <span class="simulation-focus-pill">Prev ${formatPct(state.prevalence || 0)}</span>
+              </div>
+              <div class="trade-sections">
+                <div class="trade-section">
+                  <div class="trade-section-header">
+                    <i class="fa-solid fa-arrow-right-from-bracket"></i> Outgoing Pressure
+                    <input type="checkbox" class="trade-header-checkbox" data-section="outgoing" ${allOutgoingEnabled ? "checked" : ""}>
+                  </div>
+                  <div class="trade-list">${renderRows(outgoing, "outgoing")}</div>
+                </div>
+                <div class="trade-section">
+                  <div class="trade-section-header">
+                    <i class="fa-solid fa-arrow-left-to-bracket"></i> Incoming Exposure
+                    <input type="checkbox" class="trade-header-checkbox" data-section="incoming" ${allIncomingEnabled ? "checked" : ""}>
+                  </div>
+                  <div class="trade-list">${renderRows(incoming, "incoming")}</div>
+                </div>
+              </div>
+            `;
+            attachTradeCheckboxListeners();
+            if (window.isPlaying) {
+              disableAllCheckboxes();
+            }
+          }
+
           function updateTradeTable() {
+            if (isSimulationModeActive() && simulationState.currentFrame) {
+              updateSimulationLedgerTable();
+              return;
+            }
+
             const tradePanelDiv = document.getElementById("tradePanel");
             if (!selectedNodeData) {
               tradePanelDiv.innerHTML = "";
@@ -4174,6 +7629,7 @@
     
           function renderEmpty(g, width, height, msg) {
             g.append("text")
+              .attr("class", "empty-message")
               .attr("x", width / 2)
               .attr("y", height / 2)
               .attr("text-anchor", "middle")
@@ -4184,6 +7640,11 @@
           }
     
           function updateTradeNodeInsight(view) {
+            if (isSimulationModeActive() && simulationState.currentFrame) {
+              renderSimulationNodeInsight(view);
+              return;
+            }
+
             // If not in focus mode, clear summary and skip.
             if (!selectedNodeData) {
               const sumDiv = document.getElementById("tradeNodeInsightSummary");
@@ -4350,6 +7811,12 @@
             phSvg
               .attr("width", containerNode.clientWidth)
               .attr("height", containerNode.clientHeight);
+            if (phSvg.classed("simulation-nodeinsight-svg")) {
+              phSvg.selectAll("*").interrupt().remove();
+              phSvg
+                .attr("data-simulation-view", null)
+                .classed("simulation-nodeinsight-svg", false);
+            }
     
             // Compute top offset from overlay UI
             const labelNode = container.select(".trade-nodeinsight-label").node();
@@ -5381,6 +8848,9 @@
             disableAllButtons();
             disableAllCheckboxes();
             clearHoveredLinkState();
+            if (linkSelection) linkSelection.interrupt();
+            if (nodeEnter) nodeEnter.interrupt();
+            if (labelSelection) labelSelection.interrupt();
     
             // 1. Update link.disabled based on checkboxes.
             d3.selectAll(".trade-checkbox").each(function () {
@@ -5408,8 +8878,16 @@
             const validLinks = allLinks.filter((link) => link.weight > 0);
             const edgeExtent = d3.extent(validLinks, (d) => Math.log(d.weight));
             const edgeColor = d3
-              .scaleSequential(d3.interpolateSpectral)
-              .domain([edgeExtent[1], edgeExtent[0]]);
+              .scaleSequential(
+                isSimulationModeActive()
+                  ? d3.interpolateYlOrRd
+                  : d3.interpolateSpectral,
+              )
+              .domain(
+                isSimulationModeActive()
+                  ? [edgeExtent[0] ?? 0, edgeExtent[1] ?? 1]
+                  : [edgeExtent[1] ?? 1, edgeExtent[0] ?? 0],
+              );
     
             if (selectedNodeData) {
               // When a node is selected: highlight only links connected to that node and enabled.
@@ -5424,6 +8902,7 @@
                   if (instant) {
                     d3.select(this)
                       .style("opacity", 0)
+                      .attr("opacity", null)
                       .attr("display", "none")
                       .attr("class", "link")
                       .attr("filter", null)
@@ -5434,6 +8913,7 @@
                       .transition()
                       .duration(500)
                       .style("opacity", 0)
+                      .attr("opacity", null)
                       .on("end", function () {
                         d3.select(this)
                           .attr("display", "none")
@@ -5449,6 +8929,7 @@
                     d3.select(this)
                       .attr("display", "block")
                       .style("opacity", 1)
+                      .attr("opacity", null)
                       .attr("class", isOutgoing ? "linkSelectOut" : "linkSelectIn")
                       .attr("stroke-width", 2)
                       .attr("filter", "url(#edgeGlow)")
@@ -5460,6 +8941,7 @@
                       .transition()
                       .duration(500)
                       .style("opacity", 1)
+                      .attr("opacity", null)
                       .on("start", function () {
                         d3.select(this)
                           .attr(
@@ -5483,6 +8965,7 @@
                   if (instant) {
                     d3.select(this)
                       .style("opacity", null)
+                      .attr("opacity", null)
                       .attr("display", "none")
                       .attr("class", "link")
                       .attr("filter", null)
@@ -5493,6 +8976,7 @@
                       .transition()
                       .duration(500)
                       .attr("opacity", 0)
+                      .style("opacity", null)
                       .on("end", function () {
                         d3.select(this)
                           .attr("display", "none")
@@ -5506,6 +8990,7 @@
                     d3.select(this)
                       .attr("display", "block")
                       .style("opacity", null)
+                      .attr("opacity", null)
                       .attr("class", "link")
                       .attr("stroke", edgeColor(Math.log(d.weight)))
                       .attr("stroke-width", Math.sqrt(d.weight))
@@ -5518,6 +9003,7 @@
                       .transition()
                       .duration(500)
                       .style("opacity", null)
+                      .attr("opacity", null)
                       .on("start", function (d) {
                         d3.select(this)
                           .attr("class", "link")
@@ -5552,6 +9038,8 @@
             }
     
             // Re-enable buttons and checkboxes after transitions.
+            applySimulationNodeStyles();
+
             if (instant) {
               enableAllButtons(isSwitchingCSV ? 550 : 0);
               enableAllCheckboxes(isSwitchingCSV ? 550 : 0);
@@ -5562,6 +9050,10 @@
           }
     
           function updateTradeDistribution() {
+            if (isSimulationModeActive() && simulationState.currentFrame) {
+              renderSimulationSpatialPatternPanel();
+              return;
+            }
             if (selectedNodeData) {
               return; // Skip if a node is selected.
             }
@@ -5903,6 +9395,10 @@
           }
     
           function updateNodeTradeDistribution() {
+            if (isSimulationModeActive() && simulationState.currentFrame) {
+              renderSimulationFocusTrajectory();
+              return;
+            }
             if (!selectedNodeData) return;
             precomputeAllTradeData();
             // Get focal node id from selectedNodeData (e.g., "CR01")
@@ -6408,6 +9904,13 @@
             // MERGE and transition links.
             linkSelection = linksEnter.merge(linksSelection);
             linkSelection
+              .interrupt()
+              .attr("display", (d) => (d.weight > 0 ? "block" : "none"))
+              .attr("class", "link")
+              .attr("filter", null)
+              .attr("marker-end", null)
+              .attr("opacity", (d) => (d.weight > 0 ? null : 0))
+              .style("opacity", null)
               .transition()
               .duration(400)
               .attr("stroke", (d) => {
@@ -6751,6 +10254,11 @@
                 updateAnnotationForNode(hoveredNode, annotationGroup);
               }
             }
+
+            if (isSimulationModeActive()) {
+              applySimulationNodeStyles();
+              renderSimulationPanels();
+            }
     
             isDoingTemporalUpdate = false;
             window.isDoingTemporalUpdate = false;
@@ -6798,8 +10306,47 @@
               }
             }
           }
+
+          function updateCompartmentDonutCharts() {
+            d3.selectAll(".nodeGroup").each(function (d) {
+              const state = d.simulation;
+              if (!state || !state.N) return;
+              let donutGroup = d3.select(this).select("g.trade-donut");
+              if (donutGroup.empty()) {
+                donutGroup = d3
+                  .select(this)
+                  .append("g")
+                  .attr("class", "trade-donut simulation-donut")
+                  .attr("transform", "translate(0,0)");
+              }
+              donutGroup.classed("simulation-donut", true).style("display", "block");
+              donutGroup.selectAll("path").remove();
+
+              const innerRadius = d.r * 0.28;
+              const outerRadius = d.r * 0.86;
+              const arc = d3.arc().innerRadius(innerRadius).outerRadius(outerRadius);
+              let startAngle = 0;
+              ["S", "E", "I", "R"].forEach((key) => {
+                const share = state.N ? state[key] / state.N : 0;
+                const endAngle = startAngle + 2 * Math.PI * share;
+                donutGroup
+                  .append("path")
+                  .attr("class", `donut-compartment-${key}`)
+                  .attr("d", arc({ startAngle, endAngle }))
+                  .attr("fill", simulationCompartmentColors[key])
+                  .attr("opacity", key === "S" ? 0.48 : 0.88);
+                startAngle = endAngle;
+              });
+            });
+          }
     
           function updateDonutCharts() {
+            if (isSimulationModeActive()) {
+              updateCompartmentDonutCharts();
+              applySimulationNodeStyles();
+              return;
+            }
+
             // For each node group (each node)
             d3.selectAll(".nodeGroup").each(function (d) {
               // Filter enabled links that involve this node.
@@ -6835,6 +10382,10 @@
     
               // Select (or create) the donut group inside the node group.
               let donutGroup = d3.select(this).select("g.trade-donut");
+              if (!donutGroup.empty() && donutGroup.classed("simulation-donut")) {
+                donutGroup.remove();
+                donutGroup = d3.select(this).select("g.trade-donut");
+              }
     
               if (totalVolume === 0) {
                 if (!donutGroup.empty()) {
@@ -7139,6 +10690,7 @@
             }
     
             updateMapPositionsWithTransition(instant);
+            applySimulationMapPrevalence();
     
             if (instant) {
               enableAllButtons(isSwitchingCSV ? 550 : 0);
@@ -7193,58 +10745,86 @@
             recordOnly = false,
           ) {
             const transitionDuration = instant ? 0 : 1000;
+
+            const getMapLinkPath = (d) => {
+              const dx = d.target.x - d.source.x,
+                dy = d.target.y - d.source.y,
+                dr = Math.sqrt(dx * dx + dy * dy),
+                adj = getAdjustedTarget(d);
+              return (
+                "M" +
+                d.source.x +
+                "," +
+                d.source.y +
+                "A" +
+                dr +
+                "," +
+                dr +
+                " 0 0,1 " +
+                adj.x +
+                "," +
+                adj.y
+              );
+            };
+
+            const recordNodeMapPosition = (d) => {
+              d.x0 = d.x;
+              d.y0 = d.y;
+              if (selectedNodeData && selectedNodeData.id === d.id) {
+                updateAnnotationForNode(d, annotationGroup);
+              }
+              if (hoveredNode && hoveredNode.id === d.id) {
+                updateAnnotationForNode(d, annotationGroup);
+              }
+            };
+
+            const recordLinkMapPosition = (d) => {
+              if (typeof d.source === "object") {
+                d.source.x0 = d.source.x;
+                d.source.y0 = d.source.y;
+              }
+              if (typeof d.target === "object") {
+                d.target.x0 = d.target.x;
+                d.target.y0 = d.target.y;
+              }
+            };
     
             if (!recordOnly) {
+              if (instant) {
+                nodeEnter
+                  .interrupt()
+                  .attr("transform", (d) => `translate(${d.x},${d.y})`)
+                  .each(recordNodeMapPosition);
+
+                linkSelection
+                  .interrupt()
+                  .attr("d", getMapLinkPath)
+                  .each(recordLinkMapPosition);
+
+                labelSelection
+                  .interrupt()
+                  .attr("x", (d) => d.x)
+                  .attr("y", (d) => d.y - (d.r + 13));
+
+                return;
+              }
+
               // Transition node groups.
               nodeEnter
                 .transition()
                 .duration(transitionDuration)
                 .attr("transform", (d) => `translate(${d.x},${d.y})`)
-                .on("end", function (d) {
-                  d.x0 = d.x;
-                  d.y0 = d.y;
-                  if (selectedNodeData && selectedNodeData.id === d.id) {
-                    updateAnnotationForNode(d, annotationGroup);
-                  }
-                  if (hoveredNode && hoveredNode.id === d.id) {
-                    updateAnnotationForNode(d, annotationGroup);
-                  }
+                .on("end", function () {
+                  recordNodeMapPosition(d3.select(this).datum());
                 });
     
               // Transition link positions.
               linkSelection
                 .transition()
                 .duration(transitionDuration)
-                .attr("d", function (d) {
-                  const dx = d.target.x - d.source.x,
-                    dy = d.target.y - d.source.y,
-                    dr = Math.sqrt(dx * dx + dy * dy),
-                    adj = getAdjustedTarget(d);
-                  return (
-                    "M" +
-                    d.source.x +
-                    "," +
-                    d.source.y +
-                    "A" +
-                    dr +
-                    "," +
-                    dr +
-                    " 0 0,1 " +
-                    adj.x +
-                    "," +
-                    adj.y
-                  );
-                })
-                .on("end", function (d) {
-                  // Update source and target positions.
-                  if (typeof d.source === "object") {
-                    d.source.x0 = d.source.x;
-                    d.source.y0 = d.source.y;
-                  }
-                  if (typeof d.target === "object") {
-                    d.target.x0 = d.target.x;
-                    d.target.y0 = d.target.y;
-                  }
+                .attr("d", getMapLinkPath)
+                .on("end", function () {
+                  recordLinkMapPosition(d3.select(this).datum());
                 });
     
               // Transition label positions.
@@ -7902,17 +11482,419 @@
             });
             return adj;
           }
-    
+
+          function getTradeCommunityLabel(key) {
+            return key === "NA" ? "NA" : `P${key}`;
+          }
+
+          function getTradeCommunityColor(key) {
+            return key === "NA" ? "#9ca3af" : nodeColor(Number(key));
+          }
+
+          function getTradeCommunityStructureData() {
+            const nodes = activeNodes.length
+              ? activeNodes
+              : allNodes.filter((node) => node.active);
+            const links = enabledLinks.filter((link) => link.weight > 0);
+            const temporalStats =
+              window.currentDate &&
+              window.allTemporalStats?.[window.currentDate.toISOString()];
+
+            if (temporalStats?.partition) {
+              allNodes.forEach((node) => {
+                node.community = temporalStats.partition[node.id];
+              });
+            }
+
+            const communities = new Map();
+            const nodeCommunity = new Map();
+            nodes.forEach((node) => {
+              const key =
+                node.community === undefined || node.community === null
+                  ? "NA"
+                  : String(node.community);
+              nodeCommunity.set(node.id, key);
+              if (!communities.has(key)) {
+                communities.set(key, {
+                  key,
+                  members: [],
+                  nodeCount: 0,
+                  nodeVolume: 0,
+                  incoming: 0,
+                  outgoing: 0,
+                  load: 0,
+                });
+              }
+              const community = communities.get(key);
+              community.members.push(node.id);
+              community.nodeCount += 1;
+              community.nodeVolume += node.tradeTotal || 0;
+            });
+
+            let total = 0;
+            let within = 0;
+            const matrix = new Map();
+            links.forEach((link) => {
+              const sourceId = getNodeId(link.source);
+              const targetId = getNodeId(link.target);
+              const sourceKey = nodeCommunity.get(sourceId);
+              const targetKey = nodeCommunity.get(targetId);
+              const weight = Math.max(0, +link.weight || 0);
+              if (!sourceKey || !targetKey || !weight) return;
+
+              const key = `${sourceKey}->${targetKey}`;
+              matrix.set(key, (matrix.get(key) || 0) + weight);
+              communities.get(sourceKey).outgoing += weight;
+              communities.get(targetKey).incoming += weight;
+              total += weight;
+              if (sourceKey === targetKey) within += weight;
+            });
+
+            communities.forEach((community) => {
+              community.load = community.incoming + community.outgoing;
+              community.members.sort((a, b) => {
+                const aNum = parseInt(String(a).replace("CR", ""), 10);
+                const bNum = parseInt(String(b).replace("CR", ""), 10);
+                return aNum - bNum || d3.ascending(a, b);
+              });
+            });
+
+            const communityList = Array.from(communities.values()).sort(
+              (a, b) =>
+                b.load - a.load ||
+                b.nodeVolume - a.nodeVolume ||
+                b.nodeCount - a.nodeCount ||
+                d3.ascending(a.key, b.key),
+            );
+            const modularity =
+              temporalStats?.modularity ??
+              computeModularity(nodes, links).modularity ??
+              0;
+
+            return {
+              communities: communityList,
+              matrix,
+              total,
+              within,
+              between: total - within,
+              modularity,
+            };
+          }
+
+          function renderTradeCommunityStructurePanel() {
+            const container = d3.select("#tradeClusters");
+            const containerNode = container.node();
+            const data = getTradeCommunityStructureData();
+            const { communities, matrix } = data;
+            const mappingLayout = getSimulationPartitionMappingLayout(containerNode);
+            const margin = {
+              top: 78,
+              right: 104,
+              bottom: communities.length ? mappingLayout.compactHeight + 12 : 36,
+              left: 42,
+            };
+            const width = Math.max(
+              10,
+              containerNode.clientWidth - margin.left - margin.right,
+            );
+            const height = Math.max(
+              10,
+              containerNode.clientHeight - margin.top - margin.bottom,
+            );
+
+            let svg = container.select("svg.trade-community-chart");
+            if (svg.empty()) {
+              container.selectAll("svg").remove();
+              svg = container.append("svg").attr("class", "trade-community-chart");
+            }
+            svg
+              .attr("width", containerNode.clientWidth)
+              .attr("height", containerNode.clientHeight);
+
+            const g = svg
+              .selectAll("g.trade-community-chart-group")
+              .data([null])
+              .join("g")
+              .attr("class", "trade-community-chart-group")
+              .attr("transform", `translate(${margin.left},${margin.top})`);
+
+            if (!communities.length) {
+              renderSimulationPartitionMapping(
+                container,
+                communities,
+                mappingLayout,
+              );
+              svg.selectAll("g.trade-community-summary").remove();
+              g.selectAll("*").interrupt().remove();
+              renderEmpty(g, width, height, "No community data");
+              return;
+            }
+            renderSimulationPartitionMapping(container, communities, mappingLayout);
+            g.selectAll(".empty-message").remove();
+
+            const keys = communities.map((community) => community.key);
+            const matrixSize = Math.max(10, Math.min(width, height));
+            const matrixOffsetY = Math.max(0, (height - matrixSize) / 2);
+            const x = d3
+              .scaleBand()
+              .domain(keys)
+              .range([0, matrixSize])
+              .padding(0.06);
+            const y = d3
+              .scaleBand()
+              .domain(keys)
+              .range([matrixOffsetY, matrixOffsetY + matrixSize])
+              .padding(0.06);
+            const cells = keys.flatMap((source) =>
+              keys.map((target) => ({
+                source,
+                target,
+                value: matrix.get(`${source}->${target}`) || 0,
+              })),
+            );
+            const maxValue = d3.max(cells, (cell) => cell.value) || 1;
+            const color = d3
+              .scaleSequential(d3.interpolateYlGnBu)
+              .domain([0, maxValue]);
+
+            const summaryItems = [
+              ["Within", formatPct(data.total ? data.within / data.total : 0)],
+              ["Between", formatPct(data.total ? data.between / data.total : 0)],
+              ["Modularity", d3.format(".3f")(data.modularity || 0)],
+            ];
+            const summaryWidth = Math.min(92, containerNode.clientWidth / 3);
+            const summary = svg
+              .selectAll("g.trade-community-summary")
+              .data([null])
+              .join("g")
+              .attr("class", "trade-community-summary")
+              .attr("transform", "translate(16,50)");
+            const summaryGroups = summary
+              .selectAll("g.trade-community-summary-item")
+              .data(summaryItems, (item) => item[0])
+              .join(
+                (enter) => {
+                  const item = enter
+                    .append("g")
+                    .attr("class", "trade-community-summary-item")
+                    .style("opacity", 0);
+                  item
+                    .append("text")
+                    .attr("class", "trade-community-summary-label")
+                    .attr("y", -9);
+                  item
+                    .append("text")
+                    .attr("class", "trade-community-summary-value")
+                    .attr("y", 5);
+                  return item;
+                },
+                (update) => update,
+                (exit) =>
+                  exit.call((selection) =>
+                    transitionSelection(selection).style("opacity", 0).remove(),
+                  ),
+              );
+            summaryGroups
+              .call((selection) =>
+                transitionSelection(selection)
+                  .style("opacity", 1)
+                  .attr(
+                    "transform",
+                    (item, index) => `translate(${index * summaryWidth},0)`,
+                  ),
+              );
+            summaryGroups
+              .select("text.trade-community-summary-label")
+              .text((item) => item[0]);
+            summaryGroups
+              .select("text.trade-community-summary-value")
+              .text((item) => item[1]);
+
+            const cellSelection = g
+              .selectAll("rect.trade-community-cell")
+              .data(cells, (cell) => `${cell.source}->${cell.target}`)
+              .join(
+                (enter) =>
+                  enter
+                    .append("rect")
+                    .attr("class", "trade-community-cell")
+                    .attr("x", (cell) => x(cell.target))
+                    .attr("y", matrixOffsetY + matrixSize)
+                    .attr("width", x.bandwidth())
+                    .attr("height", 0)
+                    .attr("rx", 3)
+                    .attr("ry", 3)
+                    .style("opacity", 0),
+                (update) => update,
+                (exit) =>
+                  exit.call((selection) =>
+                    transitionSelection(selection)
+                      .style("opacity", 0)
+                      .attr("height", 0)
+                      .remove(),
+                  ),
+              );
+            cellSelection
+              .call((selection) =>
+                transitionSelection(selection)
+                  .style("opacity", 1)
+                  .attr("x", (cell) => x(cell.target))
+                  .attr("y", (cell) => y(cell.source))
+                  .attr("width", x.bandwidth())
+                  .attr("height", y.bandwidth())
+                  .attr("fill", (cell) =>
+                    cell.value > 0 ? color(cell.value) : "rgba(23,34,24,0.04)",
+                  )
+                  .attr("stroke", (cell) =>
+                    cell.source === cell.target
+                      ? "rgba(23,34,24,0.45)"
+                      : "rgba(255,255,255,0.9)",
+                  )
+                  .attr("stroke-width", (cell) =>
+                    cell.source === cell.target ? 1.2 : 0.6,
+                  ),
+              );
+            cellSelection
+              .selectAll("title")
+              .data((cell) => [cell])
+              .join("title")
+              .text(
+                (cell) =>
+                  `${getTradeCommunityLabel(cell.source)} -> ${getTradeCommunityLabel(cell.target)}: ${formatSmall(cell.value)}`,
+              );
+
+            g.selectAll("text.trade-community-column-label")
+              .data(keys, (key) => key)
+              .join(
+                (enter) =>
+                  enter
+                    .append("text")
+                    .attr("class", "trade-community-column-label")
+                    .attr("text-anchor", "middle")
+                    .style("opacity", 0),
+                (update) => update,
+                (exit) =>
+                  exit.call((selection) =>
+                    transitionSelection(selection).style("opacity", 0).remove(),
+                  ),
+              )
+              .call((selection) =>
+                transitionSelection(selection)
+                  .style("opacity", 1)
+                  .attr("x", (key) => x(key) + x.bandwidth() / 2)
+                  .attr("y", matrixOffsetY - 8),
+              )
+              .text(getTradeCommunityLabel);
+            g.selectAll("text.trade-community-row-label")
+              .data(keys, (key) => key)
+              .join(
+                (enter) =>
+                  enter
+                    .append("text")
+                    .attr("class", "trade-community-row-label")
+                    .attr("text-anchor", "end")
+                    .style("opacity", 0),
+                (update) => update,
+                (exit) =>
+                  exit.call((selection) =>
+                    transitionSelection(selection).style("opacity", 0).remove(),
+                  ),
+              )
+              .call((selection) =>
+                transitionSelection(selection)
+                  .style("opacity", 1)
+                  .attr("x", -8)
+                  .attr("y", (key) => y(key) + y.bandwidth() / 2 + 3),
+              )
+              .text(getTradeCommunityLabel);
+
+            const maxLoad = d3.max(communities, (community) => community.load) || 1;
+            const loadX = d3
+              .scaleLinear()
+              .domain([0, maxLoad])
+              .range([0, Math.max(18, margin.right - 48)]);
+            const loadLayer = g
+              .selectAll("g.trade-community-load-layer")
+              .data([null])
+              .join("g")
+              .attr("class", "trade-community-load-layer")
+              .attr("transform", `translate(${matrixSize + 12},0)`);
+            loadLayer
+              .selectAll("rect.trade-community-load-bar")
+              .data(communities, (community) => community.key)
+              .join(
+                (enter) =>
+                  enter
+                    .append("rect")
+                    .attr("class", "trade-community-load-bar")
+                    .attr("x", 0)
+                    .attr("y", (community) => y(community.key))
+                    .attr("width", 0)
+                    .attr("height", y.bandwidth())
+                    .attr("rx", 3)
+                    .attr("fill", (community) =>
+                      getTradeCommunityColor(community.key),
+                    ),
+                (update) => update,
+                (exit) =>
+                  exit.call((selection) =>
+                    transitionSelection(selection)
+                      .attr("width", 0)
+                      .style("opacity", 0)
+                      .remove(),
+                  ),
+              )
+              .call((selection) =>
+                transitionSelection(selection)
+                  .style("opacity", 1)
+                  .attr("y", (community) => y(community.key))
+                  .attr("width", (community) => loadX(community.load))
+                  .attr("height", y.bandwidth())
+                  .attr("fill", (community) =>
+                    getTradeCommunityColor(community.key),
+                  ),
+              );
+            loadLayer
+              .selectAll("text.trade-community-load-label")
+              .data(communities, (community) => community.key)
+              .join(
+                (enter) =>
+                  enter
+                    .append("text")
+                    .attr("class", "trade-community-load-label")
+                    .attr("text-anchor", "end")
+                    .style("opacity", 0),
+                (update) => update,
+                (exit) =>
+                  exit.call((selection) =>
+                    transitionSelection(selection).style("opacity", 0).remove(),
+                  ),
+              )
+              .call((selection) =>
+                transitionSelection(selection)
+                  .style("opacity", 1)
+                  .attr("x", margin.right - 24)
+                  .attr(
+                    "y",
+                    (community) => y(community.key) + y.bandwidth() / 2 + 3,
+                  ),
+              )
+              .text((community) => formatSmall(community.load));
+          }
+   
           /**
-           * updateSCCs()
-           *
-           * Renders the array of strongly connected components (SCCs).
-           *
+           * Renders global partition structure for the ledger view.
            */
           function updateSCCs() {
+            if (isSimulationModeActive() && simulationState.currentFrame) {
+              renderSimulationPartitionStructurePanel();
+              return;
+            }
             if (selectedNodeData) {
               return; // Do not update if a node is selected.
             }
+            renderTradeCommunityStructurePanel();
+            return;
             const container = d3.select("#tradeClusters");
     
             let svg = container.select("svg");
@@ -8370,6 +12352,8 @@
             window.currentSelectedTradeNodeInsight = "partnerBalance";
             // Update the initial time span.
             currentTimeSpan = "weekly";
+            bindSimulationUi();
+            configureSimulationModeUi(false);
             initHerdLink(defaultCSVUrl);
           }
     
@@ -8426,6 +12410,9 @@
             timeControls.innerHTML = "";
             if (document.getElementById("currentDateWidget")) {
               document.getElementById("currentDateWidget").style.display = "none";
+            }
+            if (document.getElementById("timeAuthorCredit")) {
+              document.getElementById("timeAuthorCredit").style.display = "none";
             }
     
             // Fetch and process the CSV data, then initialize the visualization.
@@ -8557,12 +12544,7 @@
                     link.target = nodesMap[link.target];
                   });
     
-                  // Compute global edge extent from all links with weight > 0
-                  edgeExtent = d3.extent(
-                    links.filter((l) => l.weight > 0),
-                    (d) => Math.log(d.weight),
-                  );
-                  // Now, edgeExtent is a global variable available for later use in styling.
+                  setTradeEdgeScales(links);
     
                   allNodes = nodes;
                   allLinks = links;
@@ -8618,6 +12600,11 @@
                   );
                   // Make sure the container is visible.
                   timeControls.style.display = "flex";
+                  const timeAuthorCredit =
+                    document.getElementById("timeAuthorCredit");
+                  if (timeAuthorCredit) {
+                    timeAuthorCredit.style.display = "flex";
+                  }
                   // Clear any previous content.
                   timeControls.innerHTML = "";
     
@@ -8663,6 +12650,7 @@
                       (d) => d.time.getTime() === selectedDate.getTime(),
                     );
                     initNodesAndLinks(filteredData);
+                    applySimulationFrame(selectedDate);
     
                     updateNetworkStats();
     
@@ -8676,6 +12664,8 @@
                     updateNodeStatsChart(window.currentSelectedNodeStat);
                     updateTradeDistribution();
                   }
+
+                  updateNetworkForDateHandler = updateNetworkForDate;
     
                   // Slider event.
                   slider.addEventListener("input", function () {
@@ -8690,6 +12680,7 @@
                     if (
                       event.key === "ArrowLeft" &&
                       !window.isSwitchingCSV &&
+                      !window.isSwitchingAppMode &&
                       !window.isDoingTemporalUpdate
                     ) {
                       if (currentValue > +slider.min) {
@@ -8701,6 +12692,7 @@
                     } else if (
                       event.key === "ArrowRight" &&
                       !window.isSwitchingCSV &&
+                      !window.isSwitchingAppMode &&
                       !window.isDoingTemporalUpdate
                     ) {
                       if (currentValue < +slider.max) {
@@ -8745,6 +12737,7 @@
                     if (
                       event.key === " " &&
                       !window.isSwitchingCSV &&
+                      !window.isSwitchingAppMode &&
                       !window.isDoingTemporalUpdate
                     ) {
                       // Space key pressed
@@ -8772,7 +12765,12 @@
     
                   // Shortcut for the from-start button
                   fromStartKeyListener = function (event) {
-                    if (event.key === "f") {
+                    if (
+                      event.key === "f" &&
+                      !window.isSwitchingAppMode &&
+                      !window.isSwitchingCSV &&
+                      !window.isDoingTemporalUpdate
+                    ) {
                       const fromStartBtn = document.getElementById("fromStartBtn");
                       if (fromStartBtn && !fromStartBtn.disabled) {
                         fromStartBtn.click();
@@ -8784,6 +12782,11 @@
     
                 if (!hasTime) {
                   timeControls.style.display = "none";
+                  const timeAuthorCredit =
+                    document.getElementById("timeAuthorCredit");
+                  if (timeAuthorCredit) {
+                    timeAuthorCredit.style.display = "none";
+                  }
                   console.error("Time information not found in the CSV file.");
                 }
     
@@ -8804,6 +12807,7 @@
                 updateNetworkStats();
                 initNetwork((isReplot = false));
                 updateTemporalNetwork();
+                updateNetwork((instant = true));
                 updateDonutCharts();
                 computeSCCs();
                 updateSCCs();
@@ -8818,6 +12822,10 @@
     
                 enableAllButtons(550);
                 enableAllCheckboxes(550);
+
+                if (isSimulationModeActive()) {
+                  recomputeSimulationTrajectory("Preparing simulation trajectory");
+                }
               })
               .catch(function (error) {
                 console.error("Error loading trade data:", error);
@@ -8949,7 +12957,7 @@
                   {
                     class: "intro-key--hot",
                     buttons:
-                      "s m h q r f {space} {arrowleft} {arrowup} {arrowdown} {arrowright}",
+                      "s e m h q r f {space} {arrowleft} {arrowup} {arrowdown} {arrowright}",
                   },
                 ],
                 onChange: () => {},
@@ -8957,7 +12965,7 @@
               });
             }
     
-            function connect(key, dotId) {
+            function connect(key, dotId, lineSockets = {}) {
               const dot = document.getElementById(dotId);
               if (!dot) return null;
     
@@ -8973,8 +12981,9 @@
     
               const line = new LeaderLine(btn, dot, {
                 path: "magnet",
-                startSocket: isArrow ? "bottom" : "auto", // <- key attaches from bottom
-                endSocket: dotId === "introDotArrows" ? "top" : "auto", // optional, helps the arrows callout
+                startSocket: lineSockets.start || (isArrow ? "bottom" : "auto"),
+                endSocket:
+                  lineSockets.end || (dotId === "introDotArrows" ? "top" : "auto"),
                 startPlug: "disc",
                 endPlug: "arrow3",
                 size: 3,
@@ -8993,6 +13002,7 @@
     
               const map = [
                 ["s", "introDotS"],
+                ["e", "introDotE", { start: "top", end: "right" }],
                 ["m", "introDotM"],
                 ["q", "introDotQ"],
                 ["h", "introDotH"],
@@ -9005,8 +13015,8 @@
                 ["{arrowdown}", "introDotArrows"],
               ];
     
-              map.forEach(([k, id]) => {
-                const ln = connect(k, id);
+              map.forEach(([k, id, sockets]) => {
+                const ln = connect(k, id, sockets);
                 if (ln) lines.push(ln);
               });
     
@@ -9194,7 +13204,10 @@
     
           // Disable all controls, then optionally re-enable them after a timeout.
           function disableAllButtons() {
-            d3.selectAll(".csv-switcher").classed("disabled", true);
+            d3.selectAll(".csv-switcher, .mode-switcher-frame").classed(
+              "disabled",
+              true,
+            );
             d3.select("#mapLayerButton").attr("disabled", true);
             d3.select("#toggleModeButton").attr("disabled", true);
             d3.select("#screenshotButton").attr("disabled", true);
@@ -9204,7 +13217,11 @@
           function enableAllButtons(timeoutVal) {
             if (!window.isPlaying) {
               d3.timeout(() => {
+                if (appModeSwitchLocked) return;
                 d3.selectAll(".csv-switcher").classed("disabled", false);
+                if (simulationState.status !== "running") {
+                  d3.selectAll(".mode-switcher-frame").classed("disabled", false);
+                }
                 d3.select("#mapLayerButton").attr("disabled", true);
                 d3.select("#toggleModeButton").attr("disabled", null);
                 d3.select("#screenshotButton").attr("disabled", null);
@@ -9223,6 +13240,7 @@
           function enableAllCheckboxes(timeoutVal) {
             if (!window.isPlaying) {
               d3.timeout(() => {
+                if (appModeSwitchLocked) return;
                 // Enable link checkboxes.
                 d3.selectAll(".trade-checkbox").property("disabled", false);
                 // Enable header checkboxes.
@@ -9277,7 +13295,17 @@
           }
     
           matchButtonWidths();
-    
+
+          function isShortcutTextTarget(target) {
+            const tag = target?.tagName ? target.tagName.toLowerCase() : "";
+            return (
+              tag === "input" ||
+              tag === "textarea" ||
+              tag === "select" ||
+              Boolean(target?.isContentEditable)
+            );
+          }
+	    
           // Keyboard shortcuts
     
           // Shortcut: press "s" to take a screenshot.
@@ -9286,12 +13314,14 @@
             if (
               event.key === "s" &&
               !window.isSwitchingCSV &&
+              !window.isSwitchingAppMode &&
               !window.isPlaying &&
               !window.isDoingTemporalUpdate
             ) {
               if (
                 !screenshotButton.disabled &&
                 !window.isSwitchingCSV &&
+                !window.isSwitchingAppMode &&
                 !window.isPlaying &&
                 !window.isDoingTemporalUpdate
               ) {
@@ -9307,12 +13337,14 @@
             if (
               event.key === "m" &&
               !window.isSwitchingCSV &&
+              !window.isSwitchingAppMode &&
               !window.isPlaying &&
               !window.isDoingTemporalUpdate
             ) {
               if (
                 !toggleModeButton.disabled &&
                 !window.isSwitchingCSV &&
+                !window.isSwitchingAppMode &&
                 !window.isPlaying &&
                 !window.isDoingTemporalUpdate
               ) {
@@ -9322,12 +13354,47 @@
             }
           });
 
+          document.addEventListener("keydown", function (event) {
+            if (
+              event.key.toLowerCase() !== "e" ||
+              event.repeat ||
+              event.metaKey ||
+              event.ctrlKey ||
+              event.altKey ||
+              isShortcutTextTarget(event.target) ||
+              window.isSwitchingCSV ||
+              window.isSwitchingAppMode ||
+              window.isPlaying ||
+              window.isDoingTemporalUpdate ||
+              window.isIntroOverlayOpen?.()
+            ) {
+              return;
+            }
+
+            const nextMode = isSimulationModeActive() ? "trade" : "simulation";
+            const nextValue =
+              nextMode === "simulation" ? "simulation" : "trade-ledger";
+            const nextInput = document.querySelector(
+              `.mode-switcher input[name="modeType"][value="${nextValue}"]`,
+            );
+
+            if (!nextInput || nextInput.disabled || !canSwitchAppDataMode()) {
+              syncModeSwitcherRadios();
+              return;
+            }
+
+            event.preventDefault();
+            nextInput.checked = true;
+            nextInput.dispatchEvent(new Event("change", { bubbles: true }));
+          });
+
           // Shortcut: press "q" to exit focus mode.
           // Clears node focus using clearSelection(false).
           document.addEventListener("keydown", function (event) {
             if (
               event.key === "q" &&
               !window.isSwitchingCSV &&
+              !window.isSwitchingAppMode &&
               !window.isDoingTemporalUpdate
             ) {
               event.preventDefault();
@@ -9343,6 +13410,7 @@
             if (
               event.key === "r" &&
               !window.isSwitchingCSV &&
+              !window.isSwitchingAppMode &&
               !window.isPlaying &&
               !window.isDoingTemporalUpdate
             ) {
@@ -9367,6 +13435,7 @@
             if (e.key === "ArrowDown" || e.key === "ArrowUp") {
               if (
                 !window.isSwitchingCSV &&
+                !window.isSwitchingAppMode &&
                 !window.isPlaying &&
                 !window.isDoingTemporalUpdate
               ) {
