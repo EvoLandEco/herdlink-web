@@ -30,6 +30,12 @@
   --shadow-soft: 0 2px 8px rgba(0, 0, 0, 0.08);
   --shadow-control: 0 10px 18px rgba(18, 42, 21, 0.18);
   --shadow-glow: 0 0 12px 2px rgba(144, 238, 144, 0.8);
+  --floating-light-bg: rgba(255, 255, 255, 0.96);
+  --floating-light-border: rgba(34, 104, 42, 0.22);
+  --floating-light-shadow: 0 16px 34px rgba(18, 44, 24, 0.14);
+  --floating-dark-bg: rgba(12, 22, 16, 0.93);
+  --floating-dark-border: rgba(255, 255, 255, 0.22);
+  --floating-dark-shadow: 0 22px 52px rgba(0, 0, 0, 0.32);
   --radius-sm: 6px;
   --radius-md: 10px;
   --radius-lg: 14px;
@@ -124,7 +130,7 @@ textarea:focus-visible {
   width: max-content;
   max-width: min(240px, 72vw);
   padding: 6px 9px;
-  color: #fff;
+  color: var(--color-text);
   font-size: 0.78rem;
   font-weight: 700;
   line-height: 1.2;
@@ -132,10 +138,12 @@ textarea:focus-visible {
   white-space: normal;
   letter-spacing: 0;
   pointer-events: none;
-  background: rgba(17, 24, 39, 0.96);
-  border: 1px solid rgba(255, 255, 255, 0.18);
+  background: var(--floating-light-bg);
+  border: 1px solid var(--floating-light-border);
   border-radius: var(--radius-sm);
-  box-shadow: 0 10px 22px rgba(0, 0, 0, 0.18);
+  box-shadow: var(--floating-light-shadow);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
   opacity: 0;
   visibility: hidden;
   transform: translateY(4px);
@@ -149,6 +157,13 @@ textarea:focus-visible {
   opacity: 1;
   visibility: visible;
   transform: translateY(0);
+}
+
+body.focus-mode-active .herdlink-tooltip {
+  color: var(--color-text-on-dark);
+  background: var(--floating-dark-bg);
+  border-color: var(--floating-dark-border);
+  box-shadow: var(--floating-dark-shadow);
 }
 
 ::selection {
@@ -971,7 +986,7 @@ textarea:focus-visible {
   justify-content: center;
   padding: var(--space-6);
   pointer-events: none;
-  background: rgba(12, 22, 16, 0.42);
+  background: rgba(232, 240, 228, 0.62);
   opacity: 0;
   visibility: hidden;
   backdrop-filter: blur(8px);
@@ -990,11 +1005,11 @@ textarea:focus-visible {
 .simulation-loading-panel {
   width: min(460px, 92%);
   padding: var(--space-5);
-  color: var(--color-text-on-dark);
-  border: 1px solid rgba(255, 255, 255, 0.28);
+  color: var(--color-text);
+  border: 1px solid var(--floating-light-border);
   border-radius: var(--radius-lg);
-  background: rgba(13, 31, 19, 0.88);
-  box-shadow: 0 22px 50px rgba(0, 0, 0, 0.22);
+  background: var(--floating-light-bg);
+  box-shadow: var(--floating-light-shadow);
 }
 
 .simulation-loading-header {
@@ -1023,7 +1038,7 @@ textarea:focus-visible {
 
 .simulation-loading-stage {
   margin-top: 3px;
-  color: rgba(255, 255, 255, 0.72);
+  color: var(--color-text-muted);
   font-size: 0.84rem;
   font-weight: 600;
 }
@@ -1039,7 +1054,7 @@ textarea:focus-visible {
   margin-top: var(--space-5);
   overflow: hidden;
   border-radius: var(--radius-pill);
-  background: rgba(255, 255, 255, 0.18);
+  background: rgba(34, 104, 42, 0.14);
 }
 
 .simulation-progress-bar {
@@ -1062,7 +1077,7 @@ textarea:focus-visible {
   min-width: 0;
   align-items: center;
   gap: 7px;
-  color: rgba(255, 255, 255, 0.58);
+  color: var(--color-text-subtle);
   font-size: 0.8rem;
   font-weight: 650;
 }
@@ -1072,11 +1087,11 @@ textarea:focus-visible {
   height: 9px;
   flex: 0 0 auto;
   border-radius: 50%;
-  background: rgba(255, 255, 255, 0.3);
+  background: rgba(34, 104, 42, 0.2);
 }
 
 .simulation-progress-item.is-running {
-  color: #fff;
+  color: var(--color-text);
 }
 
 .simulation-progress-item.is-running .simulation-progress-dot {
@@ -1085,11 +1100,46 @@ textarea:focus-visible {
 }
 
 .simulation-progress-item.is-done {
-  color: rgba(255, 255, 255, 0.84);
+  color: var(--color-text-muted);
 }
 
 .simulation-progress-item.is-done .simulation-progress-dot {
   background: #7bb661;
+}
+
+body.focus-mode-active .simulation-loading-overlay {
+  background: rgba(8, 14, 10, 0.55);
+}
+
+body.focus-mode-active .simulation-loading-panel {
+  color: var(--color-text-on-dark);
+  border-color: var(--floating-dark-border);
+  background: var(--floating-dark-bg);
+  box-shadow: var(--floating-dark-shadow);
+}
+
+body.focus-mode-active .simulation-loading-stage {
+  color: rgba(255, 255, 255, 0.72);
+}
+
+body.focus-mode-active .simulation-progress-track {
+  background: rgba(255, 255, 255, 0.18);
+}
+
+body.focus-mode-active .simulation-progress-item {
+  color: rgba(255, 255, 255, 0.58);
+}
+
+body.focus-mode-active .simulation-progress-dot {
+  background: rgba(255, 255, 255, 0.3);
+}
+
+body.focus-mode-active .simulation-progress-item.is-running {
+  color: #fff;
+}
+
+body.focus-mode-active .simulation-progress-item.is-done {
+  color: rgba(255, 255, 255, 0.84);
 }
 
 /* Right column (Col 3) */
@@ -2679,7 +2729,9 @@ circle.vertex.selected {
   align-items: center;
   justify-content: center;
   padding: var(--space-6);
-  background: rgba(10, 18, 11, 0.66);
+  background: rgba(245, 250, 243, 0.72);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
   animation: overlayFadeIn var(--transition-base) forwards;
 }
 
@@ -2846,6 +2898,80 @@ circle.vertex.selected {
   font-size: 0.76rem;
   font-weight: 750;
   border-top: 1px solid rgba(23, 34, 24, 0.08);
+}
+
+body.focus-mode-active .hotspot-info-overlay {
+  background: rgba(8, 14, 10, 0.72);
+}
+
+body.focus-mode-active .hotspot-info-card {
+  color: var(--color-text-on-dark);
+  border-color: var(--floating-dark-border);
+  background: linear-gradient(
+    180deg,
+    rgba(15, 27, 18, 0.96),
+    rgba(8, 17, 12, 0.94)
+  );
+  box-shadow: var(--floating-dark-shadow);
+}
+
+body.focus-mode-active .hotspot-info-close {
+  color: rgba(255, 255, 255, 0.74);
+  border-color: rgba(255, 255, 255, 0.16);
+  background: rgba(255, 255, 255, 0.08);
+}
+
+body.focus-mode-active .hotspot-info-close:hover,
+body.focus-mode-active .hotspot-info-close:focus-visible {
+  color: var(--color-text);
+  background: #f2c94c;
+}
+
+body.focus-mode-active .hotspot-info-badge {
+  color: #bff0b9;
+  border-color: rgba(191, 240, 185, 0.26);
+  background: rgba(76, 175, 80, 0.16);
+}
+
+body.focus-mode-active .hotspot-info-card h2 {
+  color: #fff;
+}
+
+body.focus-mode-active .hotspot-info-subtitle {
+  color: rgba(255, 255, 255, 0.7);
+}
+
+body.focus-mode-active .hotspot-metric-card {
+  border-color: rgba(255, 255, 255, 0.14);
+  background: linear-gradient(
+    180deg,
+    rgba(255, 255, 255, 0.08),
+    rgba(255, 255, 255, 0.04)
+  );
+  box-shadow: none;
+}
+
+body.focus-mode-active .hotspot-metric-code {
+  color: #bff0b9;
+  border-color: rgba(191, 240, 185, 0.28);
+  background: rgba(76, 175, 80, 0.15);
+}
+
+body.focus-mode-active .hotspot-metric-role {
+  color: #bff0b9;
+}
+
+body.focus-mode-active .hotspot-metric-card h3 {
+  color: #fff;
+}
+
+body.focus-mode-active .hotspot-metric-card p {
+  color: rgba(255, 255, 255, 0.68);
+}
+
+body.focus-mode-active .hotspot-metric-method {
+  color: rgba(255, 255, 255, 0.54);
+  border-top-color: rgba(255, 255, 255, 0.12);
 }
 
 @keyframes overlayFadeIn {

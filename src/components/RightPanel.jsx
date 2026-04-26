@@ -25,7 +25,7 @@ export function RightPanel() {
         <label htmlFor="statSelect">
           <i className="fa-regular fa-globe"></i> Global Metric:
         </label>
-        <select id="statSelect" defaultValue="totalNodes">
+        <select id="statSelect" defaultValue="totalTradeVolume">
           {globalMetrics.map((metric) => (
             <option key={metric.value} value={metric.value}>
               {metric.label}
@@ -38,7 +38,7 @@ export function RightPanel() {
         <label htmlFor="nodeStatSelect">
           <i className="fa-regular fa-share-nodes"></i> Node Metric:
         </label>
-        <select id="nodeStatSelect" defaultValue="pageRank">
+        <select id="nodeStatSelect" defaultValue="eigenvector">
           {nodeMetrics.map((metric) => (
             <option key={metric.value} value={metric.value}>
               {metric.label}

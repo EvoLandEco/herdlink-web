@@ -6800,11 +6800,10 @@
                   </button>
                   <div class="hotspot-info-head">
                     <div>
-                      <div class="hotspot-info-badge">
+                      <div id="hotspotInfoTitle" class="hotspot-info-badge">
                         <i class="fa-solid fa-circle-info"></i>
-                        Hotspot guide
+                        Hotspot Metrics
                       </div>
-                      <h2 id="hotspotInfoTitle">Hotspot Metrics</h2>
                       <p class="hotspot-info-subtitle">
                         Dashed hotspot rings mark regions with high centrality or flow pressure in the trade network.
                       </p>
@@ -12444,9 +12443,17 @@
               .getElementsByClassName("csv-switcher")[0]
               .querySelector('input[value="weekly"]').checked = true;
             // Update the global stats chart with the initial stat.
-            window.currentSelectedStat = "totalNodes";
+            window.currentSelectedStat = "totalTradeVolume";
             // Update the node stats chart with the initial node stat.
-            window.currentSelectedNodeStat = "pageRank";
+            window.currentSelectedNodeStat = "eigenvector";
+            const statSelect = document.getElementById("statSelect");
+            const nodeStatSelect = document.getElementById("nodeStatSelect");
+            if (statSelect) {
+              statSelect.value = window.currentSelectedStat;
+            }
+            if (nodeStatSelect) {
+              nodeStatSelect.value = window.currentSelectedNodeStat;
+            }
             // Update the trade node insights with the initial insight.
             window.currentSelectedTradeNodeInsight = "partnerBalance";
             // Update the initial time span.
@@ -12955,7 +12962,7 @@
 
               window.addEventListener("resize", () => {
                 updateNodeStatsChart(
-                  window.currentSelectedNodeStat || "totalTradeVolume",
+                  window.currentSelectedNodeStat || "eigenvector",
                 );
               });
 
