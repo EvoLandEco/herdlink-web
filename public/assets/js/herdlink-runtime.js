@@ -138,8 +138,11 @@
             .clamp(true);
           let appDataMode = "trade";
           const appModeSwitchBounceMs = 550;
+          const modePanelRenderingReleaseMs = 340;
           let appModeSwitchTimer = null;
           let appModeSwitchLocked = false;
+          let modePanelRenderingFrame = null;
+          let modePanelRenderingTimer = null;
           let simulationRunId = 0;
           let updateNetworkForDateHandler = null;
           let simulationRecomputeTimer = null;
@@ -471,9 +474,9 @@
                   <i class="fa-solid fa-flask"></i> Simulation Controls
                 </span>
                 <button
-                  class="simulation-controls-info has-tip"
+                  class="panel-info-button simulation-controls-info has-tip"
                   type="button"
-                  data-tip="Model picks disease states. Seed keeps runs repeatable. Seed regions and Initial % set starting infections. Contact beta sets local spread, Movement beta sets trade spread. Latency and Recovery set transition speed."
+                  data-tip-key="simulationControls"
                   data-tip-placement="left"
                   aria-label="Simulation settings guide"
                 >
@@ -649,36 +652,111 @@
             const labels = active
               ? {
                   distribution:
-                    '<i class="fa-solid fa-map-location-dot"></i> Spatial Spread:',
+                    {
+                      html: '<i class="fa-solid fa-map-location-dot"></i> Spatial Spread:',
+                      tipKey: "spatialSpread",
+                      label: "Spatial spread guide",
+                      placement: "right",
+                    },
                   clusters:
-                    '<i class="fa-solid fa-diagram-project"></i> Partition Exposure:',
+                    {
+                      html: '<i class="fa-solid fa-diagram-project"></i> Partition Exposure:',
+                      tipKey: "partitionExposure",
+                      label: "Partition exposure guide",
+                      placement: "right",
+                    },
                   nodeDistribution:
-                    '<i class="fa-solid fa-chart-line"></i> Focus Trajectory:',
+                    {
+                      html: '<i class="fa-solid fa-chart-line"></i> Focus Trajectory:',
+                      tipKey: "focusTrajectory",
+                      label: "Focus trajectory guide",
+                      placement: "right",
+                    },
                   nodeInsight:
-                    '<i class="fa-solid fa-stethoscope"></i> Focus Simulation:',
+                    {
+                      html: '<i class="fa-solid fa-stethoscope"></i> Focus Simulation:',
+                      tipKey: "focusSimulation",
+                      label: "Focus simulation guide",
+                      placement: "right",
+                    },
+                  arbo: {
+                    html: '<i class="fa-solid fa-sitemap"></i> Main Exposure Backbone',
+                    tipKey: "exposureBackbone",
+                    label: "Main exposure backbone guide",
+                    placement: "top",
+                  },
                 }
               : {
                   distribution:
-                    '<i class="fa-regular fa-chart-scatter-bubble"></i> Gravity Model:',
+                    {
+                      html: '<i class="fa-regular fa-chart-scatter-bubble"></i> Gravity Model:',
+                      tipKey: "gravityModel",
+                      label: "Gravity model guide",
+                      placement: "right",
+                    },
                   clusters:
-                    '<i class="fa-regular fa-circle-nodes"></i> Trade Clusters:',
+                    {
+                      html: '<i class="fa-regular fa-circle-nodes"></i> Trade Clusters:',
+                      tipKey: "tradeClusters",
+                      label: "Trade clusters guide",
+                      placement: "right",
+                    },
                   nodeDistribution:
-                    '<i class="fa-regular fa-chart-scatter-bubble"></i> Gravity Model (Node):',
+                    {
+                      html: '<i class="fa-regular fa-chart-scatter-bubble"></i> Gravity Model (Node):',
+                      tipKey: "nodeGravityModel",
+                      label: "Node gravity model guide",
+                      placement: "right",
+                    },
                   nodeInsight:
-                    '<i class="fa-regular fa-circle-nodes"></i> Focus Insights:',
+                    {
+                      html: '<i class="fa-regular fa-circle-nodes"></i> Focus Insights:',
+                      tipKey: "focusInsights",
+                      label: "Focus insights guide",
+                      placement: "right",
+                    },
+                  arbo: {
+                    html: '<i class="fa-solid fa-sitemap"></i> Major Export Structure',
+                    tipKey: "exportBackbone",
+                    label: "Major export structure guide",
+                    placement: "top",
+                  },
                 };
 
-            d3.select(".trade-distribution-label").html(labels.distribution);
-            d3.select(".trade-clusters-label").html(labels.clusters);
-            d3.select(".trade-node-distribution-label").html(
+            function setPanelLabel(selector, config) {
+              const label = d3.select(selector);
+              const text = label.select(".panel-label-text");
+              if (text.empty()) {
+                label.html(`
+                  <span class="panel-label-text">${config.html}</span>
+                  <button
+                    class="panel-info-button has-tip"
+                    type="button"
+                    data-tip-key="${config.tipKey}"
+                    data-tip-placement="${config.placement || "right"}"
+                    aria-label="${config.label}"
+                  >
+                    <i class="fa-solid fa-circle-info" aria-hidden="true"></i>
+                  </button>
+                `);
+              } else {
+                text.html(config.html);
+                label
+                  .select(".panel-info-button")
+                  .attr("data-tip-key", config.tipKey)
+                  .attr("data-tip-placement", config.placement || "right")
+                  .attr("aria-label", config.label);
+              }
+            }
+
+            setPanelLabel(".trade-distribution-label", labels.distribution);
+            setPanelLabel(".trade-clusters-label", labels.clusters);
+            setPanelLabel(
+              ".trade-node-distribution-label",
               labels.nodeDistribution,
             );
-            d3.select(".trade-nodeinsight-label").html(labels.nodeInsight);
-            d3.select(".inArboTitle").html(
-              active
-                ? '<i class="fa-solid fa-sitemap"></i> Main Exposure Backbone'
-                : '<i class="fa-solid fa-sitemap"></i> Major Export Structure',
-            );
+            setPanelLabel(".trade-nodeinsight-label", labels.nodeInsight);
+            setPanelLabel(".inArboTitle", labels.arbo);
           }
 
           function collectSimulationRegionIds(data) {
@@ -1112,10 +1190,21 @@
               .selectAll(".simulation-panel-heading")
               .data([null])
               .join("div")
-              .attr("class", "simulation-panel-heading")
-              .html(
-                '<i class="fa-solid fa-chart-area"></i> Compartment Trajectory',
-              );
+              .attr("class", "simulation-panel-heading panel-title-label")
+              .html(`
+                <span class="panel-label-text">
+                  <i class="fa-solid fa-chart-area"></i> Compartment Trajectory
+                </span>
+                <button
+                  class="panel-info-button has-tip"
+                  type="button"
+                  data-tip-key="compartmentTrajectory"
+                  data-tip-placement="left"
+                  aria-label="Compartment trajectory guide"
+                >
+                  <i class="fa-solid fa-circle-info" aria-hidden="true"></i>
+                </button>
+              `);
             let svg = container.select("svg.simulation-global-chart");
             if (svg.empty()) {
               container.selectAll("svg").remove();
@@ -1269,10 +1358,21 @@
               .selectAll(".simulation-panel-heading")
               .data([null])
               .join("div")
-              .attr("class", "simulation-panel-heading")
-              .html(
-                '<i class="fa-solid fa-temperature-high"></i> Highest Regional Prevalence',
-              );
+              .attr("class", "simulation-panel-heading panel-title-label")
+              .html(`
+                <span class="panel-label-text">
+                  <i class="fa-solid fa-temperature-high"></i> Highest Regional Prevalence
+                </span>
+                <button
+                  class="panel-info-button has-tip"
+                  type="button"
+                  data-tip-key="highestRegionalPrevalence"
+                  data-tip-placement="left"
+                  aria-label="Highest regional prevalence guide"
+                >
+                  <i class="fa-solid fa-circle-info" aria-hidden="true"></i>
+                </button>
+              `);
             let svg = container.select("svg.simulation-node-chart");
             if (svg.empty()) {
               container.selectAll("svg").remove();
@@ -3298,6 +3398,32 @@
               });
           }
 
+          function setModePanelsRendering(rendering) {
+            if (modePanelRenderingFrame) {
+              cancelAnimationFrame(modePanelRenderingFrame);
+              modePanelRenderingFrame = null;
+            }
+            clearTimeout(modePanelRenderingTimer);
+            modePanelRenderingTimer = null;
+            document.body.classList.toggle("mode-panels-rendering", rendering);
+          }
+
+          function finishModePanelsRendering() {
+            if (!document.body.classList.contains("mode-panels-rendering")) {
+              return;
+            }
+            if (modePanelRenderingFrame) {
+              cancelAnimationFrame(modePanelRenderingFrame);
+            }
+            clearTimeout(modePanelRenderingTimer);
+            modePanelRenderingTimer = setTimeout(() => {
+              modePanelRenderingFrame = requestAnimationFrame(() => {
+                modePanelRenderingFrame = null;
+                setModePanelsRendering(false);
+              });
+            }, modePanelRenderingReleaseMs);
+          }
+
           function setModeSwitcherDisabled(disabled) {
             document
               .querySelectorAll('.mode-switcher input[name="modeType"]')
@@ -3370,8 +3496,8 @@
               resetFocusInsightRenderState(true);
             }
             if (!selectedNodeData) {
-              d3.select("#globalStatsControls").style("display", active ? "none" : "block");
-              d3.select("#nodeStatsControls").style("display", active ? "none" : "block");
+              d3.select("#globalStatsControls").style("display", active ? "none" : "flex");
+              d3.select("#nodeStatsControls").style("display", active ? "none" : "flex");
             }
           }
 
@@ -3383,7 +3509,13 @@
           }
 
           async function recomputeSimulationTrajectory(reason = "Simulation run") {
-            if (!loadedCSVData || !uniqueDates.length) return;
+            const stopRendering = () => {
+              finishModePanelsRendering();
+            };
+            if (!loadedCSVData || !uniqueDates.length) {
+              stopRendering();
+              return;
+            }
             const runId = ++simulationRunId;
             simulationState.status = "running";
             setSimulationInputsDisabled(true);
@@ -3397,13 +3529,13 @@
               return runId === simulationRunId;
             };
 
-            if (!(await stage(6, "ledger", reason))) return;
+            if (!(await stage(6, "ledger", reason))) return stopRendering();
             const settings = readSimulationSettings();
-            if (!(await stage(18, "holdings", "Estimating regional holdings"))) return;
-            if (!(await stage(34, "contacts", "Building movement contacts"))) return;
-            if (!(await stage(48, "states", "Integrating compartment states"))) return;
+            if (!(await stage(18, "holdings", "Estimating regional holdings"))) return stopRendering();
+            if (!(await stage(34, "contacts", "Building movement contacts"))) return stopRendering();
+            if (!(await stage(48, "states", "Integrating compartment states"))) return stopRendering();
             const trajectory = buildSimulationTrajectory(settings);
-            if (!(await stage(78, "frames", "Building replay ledger"))) return;
+            if (!(await stage(78, "frames", "Building replay ledger"))) return stopRendering();
 
             simulationState = {
               status: "ready",
@@ -3414,9 +3546,10 @@
               metricMax: trajectory?.metricMax || null,
             };
 
-            if (!(await stage(94, "render", "Rendering simulation view"))) return;
+            if (!(await stage(94, "render", "Rendering simulation view"))) return stopRendering();
             refreshCurrentNetworkFrame();
             renderSimulationPanels();
+            finishModePanelsRendering();
             setSimulationOverlay(100, "Simulation ready", "render");
             await delaySimulationStage();
             hideSimulationOverlay();
@@ -3444,6 +3577,7 @@
               return false;
             }
             const wasSimulationRunning = simulationState.status === "running";
+            setModePanelsRendering(true);
             appDataMode = nextMode;
             syncModeSwitcherRadios();
             configureSimulationModeUi(isSimulationModeActive());
@@ -3468,6 +3602,7 @@
             refreshCurrentNetworkFrame();
             updateNetwork(true);
             applySimulationMapPrevalence();
+            finishModePanelsRendering();
             setSimulationInputsDisabled(false);
             if (wasSimulationRunning) {
               enableAllButtons(0);
@@ -4318,6 +4453,7 @@
                 .duration(300)
                 .attr("r", 2);
             }
+            svg.select("g.current-date-annotation").raise();
           }
     
           function updateNodeStatsChart(selectedMetric) {
@@ -6800,11 +6936,10 @@
                   </button>
                   <div class="hotspot-info-head">
                     <div>
-                      <div class="hotspot-info-badge">
+                      <div id="hotspotInfoTitle" class="hotspot-info-badge">
                         <i class="fa-solid fa-circle-info"></i>
-                        Hotspot guide
+                        Hotspot Metrics
                       </div>
-                      <h2 id="hotspotInfoTitle">Hotspot Metrics</h2>
                       <p class="hotspot-info-subtitle">
                         Dashed hotspot rings mark regions with high centrality or flow pressure in the trade network.
                       </p>
@@ -7215,7 +7350,7 @@
             d3.select("#globalStats").style("visibility", "visible");
             d3.select("#globalStatsControls").style(
               "display",
-              isSimulationModeActive() ? "none" : "block",
+              isSimulationModeActive() ? "none" : "flex",
             );
             d3.select("#simulationControls").style(
               "display",
@@ -7226,7 +7361,7 @@
             d3.select("#nodeStats").style("visibility", "visible");
             d3.select("#nodeStatsControls").style(
               "display",
-              isSimulationModeActive() ? "none" : "block",
+              isSimulationModeActive() ? "none" : "flex",
             );
     
             // Show the network level gravity model and metadata groups.
@@ -12444,9 +12579,17 @@
               .getElementsByClassName("csv-switcher")[0]
               .querySelector('input[value="weekly"]').checked = true;
             // Update the global stats chart with the initial stat.
-            window.currentSelectedStat = "totalNodes";
+            window.currentSelectedStat = "totalTradeVolume";
             // Update the node stats chart with the initial node stat.
-            window.currentSelectedNodeStat = "pageRank";
+            window.currentSelectedNodeStat = "eigenvector";
+            const statSelect = document.getElementById("statSelect");
+            const nodeStatSelect = document.getElementById("nodeStatSelect");
+            if (statSelect) {
+              statSelect.value = window.currentSelectedStat;
+            }
+            if (nodeStatSelect) {
+              nodeStatSelect.value = window.currentSelectedNodeStat;
+            }
             // Update the trade node insights with the initial insight.
             window.currentSelectedTradeNodeInsight = "partnerBalance";
             // Update the initial time span.
@@ -12955,7 +13098,7 @@
 
               window.addEventListener("resize", () => {
                 updateNodeStatsChart(
-                  window.currentSelectedNodeStat || "totalTradeVolume",
+                  window.currentSelectedNodeStat || "eigenvector",
                 );
               });
 
