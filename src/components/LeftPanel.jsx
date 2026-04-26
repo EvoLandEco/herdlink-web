@@ -85,7 +85,7 @@ export function LeftPanel() {
             <div className="header-row header-row-1">
               <div className="logo-container">
                 <h4 className="app-title">HerdLink</h4>
-                <div className="app-version">v0.6.0-alpha</div>
+                <div className="app-version">v0.6.4-alpha</div>
                 <div className="app-credit">
                   <a
                     className="app-credit-link"
@@ -191,26 +191,16 @@ export function LeftPanel() {
 
         <div className="col1-bottom">
           <div id="tradeDistribution">
-            <div className="trade-distribution-label">
-              <i className="fa-regular fa-chart-scatter-bubble"></i> Gravity
-              Model:
-            </div>
+            <div className="trade-distribution-label panel-title-label"></div>
           </div>
           <div id="tradeClusters">
-            <div className="trade-clusters-label">
-              <i className="fa-regular fa-circle-nodes"></i> Trade Clusters:
-            </div>
+            <div className="trade-clusters-label panel-title-label"></div>
           </div>
           <div id="tradeNodeDistribution">
-            <div className="trade-node-distribution-label">
-              <i className="fa-regular fa-chart-scatter-bubble"></i> Gravity
-              Model (Node):
-            </div>
+            <div className="trade-node-distribution-label panel-title-label"></div>
           </div>
           <div id="tradeNodeInsight">
-            <div className="trade-nodeinsight-label">
-              <i className="fa-regular fa-circle-nodes"></i> Focus Insights:
-            </div>
+            <div className="trade-nodeinsight-label panel-title-label"></div>
 
             <div
               id="tradeNodeInsightControls"

@@ -159,11 +159,229 @@ textarea:focus-visible {
   transform: translateY(0);
 }
 
+.herdlink-tooltip.is-rich {
+  width: min(390px, calc(100vw - 24px));
+  max-width: min(390px, calc(100vw - 24px));
+  padding: 0;
+  text-align: left;
+}
+
+.tip-card {
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+}
+
+.tip-heading {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--color-accent-strong);
+  font-size: 0.9rem;
+  font-weight: 850;
+}
+
+.tip-heading i {
+  width: 18px;
+  text-align: center;
+}
+
+.tip-intro {
+  margin: 0;
+  color: var(--color-text-muted);
+  font-size: 0.78rem;
+  font-weight: 600;
+  line-height: 1.34;
+}
+
+.tip-section-list,
+.tip-options {
+  display: grid;
+  gap: 7px;
+}
+
+.tip-section {
+  display: grid;
+  grid-template-columns: 24px minmax(0, 1fr);
+  gap: 8px;
+  align-items: start;
+  padding: 7px;
+  border: 1px solid rgba(34, 104, 42, 0.13);
+  border-radius: var(--radius-sm);
+  background: rgba(76, 175, 80, 0.06);
+}
+
+.tip-section-icon {
+  display: inline-flex;
+  width: 24px;
+  height: 24px;
+  align-items: center;
+  justify-content: center;
+  color: var(--color-accent-strong);
+  border-radius: 50%;
+  background: rgba(76, 175, 80, 0.12);
+}
+
+.tip-section-icon i {
+  font-size: 0.72rem;
+}
+
+.tip-section-copy,
+.tip-option {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+}
+
+.tip-section-copy strong,
+.tip-option strong {
+  color: var(--color-text);
+  font-size: 0.75rem;
+  font-weight: 850;
+  line-height: 1.2;
+}
+
+.tip-section-copy span,
+.tip-option span {
+  color: var(--color-text-muted);
+  font-size: 0.72rem;
+  font-weight: 600;
+  line-height: 1.28;
+}
+
+.tip-options {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.tip-option {
+  padding: 7px;
+  border: 1px solid rgba(34, 104, 42, 0.12);
+  border-radius: var(--radius-sm);
+  background: rgba(255, 255, 255, 0.62);
+}
+
 body.focus-mode-active .herdlink-tooltip {
   color: var(--color-text-on-dark);
   background: var(--floating-dark-bg);
   border-color: var(--floating-dark-border);
   box-shadow: var(--floating-dark-shadow);
+}
+
+body.focus-mode-active .tip-heading,
+body.focus-mode-active .tip-section-icon {
+  color: #bff0b9;
+}
+
+body.focus-mode-active .tip-intro,
+body.focus-mode-active .tip-section-copy span,
+body.focus-mode-active .tip-option span {
+  color: rgba(255, 255, 255, 0.66);
+}
+
+body.focus-mode-active .tip-section,
+body.focus-mode-active .tip-option {
+  border-color: rgba(255, 255, 255, 0.12);
+  background: rgba(255, 255, 255, 0.06);
+}
+
+body.focus-mode-active .tip-section-icon {
+  background: rgba(76, 175, 80, 0.15);
+}
+
+body.focus-mode-active .tip-section-copy strong,
+body.focus-mode-active .tip-option strong {
+  color: #fff;
+}
+
+.panel-title-label {
+  display: flex;
+  width: auto;
+  max-width: none;
+  min-height: 18px;
+  align-items: center;
+  gap: 8px;
+  line-height: 18px;
+}
+
+.panel-label-text {
+  display: inline-flex;
+  min-width: 0;
+  align-items: center;
+  gap: 5px;
+}
+
+.panel-title-label .panel-info-button {
+  margin-left: auto;
+}
+
+#globalStatsControls .panel-info-button,
+#nodeStatsControls .panel-info-button {
+  margin-left: auto;
+}
+
+.panel-info-button {
+  display: inline-flex;
+  width: 18px;
+  height: 18px;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  color: var(--color-accent-strong);
+  border: 0;
+  border-radius: 50%;
+  background: rgba(76, 175, 80, 0.1);
+  cursor: help;
+  transition:
+    color var(--transition-fast),
+    background var(--transition-fast),
+    filter var(--transition-fast),
+    transform var(--transition-fast);
+}
+
+.panel-info-button:hover,
+.panel-info-button:focus-visible {
+  color: var(--color-accent-strong);
+  background: rgba(76, 175, 80, 0.18);
+  filter: brightness(1.12);
+  transform: translateY(-1px);
+}
+
+.panel-info-button i {
+  font-size: 0.78rem;
+  line-height: 1;
+}
+
+body.mode-panels-rendering #tradeDistribution > :not(.panel-title-label),
+body.mode-panels-rendering #tradeClusters > :not(.panel-title-label),
+body.mode-panels-rendering #globalStats > :not(#globalStatsControls):not(.simulation-panel-heading),
+body.mode-panels-rendering #nodeStats > :not(#nodeStatsControls):not(.simulation-panel-heading),
+body.mode-panels-rendering #tradeNodeDistribution > :not(.panel-title-label),
+body.mode-panels-rendering #tradeNodeInsight > :not(.trade-nodeinsight-label):not(#tradeNodeInsightControls),
+body.mode-panels-rendering #inArboContainer > :not(.inArboTitle) {
+  filter: blur(3px);
+  opacity: 0.48;
+  pointer-events: none;
+  transition:
+    filter var(--transition-fast),
+    opacity var(--transition-fast);
+}
+
+body.focus-mode-active .panel-info-button,
+.glowing-border .panel-info-button,
+.glowing-border-instant .panel-info-button {
+  color: rgba(255, 255, 255, 0.88);
+  background: rgba(255, 255, 255, 0.1);
+}
+
+body.focus-mode-active .panel-info-button:hover,
+body.focus-mode-active .panel-info-button:focus-visible,
+.glowing-border .panel-info-button:hover,
+.glowing-border .panel-info-button:focus-visible,
+.glowing-border-instant .panel-info-button:hover,
+.glowing-border-instant .panel-info-button:focus-visible {
+  color: #fff;
+  background: rgba(255, 255, 255, 0.18);
 }
 
 ::selection {
@@ -1214,25 +1432,13 @@ body.focus-mode-active .simulation-progress-item.is-done {
 }
 
 .simulation-controls-info {
-  display: inline-flex;
-  width: 18px;
-  height: 18px;
-  flex: 0 0 auto;
-  align-items: center;
-  justify-content: center;
   color: var(--color-accent-strong);
-  border: 0;
-  background: none;
-  cursor: help;
-  transition:
-    color var(--transition-fast),
-    filter var(--transition-fast),
-    transform var(--transition-fast);
 }
 
 .simulation-controls-info:hover,
 .simulation-controls-info:focus-visible {
   color: var(--color-accent-strong);
+  background: rgba(76, 175, 80, 0.18);
   filter: brightness(1.18);
   transform: translateY(-1px);
 }
@@ -1613,12 +1819,19 @@ body.focus-mode-active .simulation-progress-item.is-done {
   position: absolute;
   top: var(--space-3);
   left: var(--space-3);
+  right: var(--space-3);
   z-index: 11;
-  padding: var(--space-3);
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: 0;
 }
 
 #globalStatsControls label {
-  margin-right: 5px;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  margin-right: 0;
   font-size: 14px;
   font-weight: 700;
 }
@@ -2116,10 +2329,8 @@ body.simulation-mode-active
   position: absolute;
   top: var(--space-3);
   left: var(--space-3);
+  right: var(--space-3);
   z-index: 11;
-  display: inline-flex;
-  align-items: center;
-  gap: var(--space-2);
   color: var(--color-text);
   font-size: 0.86rem;
   font-weight: 800;
@@ -2138,14 +2349,21 @@ body.simulation-mode-active
 
 #nodeStatsControls {
   position: absolute;
-  top: calc(33.3vh + 20px);
+  top: var(--space-3);
   left: var(--space-3);
+  right: var(--space-3);
   z-index: 11;
-  padding: var(--space-3);
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: 0;
 }
 
 #nodeStatsControls label {
-  margin-right: 5px;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  margin-right: 0;
   font-size: 14px;
   font-weight: 700;
 }
@@ -2479,8 +2697,11 @@ body.simulation-mode-active .hotspotInfoButton {
 .trade-distribution-label,
 .trade-node-distribution-label {
   position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 6;
   padding: var(--space-3);
-  margin-right: 5px;
   color: var(--color-text);
   font-size: 14px;
   font-weight: 700;
@@ -2495,11 +2716,17 @@ body.simulation-mode-active .hotspotInfoButton {
   position: absolute;
   top: 8px;
   left: var(--space-3);
+  right: var(--space-3);
   z-index: 6;
   color: var(--color-text);
   font-size: 14px;
   font-weight: 700;
-  pointer-events: none;
+}
+
+.inArboTitle.panel-title-label {
+  top: var(--space-3);
+  left: var(--space-3);
+  right: var(--space-3);
 }
 
 #tradeNodeInsightControls {
