@@ -63,6 +63,7 @@
           let selectedNodeData = null;
           let hotspots = null;
           let hotspotsMax = null;
+          let ledgerHotspotsMax = null;
           const numberPrintedHotspots = 3;
           let edgeExtent, edgeColor, nodeColor, nodeSize;
           const metricDisplayNames = {
@@ -110,6 +111,26 @@
             I: "Infectious",
             R: "Recovered",
           };
+
+          function setLedgerHotspotsMax(maxNodeStats) {
+            ledgerHotspotsMax = { ...maxNodeStats };
+            window.maxTemporalNodeStats = ledgerHotspotsMax;
+            hotspotsMax = ledgerHotspotsMax;
+          }
+
+          function restoreLedgerHotspotsMax() {
+            if (ledgerHotspotsMax) {
+              hotspotsMax = ledgerHotspotsMax;
+            }
+          }
+
+          function resetRadarRenderState() {
+            window.prevRadarPoints = {};
+            window.prevRadarVertices = {};
+            d3.selectAll(
+              "svg.custom-radar path, svg.custom-radar line, svg.custom-radar circle.vertex",
+            ).interrupt();
+          }
           const simulationPrevalenceScale = d3
             .scaleSequential(
               d3.interpolateRgbBasis([
@@ -3579,6 +3600,7 @@
             const wasSimulationRunning = simulationState.status === "running";
             setModePanelsRendering(true);
             appDataMode = nextMode;
+            resetRadarRenderState();
             syncModeSwitcherRadios();
             configureSimulationModeUi(isSimulationModeActive());
 
@@ -3597,6 +3619,7 @@
               currentDateKey: null,
               metricMax: null,
             };
+            restoreLedgerHotspotsMax();
             hideSimulationOverlay();
             clearSimulationRenderState();
             refreshCurrentNetworkFrame();
@@ -3832,6 +3855,7 @@
               renderSimulationStatsContainer();
               return;
             }
+            restoreLedgerHotspotsMax();
 
             // Initialize aggregate stats.
             let totalNodes,
@@ -5100,7 +5124,7 @@
     
             // Store the computed maximums in global variables.
             window.maxTemporalStats = maxStats;
-            hotspotsMax = maxNodeStats;
+            setLedgerHotspotsMax(maxNodeStats);
           }
     
           function computeSimpleStats(activeNodes, enabledLinks) {
@@ -6204,7 +6228,8 @@
             drawRadarChart(noteContent, offsets, d);
     
             // Update radial axis labels.
-            const radarElem = d3.select("svg.custom-radar").node();
+            const radarElem = noteContent.select("svg.custom-radar").node();
+            if (!radarElem) return;
             const bbox = radarElem.getBoundingClientRect();
             const centerX = bbox.x + bbox.width / 2;
             const centerY = bbox.y + bbox.height / 2;
@@ -6360,10 +6385,17 @@
     
             const values = getRadarValuesForNode(d);
             if (!values) return;
+            const numAxes = values.length;
+            const radarCacheKey = [
+              isSimulationModeActive() ? "simulation" : "ledger",
+              d.id,
+              radarChartWidth,
+              radarChartHeight,
+              numAxes,
+            ].join(":");
     
             // Radar chart geometry
             const radarRadius = Math.min(drawWidth, drawHeight) / 2;
-            const numAxes = 5;
             const baseAngle = -Math.PI / 2; // starting at top.
             const centerX = drawWidth / 2;
             const centerY = drawHeight / 2;
@@ -6379,20 +6411,26 @@
     
             // Global storage: retrieve previous points for this node.
             let previousPoints =
-              window.prevRadarPoints && window.prevRadarPoints[d.id]
-                ? window.prevRadarPoints[d.id]
+              window.prevRadarPoints && window.prevRadarPoints[radarCacheKey]
+                ? window.prevRadarPoints[radarCacheKey]
                 : newPoints;
+            if (previousPoints.length !== newPoints.length) {
+              previousPoints = newPoints;
+            }
             // Save new points for future transitions.
             if (!window.prevRadarPoints) window.prevRadarPoints = {};
-            window.prevRadarPoints[d.id] = newPoints;
+            window.prevRadarPoints[radarCacheKey] = newPoints;
     
             // Global storage for previous vertices.
             let previousVertices =
-              window.prevRadarVertices && window.prevRadarVertices[d.id]
-                ? window.prevRadarVertices[d.id]
+              window.prevRadarVertices && window.prevRadarVertices[radarCacheKey]
+                ? window.prevRadarVertices[radarCacheKey]
                 : newPoints;
+            if (previousVertices.length !== newPoints.length) {
+              previousVertices = newPoints;
+            }
             if (!window.prevRadarVertices) window.prevRadarVertices = {};
-            window.prevRadarVertices[d.id] = newPoints;
+            window.prevRadarVertices[radarCacheKey] = newPoints;
     
             // Create a line generator.
             const radarLine = d3.line().curve(d3.curveLinearClosed);
@@ -6462,7 +6500,7 @@
             // Update vertices with interpolation using global previous positions
             const vertexSelection = drawingGroup
               .selectAll("circle.vertex")
-              .data(newPoints);
+              .data(newPoints, (point, index) => index);
     
             // Transition existing vertices.
             vertexSelection
