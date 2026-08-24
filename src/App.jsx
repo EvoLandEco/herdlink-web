@@ -1,8 +1,9 @@
-import { useEffect } from "react";
+import { useEffect, useRef, useState } from "react";
 import { IntroOverlay } from "./components/IntroOverlay";
 import { LeftPanel } from "./components/LeftPanel";
 import { NetworkPanel } from "./components/NetworkPanel";
 import { RightPanel } from "./components/RightPanel";
+import { ScreenSizeNotice } from "./components/ScreenSizeNotice";
 
 const basePath = import.meta.env.BASE_URL;
 
@@ -20,6 +21,8 @@ const runtimeScripts = [
 ];
 
 const scriptLoaders = new Map();
+const minimumViewportWidth = 720;
+const minimumScreenEdge = 600;
 const tooltipGap = 10;
 const tooltipMargin = 8;
 const oppositePlacements = {
@@ -351,6 +354,28 @@ const richTips = {
   },
 };
 
+function supportsHerdLinkLayout() {
+  return (
+    window.innerWidth >= minimumViewportWidth &&
+    Math.min(window.screen.width, window.screen.height) >= minimumScreenEdge
+  );
+}
+
+function useSupportedScreenSize() {
+  const [isSupported, setIsSupported] = useState(supportsHerdLinkLayout);
+
+  useEffect(() => {
+    const updateScreenSize = () => {
+      setIsSupported(supportsHerdLinkLayout());
+    };
+
+    window.addEventListener("resize", updateScreenSize);
+    return () => window.removeEventListener("resize", updateScreenSize);
+  }, []);
+
+  return isSupported;
+}
+
 function loadRuntimeScript({ src, crossOrigin }) {
   const existing = document.querySelector(`script[data-herdlink-src="${src}"]`);
 
@@ -536,7 +561,14 @@ function isTooltipOnScreen(position, tooltipRect) {
 }
 
 export default function App() {
+  const hasSupportedScreen = useSupportedScreenSize();
+  const runtimeReady = useRef(false);
+
   useEffect(() => {
+    if (!hasSupportedScreen) {
+      return undefined;
+    }
+
     const tooltip = document.getElementById("herdlinkTooltip");
     let activeTarget = null;
 
@@ -645,9 +677,13 @@ export default function App() {
       window.removeEventListener("resize", placeTooltip);
       window.removeEventListener("scroll", placeTooltip, true);
     };
-  }, []);
+  }, [hasSupportedScreen]);
 
   useEffect(() => {
+    if (!hasSupportedScreen || runtimeReady.current) {
+      return undefined;
+    }
+
     let frameId = null;
     let cancelled = false;
 
@@ -669,6 +705,11 @@ export default function App() {
         }
 
         frameId = window.requestAnimationFrame(() => {
+          if (cancelled) {
+            return;
+          }
+
+          runtimeReady.current = true;
           window.dispatchEvent(new Event("herdlink:mount"));
         });
       })
@@ -682,22 +723,31 @@ export default function App() {
         window.cancelAnimationFrame(frameId);
       }
     };
-  }, []);
+  }, [hasSupportedScreen]);
 
   return (
     <>
-      <IntroOverlay />
+      {!hasSupportedScreen && <ScreenSizeNotice />}
       <div
-        id="herdlinkTooltip"
-        className="herdlink-tooltip"
-        role="tooltip"
-        aria-hidden="true"
-      ></div>
-      <div id="radial-labels-container"></div>
-      <div id="mainContainer">
-        <LeftPanel />
-        <NetworkPanel />
-        <RightPanel />
+        className={`screen-access-content${
+          hasSupportedScreen ? "" : " is-screen-blocked"
+        }`}
+        aria-hidden={!hasSupportedScreen}
+        inert={hasSupportedScreen ? undefined : ""}
+      >
+        <IntroOverlay />
+        <div
+          id="herdlinkTooltip"
+          className="herdlink-tooltip"
+          role="tooltip"
+          aria-hidden="true"
+        ></div>
+        <div id="radial-labels-container"></div>
+        <div id="mainContainer">
+          <LeftPanel />
+          <NetworkPanel />
+          <RightPanel />
+        </div>
       </div>
     </>
   );
