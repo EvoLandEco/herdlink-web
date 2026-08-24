@@ -1,3 +1,9 @@
+import {
+  faDesktop,
+  faLaptop,
+  faTabletScreenButton,
+} from "@fortawesome/free-solid-svg-icons";
+import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import { useState } from "react";
 
 export function ScreenSizeNotice() {
@@ -35,11 +41,12 @@ export function ScreenSizeNotice() {
 
         <div
           className="screen-size-notice-device"
-          aria-label="Supported devices"
+          aria-label="Supported devices: tablet, laptop, and desktop"
         >
-          <span>Tablet</span>
-          <span>Laptop</span>
-          <span>Desktop</span>
+          <strong>Supported devices:</strong>
+          <FontAwesomeIcon icon={faTabletScreenButton} aria-hidden="true" />
+          <FontAwesomeIcon icon={faLaptop} aria-hidden="true" />
+          <FontAwesomeIcon icon={faDesktop} aria-hidden="true" />
         </div>
 
         <button

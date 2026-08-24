@@ -473,38 +473,47 @@ body.focus-mode-active .panel-info-button:focus-visible,
   border-top: 1px solid var(--color-border);
 }
 
-.screen-size-notice-device span {
-  display: inline-flex;
-  align-items: center;
-  gap: 7px;
+.screen-size-notice-device strong {
+  color: var(--color-text-muted);
+  font-weight: 700;
 }
 
-.screen-size-notice-device span::before {
-  width: 6px;
-  height: 6px;
-  background: currentColor;
-  content: "";
+.screen-size-notice-device svg {
+  width: 22px;
+  font-size: 1.15rem;
+  text-align: center;
 }
 
 .screen-size-copy-button {
   display: inline-flex;
   align-items: center;
   gap: 8px;
-  margin-top: 18px;
-  padding: 7px 0 5px;
-  color: var(--color-accent-strong);
+  margin-top: 20px;
+  padding: 10px 14px;
+  color: var(--color-text-on-dark);
   font-size: 0.9rem;
   font-weight: 800;
-  border: 0;
-  border-bottom: 2px solid currentColor;
+  border: 1px solid var(--color-accent-strong);
   border-radius: 0;
-  background: transparent;
+  background: var(--gradient-brand);
+  box-shadow: 3px 3px 0 rgba(27, 135, 43, 0.22);
   cursor: pointer;
-  transition: color var(--transition-fast);
+  transition:
+    background var(--transition-fast),
+    box-shadow var(--transition-fast),
+    transform var(--transition-fast);
 }
 
 .screen-size-copy-button:hover {
-  color: var(--color-focus);
+  color: var(--color-text-on-dark);
+  background: var(--color-focus);
+  box-shadow: 4px 4px 0 rgba(27, 135, 43, 0.25);
+  transform: translate(-1px, -1px);
+}
+
+.screen-size-copy-button:active {
+  box-shadow: none;
+  transform: translate(1px, 1px);
 }
 
 .screen-size-copy-button svg {
