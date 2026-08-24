@@ -1,4 +1,13 @@
+import { useState } from "react";
+
 export function ScreenSizeNotice() {
+  const [hasCopied, setHasCopied] = useState(false);
+
+  const copyPageUrl = async () => {
+    await navigator.clipboard.writeText(window.location.href);
+    setHasCopied(true);
+  };
+
   return (
     <main
       className="screen-size-notice"
@@ -7,7 +16,7 @@ export function ScreenSizeNotice() {
       <section className="screen-size-notice-card">
         <div className="screen-size-notice-icon" aria-hidden="true">
           <svg viewBox="0 0 96 96" focusable="false">
-            <rect x="13" y="20" width="70" height="49" rx="7" />
+            <rect x="13" y="20" width="70" height="49" />
             <path d="M36 79h24M48 69v10" />
             <circle cx="32" cy="45" r="4" />
             <circle cx="48" cy="36" r="4" />
@@ -16,7 +25,7 @@ export function ScreenSizeNotice() {
           </svg>
         </div>
 
-        <p className="screen-size-notice-brand">HerdLink</p>
+        <p className="screen-size-notice-brand">HERDLINK.NL</p>
         <h1 id="screenSizeNoticeTitle">Use a larger screen</h1>
         <p className="screen-size-notice-copy">
           HerdLink is designed for tablets, laptops, and desktop computers.
@@ -24,11 +33,28 @@ export function ScreenSizeNotice() {
           network.
         </p>
 
-        <div className="screen-size-notice-device" aria-hidden="true">
-          <i className="fa-solid fa-tablet-screen-button"></i>
-          <span>Tablet or larger</span>
-          <i className="fa-solid fa-laptop"></i>
+        <div
+          className="screen-size-notice-device"
+          aria-label="Supported devices"
+        >
+          <span>Tablet</span>
+          <span>Laptop</span>
+          <span>Desktop</span>
         </div>
+
+        <button
+          type="button"
+          className="screen-size-copy-button"
+          onClick={copyPageUrl}
+        >
+          <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+            <rect x="8" y="8" width="11" height="11" />
+            <path d="M16 8V5H5v11h3" />
+          </svg>
+          <span aria-live="polite">
+            {hasCopied ? "URL copied" : "Copy URL"}
+          </span>
+        </button>
       </section>
     </main>
   );

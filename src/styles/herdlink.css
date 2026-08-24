@@ -412,28 +412,24 @@ body.focus-mode-active .panel-info-button:focus-visible,
 
 .screen-size-notice-card {
   width: min(100%, 430px);
-  padding: 34px 30px 30px;
-  text-align: center;
-  border: 1px solid var(--color-border);
-  border-radius: 20px;
-  background: var(--color-surface-strong);
-  box-shadow: var(--shadow-card);
+  padding: 30px 4px 24px;
+  text-align: left;
+  border-top: 3px solid var(--color-accent-strong);
+  border-bottom: 1px solid var(--color-border);
 }
 
 .screen-size-notice-icon {
   display: grid;
-  width: 88px;
-  height: 88px;
-  margin: 0 auto 18px;
+  width: 72px;
+  height: 72px;
+  margin: 0 0 18px;
   color: var(--color-accent-strong);
   place-items: center;
-  border-radius: 50%;
-  background: var(--color-accent-soft);
 }
 
 .screen-size-notice-icon svg {
-  width: 66px;
-  height: 66px;
+  width: 72px;
+  height: 72px;
   fill: none;
   stroke: currentColor;
   stroke-linecap: round;
@@ -458,24 +454,67 @@ body.focus-mode-active .panel-info-button:focus-visible,
 }
 
 .screen-size-notice-copy {
-  margin: 14px auto 0;
+  margin: 14px 0 0;
   color: var(--color-text-muted);
   font-size: 1rem;
   line-height: 1.55;
 }
 
 .screen-size-notice-device {
-  display: inline-flex;
+  display: flex;
+  flex-wrap: wrap;
   align-items: center;
-  gap: 9px;
-  margin-top: 22px;
-  padding: 9px 14px;
+  gap: 10px 20px;
+  margin-top: 24px;
+  padding-top: 12px;
   color: var(--color-accent-strong);
   font-size: 0.86rem;
   font-weight: 750;
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-pill);
-  background: var(--color-accent-soft);
+  border-top: 1px solid var(--color-border);
+}
+
+.screen-size-notice-device span {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.screen-size-notice-device span::before {
+  width: 6px;
+  height: 6px;
+  background: currentColor;
+  content: "";
+}
+
+.screen-size-copy-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 18px;
+  padding: 7px 0 5px;
+  color: var(--color-accent-strong);
+  font-size: 0.9rem;
+  font-weight: 800;
+  border: 0;
+  border-bottom: 2px solid currentColor;
+  border-radius: 0;
+  background: transparent;
+  cursor: pointer;
+  transition: color var(--transition-fast);
+}
+
+.screen-size-copy-button:hover {
+  color: var(--color-focus);
+}
+
+.screen-size-copy-button svg {
+  width: 18px;
+  height: 18px;
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: square;
+  stroke-linejoin: miter;
+  stroke-width: 1.8;
 }
 
 @media (max-height: 520px) {
@@ -484,7 +523,7 @@ body.focus-mode-active .panel-info-button:focus-visible,
   }
 
   .screen-size-notice-card {
-    padding: 18px 26px 16px;
+    padding: 16px 4px 14px;
   }
 
   .screen-size-notice-icon {
@@ -514,7 +553,11 @@ body.focus-mode-active .panel-info-button:focus-visible,
 
   .screen-size-notice-device {
     margin-top: 10px;
-    padding: 6px 12px;
+    padding-top: 8px;
+  }
+
+  .screen-size-copy-button {
+    margin-top: 8px;
   }
 }
 
