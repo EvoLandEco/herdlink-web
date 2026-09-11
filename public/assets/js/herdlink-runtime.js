@@ -90,13 +90,14 @@
             pageRank: "Sink (by PageRank)",
             eigenvector: "Amplifier (by Eigenvector)",
           };
-          const hotspotColors = {
-            inDegree: "#7ccbae",
-            outDegree: "#72d5df",
-            betweenness: "#e8a2cf",
-            pageRank: "#f1c77b",
-            eigenvector: "#bca6ed",
+          const hotspotStyles = {
+            inDegree: { color: "#009e73", dash: "none", code: "ID", pattern: "Solid" },
+            outDegree: { color: "#56b4e9", dash: "10 5", code: "OD", pattern: "Long dash" },
+            betweenness: { color: "#e69f00", dash: "0 5", code: "BT", pattern: "Dotted" },
+            pageRank: { color: "#f0e442", dash: "8 4 0 4", code: "PR", pattern: "Dash and dot" },
+            eigenvector: { color: "#cc79a7", dash: "3 5", code: "EC", pattern: "Short dash" },
           };
+          const hotspotRingSpacing = 4;
           let newSCCs;
           const nodeAnnoType = d3.annotationCallout;
           const linkAnnoType = d3.annotationCallout;
@@ -5818,16 +5819,20 @@
                 }
               });
               metricsForNode.sort();
-              let group = d3.select(this);
+              const group = d3.select(this).append("g").attr("class", "hotspot-rings");
               metricsForNode.forEach((metric, i) => {
                 group
                   .append("circle")
+                  .datum(metric)
                   .attr("class", "hotspotStroke")
-                  .attr("r", d.r + (i + 1) * 3) // each extra ring offset by 3px per metric
+                  .attr("data-metric", metric)
+                  .attr("r", d.r + (i + 1) * hotspotRingSpacing)
                   .attr("fill", "none")
-                  .attr("stroke", hotspotColors[metric])
-                  .attr("stroke-width", 2)
-                  .attr("stroke-dashoffset", 0);
+                  .attr("stroke", hotspotStyles[metric].color)
+                  .attr("stroke-width", 2.5)
+                  .attr("stroke-linecap", "round")
+                  .attr("stroke-dasharray", hotspotStyles[metric].dash)
+                  .attr("filter", "url(#hotspotOutline)");
               });
             });
     
@@ -5839,6 +5844,7 @@
               .append("text")
               .attr("class", "nodeLabel")
               .attr("text-anchor", "middle")
+              .attr("dy", hotspotLabelDy)
               .attr("font-size", "12px")
               .attr("fill", theme.text)
               .text((d) => d.id);
@@ -6788,6 +6794,15 @@
             return { dx, dy };
           }
     
+          function hotspotSymbol(metric) {
+            const { color, dash, code, pattern } = hotspotStyles[metric];
+            return `<svg class="hotspot-symbol" viewBox="0 0 32 32" aria-hidden="true">
+              <title>${code}: ${pattern} ring</title>
+              <circle cx="16" cy="16" r="13" fill="none" stroke="${color}" stroke-width="2.5" stroke-linecap="round" stroke-dasharray="${dash}" filter="url(#hotspotOutline)" />
+              <text x="16" y="16" text-anchor="middle" dominant-baseline="central">${code}</text>
+            </svg>`;
+          }
+
           function addHotspotLegend() {
             const legend = d3.select(".hotspotLegend");
             // If the container already has legend items, do nothing.
@@ -6796,11 +6811,11 @@
             }
     
             const legendData = [
-              { name: "Vulnerable", color: hotspotColors.inDegree },
-              { name: "Seeding", color: hotspotColors.outDegree },
-              { name: "Bottleneck", color: hotspotColors.betweenness },
-              { name: "Sink", color: hotspotColors.pageRank },
-              { name: "Amplifier", color: hotspotColors.eigenvector },
+              { name: "Vulnerable", metric: "inDegree" },
+              { name: "Seeding", metric: "outDegree" },
+              { name: "Bottleneck", metric: "betweenness" },
+              { name: "Sink", metric: "pageRank" },
+              { name: "Amplifier", metric: "eigenvector" },
             ];
     
             const itemCount = legendData.length;
@@ -6817,16 +6832,11 @@
                 .style("height", itemHeight + "px")
                 .style("padding-left", "9px");
     
-              // Create an icon as a circle.
-              // Diameter is 16px when iconRadius is 8px.
               itemDiv
                 .append("div")
                 .attr("class", "legendIcon")
-                .style("width", "16px")
-                .style("height", "16px")
-                .style("border-radius", "50%")
-                .style("border", `1.5px dashed ${d.color}`)
-                .style("margin-right", "5px");
+                .attr("data-metric", d.metric)
+                .html(hotspotSymbol(d.metric));
     
               // Append the text label.
               itemDiv
@@ -6910,6 +6920,23 @@
             if (defs.empty()) {
               defs = svg.append("defs");
             }
+
+            const hotspotOutline = defs.append("filter")
+              .attr("id", "hotspotOutline")
+              .attr("x", "-50%")
+              .attr("y", "-50%")
+              .attr("width", "200%")
+              .attr("height", "200%");
+            hotspotOutline.append("feMorphology")
+              .attr("in", "SourceAlpha")
+              .attr("operator", "dilate")
+              .attr("radius", 1)
+              .attr("result", "outline");
+            hotspotOutline.append("feFlood").attr("flood-color", theme.canvas);
+            hotspotOutline.append("feComposite").attr("in2", "outline").attr("operator", "in");
+            const outlineMerge = hotspotOutline.append("feMerge");
+            outlineMerge.append("feMergeNode");
+            outlineMerge.append("feMergeNode").attr("in", "SourceGraphic");
     
             // Define the edge glow filter.
             const edgeGlow = defs
@@ -6947,7 +6974,7 @@
 
             const metrics = [
               {
-                code: "ID",
+                metric: "inDegree",
                 name: "Weighted In Degree",
                 role: "Vulnerable",
                 icon: "fa-arrow-down",
@@ -6955,7 +6982,7 @@
                 method: "Incoming trade weights, log scaled",
               },
               {
-                code: "OD",
+                metric: "outDegree",
                 name: "Weighted Out Degree",
                 role: "Seeding",
                 icon: "fa-arrow-up",
@@ -6963,7 +6990,7 @@
                 method: "Outgoing trade weights, log scaled",
               },
               {
-                code: "BT",
+                metric: "betweenness",
                 name: "Betweenness",
                 role: "Bottleneck",
                 icon: "fa-route",
@@ -6971,7 +6998,7 @@
                 method: "Brandes shortest path score",
               },
               {
-                code: "PR",
+                metric: "pageRank",
                 name: "PageRank",
                 role: "Sink",
                 icon: "fa-magnet",
@@ -6979,7 +7006,7 @@
                 method: "Random walk centrality",
               },
               {
-                code: "EC",
+                metric: "eigenvector",
                 name: "Eigenvector Centrality",
                 role: "Amplifier",
                 icon: "fa-tower-broadcast",
@@ -7003,7 +7030,7 @@
                         Hotspot Metrics
                       </div>
                       <p class="hotspot-info-subtitle">
-                        Dashed hotspot rings mark regions with high centrality or flow pressure in the trade network.
+                        Hotspot rings mark regions with high centrality or flow pressure in the trade network. Each metric has a distinct color and ring pattern, shared with the legend.
                       </p>
                     </div>
                   </div>
@@ -7013,7 +7040,7 @@
                         (metric) => `
                           <article class="hotspot-metric-card">
                             <div class="hotspot-metric-head">
-                              <span class="hotspot-metric-code">${metric.code}</span>
+                              <span class="hotspot-metric-code" data-metric="${metric.metric}">${hotspotSymbol(metric.metric)}</span>
                               <span class="hotspot-metric-role">
                                 <i class="fa-solid ${metric.icon}"></i>
                                 ${metric.role}
@@ -7119,8 +7146,6 @@
 
 
 
-            // If clicked, add glowing filter to main figure's hotspot strokes
-            d3.selectAll(".hotspotStroke").attr("filter", "url(#edgeGlow)");
 
 
             d3.select(".statsContainer")
@@ -7421,8 +7446,6 @@
 
 
 
-            // If unclicked, remove glowing filter from main figure's hotspot strokes
-            d3.selectAll(".hotspotStroke").attr("filter", null);
 
 
     
@@ -10224,16 +10247,20 @@
                 }
               });
               metricsForNode.sort();
-              let group = d3.select(this);
+              const group = d3.select(this).append("g").attr("class", "hotspot-rings");
               metricsForNode.forEach((metric, i) => {
                 group
                   .append("circle")
+                  .datum(metric)
                   .attr("class", "hotspotStroke")
-                  .attr("r", d.r + (i + 1) * 3) // each extra ring offset by 3px per metric
+                  .attr("data-metric", metric)
+                  .attr("r", d.r + (i + 1) * hotspotRingSpacing)
                   .attr("fill", "none")
-                  .attr("stroke", hotspotColors[metric])
-                  .attr("stroke-width", 2)
-                  .attr("stroke-dashoffset", 0);
+                  .attr("stroke", hotspotStyles[metric].color)
+                  .attr("stroke-width", 2.5)
+                  .attr("stroke-linecap", "round")
+                  .attr("stroke-dasharray", hotspotStyles[metric].dash)
+                  .attr("filter", "url(#hotspotOutline)");
               });
             });
     
@@ -10422,7 +10449,8 @@
     
             labelsEnter.transition().duration(400).style("opacity", 1);
     
-            labelSelection = labelsEnter.merge(labelsSelection);
+            labelSelection = labelsEnter.merge(labelsSelection)
+              .attr("dy", hotspotLabelDy);
     
             // Restart simulation in graph mode.
             if (currentMode === "graph") {
@@ -10689,6 +10717,13 @@
             false,
           );
     
+          function hotspotLabelDy(d) {
+            const ringCount = metricNames.filter((metric) =>
+              topNMetric[metric].includes(d.id),
+            ).length;
+            return -ringCount * hotspotRingSpacing;
+          }
+
           function updateHotspotMarks() {
             metricNames.forEach((metric) => {
               // Sort the keys (node IDs) of hotspots by descending metric value.
@@ -10698,7 +10733,7 @@
             });
             // Use all node groups, not only the initial enter selection.
             d3.selectAll(".nodeGroup").each(function (d) {
-              let group = d3.select(this);
+              const group = d3.select(this).select(".hotspot-rings");
     
               // Compute the updated list of metrics (hotspots) for this node.
               let newMetrics = [];
@@ -10729,8 +10764,8 @@
                 .interrupt()
                 .transition()
                 .duration(150)
-                .attr("r", (m, i) => d.r + (i + 1) * 3)
-                .attr("stroke", (m) => hotspotColors[m]);
+                .attr("r", (m, i) => d.r + (i + 1) * hotspotRingSpacing)
+                .attr("stroke", (m) => hotspotStyles[m].color);
     
               // Append new strokes for any newly added metrics.
               strokes
@@ -10739,16 +10774,19 @@
                 .attr("class", "hotspotStroke")
                 .attr("data-metric", (m) => m)
                 .attr("fill", "none")
-                .attr("stroke-width", 2)
-                .attr("stroke-dashoffset", 0)
-                .attr("stroke", (m) => hotspotColors[m])
+                .attr("stroke-width", 2.5)
+                .attr("stroke-linecap", "round")
+                .attr("stroke-dasharray", (m) => hotspotStyles[m].dash)
+                .attr("stroke", (m) => hotspotStyles[m].color)
+                .attr("filter", "url(#hotspotOutline)")
                 .attr("r", d.r) // start at the node's radius
                 .style("opacity", 0)
                 .transition()
                 .duration(150)
                 .style("opacity", 1)
-                .attr("r", (m, i) => d.r + (i + 1) * 3);
+                .attr("r", (m, i) => d.r + (i + 1) * hotspotRingSpacing);
             });
+            labelSelection.attr("dy", hotspotLabelDy);
           }
     
           // Restore function: re-enable all links and update the trade panel checkboxes.

@@ -2656,20 +2656,20 @@ g.node:hover {
 }
 
 @keyframes breathing {
-  0% {
-    stroke-opacity: 1;
+  0%,
+  100% {
     transform: scale(1);
   }
 
   50% {
-    stroke-opacity: 1;
-    transform: scale(1.15);
+    transform: scale(1.06);
   }
+}
 
-  100% {
-    stroke-opacity: 1;
-    transform: scale(1);
-  }
+.hotspot-rings {
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: breathing 2.8s ease-in-out infinite;
 }
 
 @keyframes breathing-legend {
@@ -2687,12 +2687,6 @@ g.node:hover {
     stroke-opacity: 1;
     transform: scale(1);
   }
-}
-
-.hotspotStroke {
-  stroke-dasharray: 5 5;
-  animation:
-    dash 8s linear infinite;
 }
 
 .hotspotHalo {
@@ -2716,9 +2710,6 @@ g.node:hover {
 }
 
 .hotspotLegend {
-  stroke-dasharray: 5 5;
-  animation:
-    none;
   right: 20px;
   bottom: calc(120px + var(--map-layer-legend-height, 0px));
   min-width: 95px;
@@ -2726,6 +2717,26 @@ g.node:hover {
   position: absolute;
   border-radius: 4px;
   cursor: var(--cursor-move);
+}
+
+.legendIcon {
+  width: 28px;
+  height: 28px;
+  flex: 0 0 auto;
+  margin-right: 6px;
+}
+
+.hotspot-symbol {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.hotspot-symbol text {
+  fill: var(--color-text);
+  font-family: var(--font-body);
+  font-size: 10px;
+  font-weight: 600;
 }
 
 .hotspotInfoButton {
@@ -3332,17 +3343,9 @@ circle.vertex.selected {
 
 .hotspot-metric-code {
   display: inline-flex;
-  width: 28px;
-  height: 28px;
+  width: 32px;
+  height: 32px;
   flex: 0 0 auto;
-  align-items: center;
-  justify-content: center;
-  color: var(--color-accent-strong);
-  font-size: 0.72rem;
-  font-weight: 600;
-  border: 1px solid rgba(114, 228, 212, 0.24);
-  border-radius: 50%;
-  background: rgba(114, 228, 212, 0.12);
 }
 
 .hotspot-metric-role {
@@ -3428,12 +3431,6 @@ body.focus-mode-active .hotspot-metric-card {
     rgba(255, 255, 255, 0.04)
   );
   box-shadow: none;
-}
-
-body.focus-mode-active .hotspot-metric-code {
-  color: var(--color-accent-strong);
-  border-color: rgba(114, 228, 212, 0.28);
-  background: rgba(114, 228, 212, 0.15);
 }
 
 body.focus-mode-active .hotspot-metric-role {
