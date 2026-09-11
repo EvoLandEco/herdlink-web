@@ -2921,6 +2921,24 @@ body.simulation-mode-active .hotspotInfoButton {
   pointer-events: none;
 }
 
+#globalStats .current-date-annotation rect.annotation-note-bg,
+#globalStats .simulation-compartment-callout-bg,
+#nodeStats .top-label-group rect.label-bg,
+.node-annotation rect.annotation-note-bg,
+.node-annotation svg.custom-radar rect.annotation-bg,
+.link-annotation rect.annotation-note-bg {
+  fill: var(--color-surface-strong);
+  fill-opacity: 0.96;
+  stroke: var(--color-accent);
+  stroke-width: 1;
+  filter: drop-shadow(0 0 4px var(--color-glow));
+}
+
+#nodeStats .top-label-group text {
+  font-size: 13px;
+  font-weight: 600;
+}
+
 .annotation-connector {
   stroke-dasharray: 4, 2;
   opacity: 0.9;
@@ -3057,6 +3075,10 @@ body.simulation-mode-active .hotspotInfoButton {
   fill-opacity: 0.96;
   rx: 4;
   ry: 4;
+}
+
+.node-annotation svg.custom-radar {
+  overflow: visible;
 }
 
 .node-annotation .annotation-connector .connector {

@@ -4214,7 +4214,7 @@
                   note: {
                     title: "Current Date",
                     label: d3.timeFormat("%d-%m-%Y")(window.currentDate),
-                    bgPadding: { top: 2, left: 2, right: 2, bottom: 2 },
+                    bgPadding: { top: 4, left: 6, right: 6, bottom: 4 },
                   },
                   className: "current-date-annotation",
                   x: 0,
@@ -4794,17 +4794,7 @@
               .sort((a, b) => b.value - a.value) // sort descending by value
               .slice(0, 5);
     
-            // Adjust label positions to avoid overlap
-            // First, sort the topNodes by their natural y position (ascending: top to bottom).
             topNodes.sort((a, b) => a.y - b.y);
-            const minSpacing = 22;
-            topNodes.forEach((d, i) => {
-              if (i === 0) {
-                d.adjustedY = d.y;
-              } else {
-                d.adjustedY = Math.max(d.y, topNodes[i - 1].adjustedY + minSpacing);
-              }
-            });
     
             // Define a line generator with smooth (smoothed) curve.
             const line = d3
@@ -4859,79 +4849,65 @@
               .append("g")
               .attr("class", "top-label-group");
     
-            // Merge and transition the entire group to its new vertical position.
-            // The group is translated to (currentX + windowWidth + 5, adjustedY).
-            const labelGroupsMerge = labelGroupsEnter
-              .merge(labelGroups)
-              .transition()
-              .duration(300)
-              .attr(
-                "transform",
-                (d) => `translate(${currentX + windowWidth + 5}, ${d.adjustedY})`,
-              );
-    
-            labelGroupsEnter.merge(labelGroups).each(function (d) {
-              const g = d3.select(this);
-    
-              let textEl = g.select("text");
-              if (textEl.empty()) {
-                textEl = g
-                  .append("text")
-                  .attr("font-size", "10px")
-                  .attr("alignment-baseline", "middle")
-                  .attr("fill", theme.text)
-                  .attr("y", 0)
-                  .text(d.nodeId);
-              } else {
-                textEl.text(d.nodeId).attr("fill", theme.text);
-              }
-    
-              const bbox = textEl.node().getBBox();
-              let bg = g.select("rect.label-bg");
-              if (bg.empty()) {
-                bg = g
-                  .insert("rect", "text")
-                  .attr("class", "label-bg")
-                  .attr("rx", 3)
-                  .attr("ry", 3)
-                  .attr("fill", theme.elevated)
-                  .attr("stroke", "none")
-                  .attr("stroke-width", 0.5);
-              }
-              bg.transition()
-                .duration(300)
-                .attr("x", bbox.x - 2)
-                .attr("y", bbox.y - 2)
-                .attr("width", bbox.width + 4)
-                .attr("height", bbox.height + 4);
-    
-              // Add dashed line from the left edge of the label background to the node's point
-              // Compute the node's point relative to the label group's coordinate system.
-              // The absolute node y is d.y, so its relative coordinate is (d.y - d.adjustedY).
-              const nodePointXRelative =
-                x(window.currentDate) - (currentX + windowWidth + 5);
-              const nodePointYRelative = d.y - d.adjustedY;
-    
-              let dashLine = g.select("line.label-dash-line");
-              if (dashLine.empty()) {
-                dashLine = g
-                  .insert("line", ":first-child")
-                  .attr("class", "label-dash-line")
-                  .attr("stroke", theme.accent)
-                  .attr("stroke-width", 1)
-                  .attr("stroke-dasharray", "4,2");
-              }
-              dashLine
-                .transition()
-                .duration(300)
-                .attr("x1", bbox.x - 2)
-                .attr("y1", bbox.y + bbox.height / 2)
-                .attr("x2", nodePointXRelative)
-                .attr("y2", nodePointYRelative);
-    
-              // Raise the whole group to the top.
-              g.raise();
+            labelGroupsEnter.append("line")
+              .attr("class", "label-dash-line")
+              .attr("stroke", theme.accent)
+              .attr("stroke-width", 1)
+              .attr("stroke-dasharray", "4,2");
+            labelGroupsEnter.append("rect")
+              .attr("class", "label-bg")
+              .attr("rx", 4)
+              .attr("ry", 4);
+            labelGroupsEnter.append("text")
+              .attr("alignment-baseline", "middle")
+              .attr("fill", theme.text);
+
+            const labelGroupsMerge = labelGroupsEnter.merge(labelGroups);
+            labelGroupsMerge.select("text").text((d) => d.nodeId);
+            labelGroupsMerge.each(function (d) {
+              const bbox = d3.select(this).select("text").node().getBBox();
+              d.box = {
+                x: bbox.x - 6,
+                y: bbox.y - 4,
+                width: bbox.width + 12,
+                height: bbox.height + 8,
+              };
             });
+
+            const labelGap = 8;
+            const edgePadding = 6;
+            const connectorGap = 18;
+            topNodes.forEach((d, i) => {
+              const rightX = lineX + connectorGap;
+              const leftX = lineX - connectorGap - d.box.width;
+              d.boxLeft = rightX + d.box.width <= width - edgePadding
+                ? rightX : leftX;
+              d.boxLeft = Math.max(edgePadding, Math.min(width - edgePadding - d.box.width, d.boxLeft));
+              d.boxTop = Math.max(edgePadding, d.y - d.box.height / 2);
+              if (i > 0) {
+                const previous = topNodes[i - 1];
+                d.boxTop = Math.max(d.boxTop, previous.boxTop + previous.box.height + labelGap);
+              }
+            });
+            for (let i = topNodes.length - 1; i >= 0; i -= 1) {
+              const bottom = i === topNodes.length - 1
+                ? height - edgePadding : topNodes[i + 1].boxTop - labelGap;
+              topNodes[i].boxTop = Math.min(topNodes[i].boxTop, bottom - topNodes[i].box.height);
+            }
+
+            labelGroupsMerge.transition().duration(300)
+              .attr("transform", (d) => `translate(${d.boxLeft - d.box.x},${d.boxTop - d.box.y})`);
+            labelGroupsMerge.select("rect.label-bg").transition().duration(300)
+              .attr("x", (d) => d.box.x)
+              .attr("y", (d) => d.box.y)
+              .attr("width", (d) => d.box.width)
+              .attr("height", (d) => d.box.height);
+            labelGroupsMerge.select("line.label-dash-line").transition().duration(300)
+              .attr("x1", (d) => lineX < d.boxLeft ? d.box.x : d.box.x + d.box.width)
+              .attr("y1", (d) => d.box.y + d.box.height / 2)
+              .attr("x2", (d) => lineX - (d.boxLeft - d.box.x))
+              .attr("y2", (d) => d.y - (d.boxTop - d.box.y));
+            labelGroupsMerge.raise();
           }
     
           /**
