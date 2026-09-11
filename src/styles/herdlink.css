@@ -1,3 +1,5 @@
+@import "./cursors.css";
+
 :root {
   color-scheme: dark;
   --font-body: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
@@ -337,7 +339,7 @@ body.focus-mode-active .tip-option strong {
   border: 0;
   border-radius: 50%;
   background: rgba(114, 228, 212, 0.1);
-  cursor: help;
+  cursor: var(--cursor-help);
   transition:
     color var(--transition-fast),
     background var(--transition-fast),
@@ -501,7 +503,7 @@ body.focus-mode-active .panel-info-button:focus-visible,
   border-radius: var(--radius-sm);
   background: var(--fill-action);
   box-shadow: none;
-  cursor: pointer;
+  cursor: var(--cursor-pointer);
   transition:
     background var(--transition-fast),
     box-shadow var(--transition-fast),
@@ -825,7 +827,7 @@ body.focus-mode-active .panel-info-button:focus-visible,
   color: var(--color-text-muted);
   font-weight: 600;
   text-align: center;
-  cursor: pointer;
+  cursor: var(--cursor-pointer);
   transition:
     background var(--transition-base),
     color var(--transition-base),
@@ -846,7 +848,7 @@ body.focus-mode-active .panel-info-button:focus-visible,
 .animal-switcher input[type="radio"]:disabled + label {
   color: var(--color-disabled);
   background: none;
-  cursor: not-allowed;
+  cursor: var(--cursor-not-allowed);
   filter: saturate(0.45);
 }
 
@@ -867,7 +869,7 @@ body.focus-mode-active .panel-info-button:focus-visible,
 
 .csv-switcher.disabled label {
   color: var(--color-disabled);
-  cursor: not-allowed;
+  cursor: var(--cursor-not-allowed);
   background: none;
 }
 
@@ -905,7 +907,7 @@ body.focus-mode-active .panel-info-button:focus-visible,
   justify-content: center;
   color: var(--color-text-muted);
   font-size: 0.95rem;
-  cursor: pointer;
+  cursor: var(--cursor-pointer);
   transition:
     background var(--transition-base),
     color var(--transition-base),
@@ -931,7 +933,7 @@ body.focus-mode-active .panel-info-button:focus-visible,
 }
 
 .mode-switcher-frame.disabled .mode-switcher label {
-  cursor: not-allowed;
+  cursor: var(--cursor-not-allowed);
   filter: saturate(0.65);
 }
 
@@ -1019,7 +1021,7 @@ body.focus-mode-active .panel-info-button:focus-visible,
   border: 1px solid var(--color-border-strong);
   border-radius: var(--radius-md);
   box-shadow: var(--shadow-control);
-  cursor: pointer;
+  cursor: var(--cursor-pointer);
   transition:
     transform var(--transition-fast),
     filter var(--transition-fast),
@@ -1051,7 +1053,7 @@ body.focus-mode-active .panel-info-button:focus-visible,
 #timeControlsContainer button:disabled,
 .toggle-button-container .btn:disabled {
   opacity: 0.5;
-  cursor: not-allowed;
+  cursor: var(--cursor-not-allowed);
   background: var(--color-disabled-bg);
   box-shadow: none;
   transform: none;
@@ -1088,7 +1090,7 @@ body.focus-mode-active .panel-info-button:focus-visible,
   color: var(--color-text-on-dark);
   border: none;
   border-radius: var(--radius-md);
-  cursor: pointer;
+  cursor: var(--cursor-pointer);
   background: transparent;
   filter: brightness(1);
   transition:
@@ -1231,7 +1233,7 @@ body.focus-mode-active .panel-info-button:focus-visible,
 
 .map-layer-reset {
   margin-top: var(--space-3);
-  cursor: pointer;
+  cursor: var(--cursor-pointer);
 }
 
 .map-layer-reset:hover {
@@ -1257,7 +1259,7 @@ body.focus-mode-active .panel-info-button:focus-visible,
   align-items: center;
   gap: var(--space-2);
   min-height: 29px;
-  cursor: pointer;
+  cursor: var(--cursor-pointer);
 }
 
 .map-layer-context input {
@@ -1327,7 +1329,7 @@ body.focus-mode-active .panel-info-button:focus-visible,
   margin: 0 5px;
   -webkit-appearance: none;
   background: transparent;
-  cursor: pointer;
+  cursor: var(--cursor-pointer);
 }
 
 #timeControlsContainer input[type="range"]::-webkit-slider-runnable-track {
@@ -1887,7 +1889,7 @@ body.focus-mode-active .simulation-progress-item.is-done {
   border: 2px solid rgba(255, 255, 255, 0.45);
   border-radius: 4px;
   appearance: none;
-  cursor: pointer;
+  cursor: var(--cursor-pointer);
   transition:
     background var(--transition-base),
     border-color var(--transition-base);
@@ -1904,7 +1906,7 @@ body.focus-mode-active .simulation-progress-item.is-done {
 .trade-header-checkbox:disabled:checked {
   background: var(--color-disabled);
   border-color: var(--color-disabled);
-  cursor: not-allowed;
+  cursor: var(--cursor-not-allowed);
 }
 
 .trade-checkbox {
@@ -1915,7 +1917,7 @@ body.focus-mode-active .simulation-progress-item.is-done {
   border: 2px solid rgba(255, 255, 255, 0.45);
   border-radius: 4px;
   appearance: none;
-  cursor: pointer;
+  cursor: var(--cursor-pointer);
   transition:
     background var(--transition-base),
     border-color var(--transition-base);
@@ -1931,7 +1933,7 @@ body.focus-mode-active .simulation-progress-item.is-done {
 .trade-checkbox:disabled:checked {
   background: var(--color-disabled);
   border-color: var(--color-disabled);
-  cursor: not-allowed;
+  cursor: var(--cursor-not-allowed);
 }
 
 .trade-header-checkbox:checked::after {
@@ -2630,23 +2632,23 @@ body.simulation-mode-active
 
 /* D3-specific styles. */
 .node {
-  cursor: pointer;
+  cursor: var(--cursor-pointer);
   stroke-width: 4.5px;
   stroke-dasharray: 5 5;
   animation: dash 2s linear infinite;
 }
 
 .nodeOver {
-  cursor: pointer;
+  cursor: var(--cursor-pointer);
 }
 
 circle:hover,
 g.node:hover {
-  cursor: pointer;
+  cursor: var(--cursor-pointer);
 }
 
 .trade-donut {
-  cursor: pointer;
+  cursor: var(--cursor-pointer);
 }
 
 .inactive-overlay-selected i {
@@ -2723,7 +2725,7 @@ g.node:hover {
   height: 140px;
   position: absolute;
   border-radius: 4px;
-  cursor: move;
+  cursor: var(--cursor-move);
 }
 
 .hotspotInfoButton {
@@ -2736,7 +2738,7 @@ g.node:hover {
   height: 26px;
   align-items: center;
   justify-content: center;
-  cursor: pointer;
+  cursor: var(--cursor-pointer);
   font-size: 18px;
   color: var(--color-accent-strong);
   border: 0;
@@ -2770,7 +2772,7 @@ body.simulation-mode-active .hotspotInfoButton {
 }
 
 .statsContainer {
-  cursor: move;
+  cursor: var(--cursor-move);
   position: absolute;
   top: 60px;
   left: 20px;
@@ -3248,7 +3250,7 @@ circle.vertex.selected {
   border: 1px solid rgba(114, 228, 212, 0.1);
   border-radius: 50%;
   background: var(--color-surface-strong);
-  cursor: pointer;
+  cursor: var(--cursor-pointer);
   transition:
     color var(--transition-fast),
     background var(--transition-fast),

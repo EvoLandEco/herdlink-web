@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>HerdLink cursors</title>
+    <link rel="stylesheet" href="../../styles/cursors.css">
+    <style>
+      body { margin: 32px; background: #080e17; color: #e8eef5; font: 15px system-ui; }
+      main { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 16px; max-width: 1120px; }
+      article { border: 1px solid #52667d; border-radius: 10px; overflow: hidden; text-align: center; }
+      h1 { font-size: 24px; }
+      h2 { font-size: 14px; font-weight: 500; margin: 16px; }
+      p { color: #a5b5c8; }
+      .dark, .light, .large { display: grid; place-items: center; height: 96px; }
+      .dark, .large { background: #0c1420; }
+      .light { background: #fff; }
+      .large { height: 160px; }
+      .large img { width: 128px; height: 128px; }
+    </style>
+  </head>
+  <body>
+    <h1>HerdLink cursors</h1>
+    <p>Hover over each card to try the cursor. Artwork appears at actual size on dark and light backgrounds, then at twice its size.</p>
+    <main>
+      <article style="cursor: var(--cursor-default)"><h2>Arrow</h2><div class="dark"><img src="default.svg" alt="Arrow on dark"></div><div class="light"><img src="default.svg" alt="Arrow on light"></div><div class="large"><img src="default.svg" alt="Enlarged arrow"></div></article>
+      <article style="cursor: var(--cursor-pointer)"><h2>Hand</h2><div class="dark"><img src="pointer.svg" alt="Hand on dark"></div><div class="light"><img src="pointer.svg" alt="Hand on light"></div><div class="large"><img src="pointer.svg" alt="Enlarged hand"></div></article>
+      <article style="cursor: var(--cursor-text)"><h2>Text</h2><div class="dark"><img src="text.svg" alt="Text cursor on dark"></div><div class="light"><img src="text.svg" alt="Text cursor on light"></div><div class="large"><img src="text.svg" alt="Enlarged text cursor"></div></article>
+      <article style="cursor: var(--cursor-move)"><h2>Move</h2><div class="dark"><img src="move.svg" alt="Move cursor on dark"></div><div class="light"><img src="move.svg" alt="Move cursor on light"></div><div class="large"><img src="move.svg" alt="Enlarged move cursor"></div></article>
+      <article style="cursor: var(--cursor-help)"><h2>Help</h2><div class="dark"><img src="help.svg" alt="Help cursor on dark"></div><div class="light"><img src="help.svg" alt="Help cursor on light"></div><div class="large"><img src="help.svg" alt="Enlarged help cursor"></div></article>
+      <article style="cursor: var(--cursor-not-allowed)"><h2>Unavailable</h2><div class="dark"><img src="not-allowed.svg" alt="Unavailable cursor on dark"></div><div class="light"><img src="not-allowed.svg" alt="Unavailable cursor on light"></div><div class="large"><img src="not-allowed.svg" alt="Enlarged unavailable cursor"></div></article>
+    </main>
+  </body>
+</html>

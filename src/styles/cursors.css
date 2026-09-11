@@ -1,0 +1,48 @@
+:root {
+  --cursor-default: default;
+  --cursor-pointer: pointer;
+  --cursor-text: text;
+  --cursor-move: move;
+  --cursor-not-allowed: not-allowed;
+  --cursor-help: help;
+}
+
+@media (any-pointer: fine) and (any-hover: hover) and (forced-colors: none) {
+  :root {
+    --cursor-default: url("../assets/cursors/default.svg") 20 19, default;
+    --cursor-pointer: url("../assets/cursors/pointer.svg") 28 18, pointer;
+    --cursor-text: url("../assets/cursors/text.svg") 32 32, text;
+    --cursor-move: url("../assets/cursors/move.svg") 32 32, move;
+    --cursor-not-allowed: url("../assets/cursors/not-allowed.svg") 32 32, not-allowed;
+    --cursor-help: url("../assets/cursors/help.svg") 20 19, help;
+  }
+}
+
+html {
+  cursor: var(--cursor-default);
+}
+
+:is(button, [type="button"], [type="submit"], [type="reset"]):not(:disabled),
+a[href],
+select,
+summary,
+[role="button"],
+input:is([type="checkbox"], [type="radio"], [type="range"], [type="file"]) {
+  cursor: var(--cursor-pointer);
+}
+
+:where(textarea, input:not([type]), input:is(
+  [type="text"], [type="search"], [type="email"], [type="url"],
+  [type="tel"], [type="password"], [type="number"]
+), [contenteditable]:not([contenteditable="false"])) {
+  cursor: var(--cursor-text);
+}
+
+:is(button, input, select, textarea):disabled,
+:is(button, input, select, textarea, [role="button"])[aria-disabled="true"] {
+  cursor: var(--cursor-not-allowed);
+}
+
+.panel-info-button:not(:disabled):not([aria-disabled="true"]) {
+  cursor: var(--cursor-help);
+}

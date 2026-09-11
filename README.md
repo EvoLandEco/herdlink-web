@@ -1,6 +1,6 @@
 # HerdLink Web
 
-![Version](https://img.shields.io/badge/version-v0.7.0--beta-2f6fed)
+![Version](https://img.shields.io/badge/version-v0.7.1-2f6fed)
 ![Deployment](https://img.shields.io/badge/deployment-GitHub%20Pages-121013?logo=github)
 ![Website](https://img.shields.io/website?url=https%3A%2F%2Fherdlink.nl&label=HerdLink.nl)
 ![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)
@@ -111,6 +111,15 @@ python3 scripts/fetch-map-geography.py --check
 python3 scripts/fetch-pig-census.py --check
 node --test tests/map-layers.test.js
 ```
+
+## Cursors
+
+The [cursor set](src/assets/cursors) contains six original SVGs with black fills,
+rounded white outlines, and a pink and orange glow: arrow, hand, text, move, help, and unavailable.
+[Cursor styles](src/styles/cursors.css) map them to the application controls using
+native CSS. Each SVG has a 64 × 64 canvas and a defined click point. Touch devices
+and forced colour mode retain system cursors. The artwork uses the project licence.
+Open the [cursor preview](src/assets/cursors/preview.html) to inspect and try the set.
 
 ## Development
 
