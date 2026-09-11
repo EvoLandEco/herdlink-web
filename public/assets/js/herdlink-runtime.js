@@ -21,6 +21,23 @@
           window.isSwitchingAppMode = false;
           let isDoingTemporalUpdate = false;
           window.isDoingTemporalUpdate = false;
+          const themeStyles = getComputedStyle(document.documentElement);
+          const theme = {
+            text: themeStyles.getPropertyValue("--color-text").trim(),
+            muted: themeStyles.getPropertyValue("--color-text-muted").trim(),
+            surface: themeStyles.getPropertyValue("--color-surface").trim(),
+            elevated: themeStyles.getPropertyValue("--color-surface-strong").trim(),
+            canvas: themeStyles.getPropertyValue("--color-canvas").trim(),
+            border: themeStyles.getPropertyValue("--color-border").trim(),
+            grid: themeStyles.getPropertyValue("--color-chart-grid").trim(),
+            accent: themeStyles.getPropertyValue("--color-accent").trim(),
+            onAccent: themeStyles.getPropertyValue("--color-on-accent").trim(),
+            incoming: themeStyles.getPropertyValue("--color-chart-incoming").trim(),
+            outgoing: themeStyles.getPropertyValue("--color-chart-outgoing").trim(),
+            font: themeStyles.getPropertyValue("--font-body").trim(),
+          };
+          const tradeIntensity = d3.interpolateRgb(theme.accent, "#364f67");
+          const exposureIntensity = d3.interpolateRgb("#634350", "#ffb599");
           const svg = d3.select("#col2 svg");
           let containerCol2 = document.getElementById("col2");
           let w = containerCol2.clientWidth,
@@ -74,11 +91,11 @@
             eigenvector: "Amplifier (by Eigenvector)",
           };
           const hotspotColors = {
-            inDegree: "#08FF08", // Fluorescent Green
-            outDegree: "#05C3DD", // Aqua Blue
-            betweenness: "#ff007f", // Bright Pink
-            pageRank: "#FFD600", // Vivid Yellow
-            eigenvector: "#8a2be2", // Strong Purple
+            inDegree: "#7ccbae",
+            outDegree: "#72d5df",
+            betweenness: "#e8a2cf",
+            pageRank: "#f1c77b",
+            eigenvector: "#bca6ed",
           };
           let newSCCs;
           const nodeAnnoType = d3.annotationCallout;
@@ -100,10 +117,10 @@
           let preYDomainGlobalStats = null;
           let preYDomainNodeStats = null;
           const simulationCompartmentColors = {
-            S: "#7bb661",
-            E: "#f2c94c",
-            I: "#eb5757",
-            R: "#4f83cc",
+            S: "#7ccbae",
+            E: "#f1c77b",
+            I: "#f28b96",
+            R: "#78b8ed",
           };
           const simulationCompartmentLabels = {
             S: "Susceptible",
@@ -134,12 +151,12 @@
           const simulationPrevalenceScale = d3
             .scaleSequential(
               d3.interpolateRgbBasis([
-                "#e5efd8",
-                "#9fbe7c",
-                "#d4bd69",
-                "#d88a4f",
-                "#b94f45",
-                "#74353d",
+                "#263b4c",
+                "#46526a",
+                "#79637a",
+                "#af7a87",
+                "#db9b97",
+                "#ffcca8",
               ]),
             )
             .domain([0, 0.35])
@@ -147,12 +164,12 @@
           const simulationPrevalenceTextScale = d3
             .scaleSequential(
               d3.interpolateRgbBasis([
-                "#4f6a3d",
-                "#58713f",
-                "#80642c",
-                "#8c4c30",
-                "#793536",
-                "#5c2d36",
+                "#a5b5c8",
+                "#b5bbca",
+                "#c7b9ca",
+                "#ddb2bf",
+                "#efb7b2",
+                "#ffcca8",
               ]),
             )
             .domain([0, 0.35])
@@ -211,7 +228,7 @@
 
           function renderSimulationDateMarker(
             root,
-            { x, date, height, rangeWidth = 12, lineColor = "#9ca3af" },
+            { x, date, height, rangeWidth = 12, lineColor = theme.muted },
           ) {
             if (!date) return;
             const cx = x(date);
@@ -441,10 +458,10 @@
 
           function getReadablePrevalenceTextColor(value) {
             const color = d3.color(simulationPrevalenceScale(value));
-            if (!color) return "#172218";
+            if (!color) return theme.onAccent;
             const luminance =
               (0.299 * color.r + 0.587 * color.g + 0.114 * color.b) / 255;
-            return luminance < 0.56 ? "#fff" : "#172218";
+            return luminance < 0.56 ? "#fff" : theme.onAccent;
           }
 
           function clampNumber(value, min, max) {
@@ -458,7 +475,7 @@
               edgeExtent = [0, 1];
             }
             edgeColor = d3
-              .scaleSequential(d3.interpolateSpectral)
+              .scaleSequential(tradeIntensity)
               .domain([edgeExtent[1], edgeExtent[0]]);
           }
 
@@ -1126,7 +1143,7 @@
               edgeExtent = [0, 1];
             }
             edgeColor = d3
-              .scaleSequential(d3.interpolateYlOrRd)
+              .scaleSequential(exposureIntensity)
               .domain([edgeExtent[0], edgeExtent[1]]);
             return true;
           }
@@ -1165,14 +1182,14 @@
             const container = d3.select(".statsContainer");
             container
               .classed("simulation-stats-container", true)
-              .style("border", selectedNodeData ? "1px dashed white" : "1px dashed #eb5757")
-              .style("background", selectedNodeData ? "rgba(255,255,255,0.05)" : "rgba(235,87,87,0.08)")
+              .style("border", `1px solid ${theme.border}`)
+              .style("background", theme.surface)
               .html("");
             rows.forEach(([icon, label, value]) => {
               const item = container
                 .append("div")
                 .attr("class", "stat-item simulation-stat-item")
-                .style("color", selectedNodeData ? "white" : "gray");
+                .style("color", selectedNodeData ? theme.text : theme.muted);
               item.append("div").attr("class", "stat-icon").html(`<i class="${icon}"></i>`);
               item.append("span").attr("class", "stat-label").text(label);
               item.append("span").attr("class", "stat-value").text(value);
@@ -1317,7 +1334,7 @@
                 date: current.date,
                 height,
                 rangeWidth: 12,
-                lineColor: "#6b7280",
+                lineColor: theme.muted,
               });
               renderSimulationCompartmentCallout(
                 markerLayer,
@@ -1481,7 +1498,7 @@
                   label
                     .attr("x", barEnd + padding)
                     .attr("text-anchor", "start")
-                    .style("fill", "#172218");
+                    .style("fill", theme.text);
                 } else {
                   label
                     .attr(
@@ -1510,9 +1527,9 @@
 
           function renderSimulationSpatialLegend(svg, x, y) {
             const items = [
-              { label: "Prevalence", type: "fill", color: "#bed9ad" },
-              { label: "Exposure flow", type: "line", color: "#f2c94c" },
-              { label: "New cases", type: "circle", color: "#2e8d34" },
+              { label: "Prevalence", type: "fill", color: "#a5f0df" },
+              { label: "Exposure flow", type: "line", color: "#f1c77b" },
+              { label: "New cases", type: "circle", color: theme.accent },
             ];
             const legend = svg
               .selectAll("g.simulation-spatial-mini-legend")
@@ -1559,7 +1576,7 @@
               .attr("cy", 6)
               .attr("r", 4.5)
               .attr("fill", (item) => item.color)
-              .attr("stroke", "#172218")
+              .attr("stroke", theme.onAccent)
               .attr("stroke-width", 0.6);
             rows
               .selectAll("text")
@@ -1753,7 +1770,7 @@
                 const state = frame.nodeStates[feature.properties.statcode];
                 return state
                   ? simulationPrevalenceScale(state.prevalence || 0)
-                  : "rgba(23,34,24,0.04)";
+                  : theme.surface;
               })
               .attr("stroke", "rgba(255,255,255,0.85)")
               .attr("stroke-width", 0.7)
@@ -1823,7 +1840,7 @@
               .attr("cy", (item) => item.y)
               .attr("r", 0)
               .attr("fill", (item) => simulationPrevalenceScale(item.prevalence))
-              .attr("stroke", "#172218")
+              .attr("stroke", theme.onAccent)
               .attr("stroke-width", 0.7)
               .attr("opacity", 0.88)
               .merge(bubbles)
@@ -1907,7 +1924,7 @@
           }
 
           function getSimulationPartitionColor(key) {
-            return key === "NA" ? "#9ca3af" : nodeColor(Number(key));
+            return key === "NA" ? theme.muted : nodeColor(Number(key));
           }
 
           function getSimulationPartitionDisplayKey(key) {
@@ -2199,7 +2216,7 @@
             );
             const maxValue = d3.max(cells, (cell) => cell.value) || 1;
             const color = d3
-              .scaleSequential(d3.interpolateYlOrRd)
+              .scaleSequential(exposureIntensity)
               .domain([0, maxValue]);
 
             const cellSelection = g
@@ -2215,7 +2232,7 @@
               .attr("height", y.bandwidth())
               .attr("rx", 3)
               .attr("ry", 3)
-              .attr("fill", "rgba(23,34,24,0.04)")
+              .attr("fill", theme.surface)
               .merge(cellSelection)
               .call((selection) =>
                 transitionSelection(selection)
@@ -2224,11 +2241,11 @@
                   .attr("width", x.bandwidth())
                   .attr("height", y.bandwidth())
                   .attr("fill", (cell) =>
-                    cell.value > 0 ? color(cell.value) : "rgba(23,34,24,0.04)",
+                    cell.value > 0 ? color(cell.value) : theme.surface,
                   )
                   .attr("stroke", (cell) =>
                     cell.source === cell.target
-                      ? "rgba(23,34,24,0.42)"
+                      ? theme.muted
                       : "rgba(255,255,255,0.9)",
                   )
                   .attr("stroke-width", (cell) =>
@@ -2778,17 +2795,17 @@
               {
                 key: "Focal I",
                 value: partition.I ? (state.I || 0) / partition.I : 0,
-                color: "#4f83cc",
+                color: "#78b8ed",
               },
               {
                 key: "In cross",
                 value: incomingBase ? stats.incomingCross / incomingBase : 0,
-                color: "#f2c94c",
+                color: "#f1c77b",
               },
               {
                 key: "Out cross",
                 value: outgoingBase ? stats.outgoingCross / outgoingBase : 0,
-                color: "#eb5757",
+                color: "#f28b96",
               },
             ];
             const x = d3
@@ -2884,17 +2901,17 @@
               {
                 key: "Incoming",
                 value: state.incomingExposure || 0,
-                color: "#f2c94c",
+                color: "#f1c77b",
               },
               {
                 key: "Outgoing",
                 value: state.outgoingPressure || 0,
-                color: "#eb5757",
+                color: "#f28b96",
               },
               {
                 key: "New cases",
                 value: state.newInfections || 0,
-                color: "#4f83cc",
+                color: "#78b8ed",
               },
             ];
             const x = d3
@@ -3046,7 +3063,7 @@
               .attr("width", x.bandwidth())
               .attr("height", 0)
               .attr("rx", 4)
-              .attr("fill", "#f2c94c")
+              .attr("fill", "#f1c77b")
               .merge(incomingBars)
               .call((selection) =>
                 transitionSelection(selection)
@@ -3069,7 +3086,7 @@
               .attr("width", x.bandwidth())
               .attr("height", 0)
               .attr("rx", 4)
-              .attr("fill", "#eb5757")
+              .attr("fill", "#f28b96")
               .merge(outgoingBars)
               .call((selection) =>
                 transitionSelection(selection)
@@ -3104,8 +3121,8 @@
             labels.exit().remove();
 
             const legendData = [
-              { key: "Incoming", color: "#f2c94c" },
-              { key: "Outgoing", color: "#eb5757" },
+              { key: "Incoming", color: "#f1c77b" },
+              { key: "Outgoing", color: "#f28b96" },
             ];
             const legendItemWidth = 86;
             const legendWidth = legendData.length * legendItemWidth - 8;
@@ -4041,13 +4058,8 @@
             // Clear previous content.
             container.html("");
     
-            if (selectedNodeData) {
-              container.style("border", "1px dashed white");
-              container.style("background", "rgba(255, 255, 255, 0.05)");
-            } else {
-              container.style("border", "1px dashed green");
-              container.style("background", "rgba(0, 255, 0, 0.03)");
-            }
+            container.style("border", `1px solid ${theme.border}`);
+            container.style("background", theme.surface);
     
             // Layout constants for stat rows.
             const statItemHeight = 20;
@@ -4060,7 +4072,7 @@
               const item = container
                 .append("div")
                 .attr("class", "stat-item")
-                .style("color", selectedNodeData ? "white" : "gray");
+                .style("color", selectedNodeData ? theme.text : theme.muted);
     
               // Render icon.
               item.append("div").attr("class", "stat-icon").html(itemData.icon);
@@ -4085,7 +4097,6 @@
             const formattedNormal = normalizedValue.toFixed(3); // three decimal places
     
             // Color scale for normalized risk score.
-            // 0.0 = green, 1.0 = salmon, 2.0 = orange.
             const colorScale = d3
               .scaleLinear()
               .domain([0, 1, 2])
@@ -4223,10 +4234,10 @@
                 currentDateAnnoGroup.call(currentAnno);
                 currentDateAnnoGroup
                   .selectAll(".current-date-annotation .annotation-note text")
-                  .attr("fill", "white");
+                  .attr("fill", theme.text);
                 currentDateAnnoGroup
                   .selectAll("rect.annotation-note-bg")
-                  .attr("fill", "green")
+                  .attr("fill", theme.elevated)
                   .attr("fill-opacity", 0.8)
                   .attr("rx", 4)
                   .attr("ry", 4);
@@ -4246,10 +4257,10 @@
                     const sel = d3.select(this);
                     sel.call(currentAnno);
                     // Reapply styles after re-rendering the annotation.
-                    sel.selectAll(".annotation-note text").attr("fill", "white");
+                    sel.selectAll(".annotation-note text").attr("fill", theme.text);
                     sel
                       .selectAll("rect.annotation-note-bg")
-                      .attr("fill", "green")
+                      .attr("fill", theme.elevated)
                       .attr("fill-opacity", 0.8)
                       .attr("rx", 4)
                       .attr("ry", 4);
@@ -4288,7 +4299,7 @@
               yGrid = svg
                 .append("g")
                 .attr("class", "y-grid")
-                .attr("stroke", "lightgray")
+                .attr("stroke", theme.grid)
                 .attr("stroke-opacity", 0.2);
             }
     
@@ -4377,7 +4388,7 @@
               ciPath = svg
                 .append("path")
                 .attr("class", "ci-area")
-                .attr("fill", "green")
+                .attr("fill", theme.accent)
                 .attr("fill-opacity", 0.1);
             }
             ciPath.datum(ciData).transition().duration(300).attr("d", ciArea);
@@ -4396,7 +4407,7 @@
                 .append("path")
                 .attr("class", "moving-average-line")
                 .attr("fill", "none")
-                .attr("stroke", "gray")
+                .attr("stroke", theme.muted)
                 .attr("stroke-dasharray", "5,5")
                 .attr("stroke-width", 2);
             }
@@ -4420,7 +4431,7 @@
                 .attr("class", "line-chart")
                 .datum(data)
                 .attr("fill", "none")
-                .attr("stroke", "green")
+                .attr("stroke", theme.accent)
                 .attr("stroke-width", 1)
                 .attr("d", line);
             } else {
@@ -4434,7 +4445,7 @@
                   const current = line(data);
                   return d3.interpolateString(previous, current);
                 })
-                .attr("stroke", "green")
+                .attr("stroke", theme.accent)
                 .attr("stroke-width", 1);
             }
     
@@ -4451,7 +4462,7 @@
                 .attr("cx", (d) => x(d.date))
                 .attr("cy", (d) => y(d.value))
                 .attr("r", 0)
-                .attr("fill", "gray")
+                .attr("fill", theme.muted)
                 .transition()
                 .duration(300)
                 .attr("r", 2);
@@ -4472,7 +4483,7 @@
                 .attr("cx", (d) => x(d.date))
                 .attr("cy", (d) => y(d.value))
                 .attr("r", 0)
-                .attr("fill", "gray")
+                .attr("fill", theme.muted)
                 .transition()
                 .duration(300)
                 .attr("r", 2);
@@ -4606,7 +4617,7 @@
               yGrid = svg
                 .append("g")
                 .attr("class", "y-grid")
-                .attr("stroke", "lightgray")
+                .attr("stroke", theme.grid)
                 .attr("stroke-opacity", 0.2);
             }
     
@@ -4665,7 +4676,7 @@
                 .attr("y", 0)
                 .attr("width", windowWidth)
                 .attr("height", height)
-                .attr("fill", "gray")
+                .attr("fill", theme.muted)
                 .attr("fill-opacity", 0.1)
                 .attr("rx", 3)
                 .attr("ry", 3);
@@ -4690,7 +4701,7 @@
                 .attr("x2", lineX)
                 .attr("y1", 0)
                 .attr("y2", height)
-                .attr("stroke", "green")
+                .attr("stroke", theme.accent)
                 .attr("stroke-width", 1)
                 .attr("stroke-dasharray", "4,2")
                 .attr("filter", "brightness(1.2)");
@@ -4858,11 +4869,11 @@
                   .append("text")
                   .attr("font-size", "10px")
                   .attr("alignment-baseline", "middle")
-                  .attr("fill", "white")
+                  .attr("fill", theme.text)
                   .attr("y", 0)
                   .text(d.nodeId);
               } else {
-                textEl.text(d.nodeId).attr("fill", "white");
+                textEl.text(d.nodeId).attr("fill", theme.text);
               }
     
               const bbox = textEl.node().getBBox();
@@ -4873,7 +4884,7 @@
                   .attr("class", "label-bg")
                   .attr("rx", 3)
                   .attr("ry", 3)
-                  .attr("fill", "green")
+                  .attr("fill", theme.elevated)
                   .attr("stroke", "none")
                   .attr("stroke-width", 0.5);
               }
@@ -4896,7 +4907,7 @@
                 dashLine = g
                   .insert("line", ":first-child")
                   .attr("class", "label-dash-line")
-                  .attr("stroke", "green")
+                  .attr("stroke", theme.accent)
                   .attr("stroke-width", 1)
                   .attr("stroke-dasharray", "4,2");
               }
@@ -5727,7 +5738,7 @@
               .on("click", debouncedOnClickNode)
               .on("mouseover", function (event, d) {
                 hoveredNode = d;
-                d3.select(this).select("circle.primary").attr("stroke", "black");
+                d3.select(this).select("circle.primary").attr("stroke", theme.text);
     
                 updateAnnotationForNode(d, annotationGroup);
               })
@@ -5783,7 +5794,7 @@
                   .style("align-items", "center")
                   .style("justify-content", "center")
                   .style("font-size", `${iconSize * 0.7}px`)
-                  .style("color", "gray")
+                  .style("color", theme.muted)
                   .html('<i class="fa-solid fa-circle-xmark"></i>');
               }
             });
@@ -5820,7 +5831,7 @@
               .attr("class", "nodeLabel")
               .attr("text-anchor", "middle")
               .attr("font-size", "12px")
-              .attr("fill", "black")
+              .attr("fill", theme.text)
               .text((d) => d.id);
     
             // Raise labels above nodes.
@@ -5883,7 +5894,7 @@
                   .append("path")
                   .attr("class", "donut-self")
                   .attr("d", arc({ startAngle: 0, endAngle: selfAngle }))
-                  .attr("fill", "white")
+                  .attr("fill", theme.text)
                   .attr("opacity", 0.8);
     
                 // Append arc for external trade (e.g., blue).
@@ -5891,7 +5902,7 @@
                   .append("path")
                   .attr("class", "donut-other")
                   .attr("d", arc({ startAngle: selfAngle, endAngle: 2 * Math.PI }))
-                  .attr("fill", "black")
+                  .attr("fill", theme.canvas)
                   .attr("opacity", 0.1);
               }
             });
@@ -6037,7 +6048,7 @@
                 "d",
                 "M201.4 137.4c12.5-12.5 32.8-12.5 45.3 0l160 160c12.5 12.5 12.5 32.8 0 45.3s-32.8 12.5-45.3 0L224 205.3 86.6 342.6c-12.5 12.5-32.8 12.5-45.3 0s-12.5-32.8 0-45.3l160-160z",
               )
-              .attr("fill", "white")
+              .attr("fill", theme.text)
               .attr("transform", "rotate(90,224,256)");
     
             svg
@@ -6119,7 +6130,7 @@
     
           function initAesthetics() {
             setTradeEdgeScales(nonZeroLinks);
-            nodeColor = d3.scaleOrdinal(d3.schemeCategory10);
+            nodeColor = d3.scaleOrdinal(["#78b8ed", "#ffba86", "#7ccbae", "#f28b96", "#bca6ed", "#d3b49a", "#e8a2cf", "#a0b1c5", "#cfce87", "#72d5df"]);
             nodeSize = d3
               .scaleSqrt()
               .domain(d3.extent(allNodes, (d) => d.tradeTotal))
@@ -6688,19 +6699,19 @@
             annotationGroup.call(makeAnnotations).raise();
             annotationGroup
               .selectAll("rect.annotation-note-bg")
-              .attr("fill", selectedNodeData ? "white" : "green")
+              .attr("fill", theme.elevated)
               .attr("fill-opacity", 0.8)
               .attr("rx", 4)
               .attr("ry", 4);
             annotationGroup
               .selectAll(".link-annotation .annotation-connector .connector")
-              .attr("stroke", selectedNodeData ? "white" : "green");
+              .attr("stroke", selectedNodeData ? theme.text : theme.accent);
             annotationGroup
               .selectAll(".link-annotation .annotation-note .note-line")
-              .attr("stroke", selectedNodeData ? "white" : "green");
+              .attr("stroke", selectedNodeData ? theme.text : theme.accent);
             annotationGroup
               .selectAll(".link-annotation .annotation-note text")
-              .attr("fill", selectedNodeData ? "gray" : "white");
+              .attr("fill", theme.text);
           }
     
           // Helper function: Adjust dx, dy based on node position relative to SVG bounds.
@@ -6813,7 +6824,7 @@
                 .append("span")
                 .attr("class", "legendLabel")
                 .style("font-size", "12px")
-                .style("color", "gray")
+                .style("color", theme.muted)
                 .text(d.name);
             });
     
@@ -6831,8 +6842,10 @@
                     .getBoundingClientRect();
                   const thisRect = d3.select(this).node().getBoundingClientRect();
     
-                  let newX = event.x;
-                  let newY = event.y;
+                  const currentLeft = parseFloat(d3.select(this).style("left"));
+                  const currentTop = parseFloat(d3.select(this).style("top"));
+                  let newX = currentLeft + event.dx;
+                  let newY = currentTop + event.dy;
     
                   // Clamp horizontally (so it stays fully inside .col2).
                   // 0 is the left edge of parentRect,
@@ -6851,7 +6864,9 @@
                   // Apply the clamped positions.
                   d3.select(this)
                     .style("left", newX + "px")
-                    .style("top", newY + "px");
+                    .style("top", newY + "px")
+                    .style("right", "auto")
+                    .style("bottom", "auto");
                 })
                 .on("end", function () {
                   d3.select(this).classed("active", false);
@@ -7050,12 +7065,8 @@
             clearSelection(wasSelected && !wasSameNode);
             selectedNodeData = d;
             document.body.classList.add("focus-mode-active");
-    
-            // Change the whole page background to black with transition
-            d3.select("body")
-              .transition()
-              .duration(selectedNodeData ? 0 : 300)
-              .style("background", "gray");
+
+
     
             // Hide the global stats display.
             d3.select("#globalStats").style("visibility", "hidden");
@@ -7072,29 +7083,16 @@
             // Show the node level gravity model and metadata groups.
             d3.select("#tradeNodeDistribution").style("visibility", "visible");
             d3.select("#tradeNodeInsight").style("visibility", "visible");
-    
-            // Change Gravity Model background to black.
-            d3.select("#tradeNodeDistribution").style(
-              "background",
-              "rgba(0, 0, 0, 0.4)",
-            );
-            // Change Gravity Model title to white.
-            d3.select(".trade-node-distribution-label").style("color", "white");
-    
-            // Change Placeholder background to black.
-            d3.select("#tradeNodeInsight").style(
-              "background",
-              "rgba(0, 0, 0, 0.4)",
-            );
-            //  Change SCCs title to white.
-            d3.select(".trade-nodeinsight-label").style("color", "white");
-    
-            // If clicked, change all node labels to white
-            labelSelection.attr("fill", "white");
+
+
+
+
+
+            labelSelection.attr("fill", theme.text);
             // Then update node label styling for the selected node.
             labelSelection
               .filter((nd) => String(nd.id) === String(d.id))
-              .attr("fill", "white")
+              .attr("fill", theme.text)
               .attr("font-weight", "bold")
               .attr("background", "red")
               .attr("font-size", "21px")
@@ -7109,44 +7107,21 @@
                 return d3.select(this).classed("inactive-overlay");
               })
               .attr("class", "inactive-overlay inactive-overlay-selected");
-    
-            // If clicked, change legend text to white
-            d3.selectAll(".legendLabel").style("color", "white");
-            // If clicked, add glowing filter to legend circles
-            d3.selectAll(".legendIcon").style("filter", "url(#edgeGlow)");
+
+
+
             // If clicked, add glowing filter to main figure's hotspot strokes
             d3.selectAll(".hotspotStroke").attr("filter", "url(#edgeGlow)");
-            // If clicked, change "?" button color to white
-            d3.select(".hotspotInfoButton i").style("color", "white");
-    
-            // If clicked, change stats color to white
+
+
             d3.select(".statsContainer")
-              .style("border", "1px dashed white")
-              .style("background", "rgba(255, 255, 255, 0.05)");
-            d3.selectAll(".stat-item").style("color", "white");
-    
-            // If clicked, change layer, restore and screenshot buttons to white and their text to dark mode
-            d3.select(".help-overlay-button").style("color", "gray");
-            d3.select(".map-layer-button").style("color", "gray");
-            d3.select(".restore-button").style("color", "gray");
-            d3.select(".screenshot-button").style("color", "gray");
-            d3.select(".help-overlay-button").style("background", "white");
-            d3.select(".map-layer-button").style("background", "white");
-            d3.select(".restore-button").style("background", "white");
-            d3.select(".screenshot-button").style("background", "white");
-    
-            // If clicked, change spectral radius display background to white and text to black
-            d3.select("#networkTransRiskScore").style("color", "white");
-    
-            // If clicked, change the play/pause and restart buttons to white and content to black
-            d3.select("#playPauseBtn").style("background", "white");
-            d3.select("#fromStartBtn").style("background", "white");
-            d3.select("#playPauseBtn").style("color", "black");
-            d3.select("#fromStartBtn").style("color", "black");
-    
-            // If clicked, change date display text to white
-            d3.select("#currentDateWidget").style("color", "white");
-            d3.select("#timeAuthorCredit").style("color", "white");
+              .style("border", `1px solid ${theme.border}`)
+              .style("background", theme.surface);
+
+
+
+
+
     
             linkSelection
               .attr("display", function (linkData) {
@@ -7235,7 +7210,7 @@
                   .attr("y", 0)
                   .attr("width", w)
                   .attr("height", h)
-                  .attr("fill", "black")
+                  .attr("fill", theme.canvas)
                   .attr("opacity", 0.4);
               } else {
                 // If no node was previously selected, animate the overlay.
@@ -7246,7 +7221,7 @@
                   .attr("y", 0)
                   .attr("width", w)
                   .attr("height", h)
-                  .attr("fill", "black")
+                  .attr("fill", theme.canvas)
                   .attr("opacity", 0)
                   .transition()
                   // If is called by updateTemporalNetwork, don't animate the overlay
@@ -7313,14 +7288,10 @@
             document.body.classList.remove("focus-mode-active");
     
             const colorScale = d3
-              .scaleSequential(d3.interpolateSpectral)
+              .scaleSequential(tradeIntensity)
               .domain(d3.extent(allLinks, (d) => Math.log(d.weight)).reverse()); // Inverted color scale
-    
-            // Change the whole page background to white.
-            d3.select("body")
-              .transition()
-              .duration(selectedNodeData ? 0 : 300)
-              .style("background", null);
+
+
     
             if (!selectedNodeData) {
               d3.select(".header-row-1").classed("header-row-dark", false);
@@ -7409,16 +7380,11 @@
             // Hide the node level gravity model and metadata groups.
             d3.select("#tradeNodeDistribution").style("visibility", "hidden");
             d3.select("#tradeNodeInsight").style("visibility", "hidden");
-    
-            // Restore panel backgrounds.
-            d3.select("#tradeNodeDistribution").style("background", null);
-            // Change Gravity Model title to black.
-            d3.select(".trade-node-distribution-label").style("color", "black");
 
-            // Restore panel backgrounds.
-            d3.select("#tradeNodeInsight").style("background", null);
-            //  Change SCCs title to black.
-            d3.select(".trade-nodeinsight-label").style("color", "black");
+
+
+
+
     
             // Update the global stats display.
             updateGlobalStatsChart(window.currentSelectedStat);
@@ -7431,9 +7397,8 @@
     
             // Update the trade clusters display.
             updateSCCs();
-    
-            // If unclicked, change all node labels back to black
-            labelSelection.attr("fill", "black");
+
+            labelSelection.attr("fill", theme.text);
     
             // Raise labels
             labelSelection.raise();
@@ -7444,66 +7409,28 @@
                 return d3.select(this).classed("inactive-overlay-selected");
               })
               .classed("inactive-overlay-selected", false);
-    
-            // If unclicked, change legend text back to gray
-            d3.selectAll(".legendLabel").style("color", "gray");
-            // If unclicked, remove glowing filter to legend circles
-            d3.selectAll(".legendIcon").style("filter", null);
+
+
+
             // If unclicked, remove glowing filter from main figure's hotspot strokes
             d3.selectAll(".hotspotStroke").attr("filter", null);
-            // If unclicked, change "?" button color back to green
-            d3.select(".hotspotInfoButton i").style("color", "green");
+
+
     
             if (isSimulationModeActive() && simulationState.currentFrame) {
               renderSimulationStatsContainer();
             } else {
               d3.select(".statsContainer")
                 .classed("simulation-stats-container", false)
-                .style("border", "1px dashed green")
-                .style("background", "rgba(0, 255, 0, 0.03)");
-              d3.selectAll(".stat-item").style("color", "gray");
+                .style("border", `1px solid ${theme.border}`)
+                .style("background", theme.surface);
+
             }
-    
-            // If unclicked, change layer, restore and screenshot buttons back to green and their text to white
-            d3.select(".help-overlay-button").style("color", "white");
-            d3.select(".map-layer-button").style("color", "white");
-            d3.select(".restore-button").style("color", "white");
-            d3.select(".screenshot-button").style("color", "white");
-            d3.select(".help-overlay-button").style(
-              "background",
-              "linear-gradient(135deg, #4CAF50, #1b872b)",
-            );
-            d3.select(".map-layer-button").style(
-              "background",
-              "linear-gradient(135deg, #4CAF50, #1b872b)",
-            );
-            d3.select(".restore-button").style(
-              "background",
-              "linear-gradient(135deg, #4CAF50, #1b872b)",
-            );
-            d3.select(".screenshot-button").style(
-              "background",
-              "linear-gradient(135deg, #4CAF50, #1b872b)",
-            );
-    
-            // If unclicked, change spectral radius display background to green and text to white
-            d3.select("#networkTransRiskScore").style("color", "green");
-    
-            // If unclicked, change the play/pause and restart buttons back to green and content to white
-            d3.select("#playPauseBtn").style(
-              "background",
-              "linear-gradient(135deg, #4CAF50, #1b872b)",
-            );
-            d3.select("#fromStartBtn").style(
-              "background",
-              "linear-gradient(135deg, #4CAF50, #1b872b)",
-            );
-            d3.select("#playPauseBtn").style("color", "white");
-            d3.select("#fromStartBtn").style("color", "white");
-    
-            // If unclicked, change the date display text back to gray
-            d3.select("#currentDateWidget").style("color", "gray");
-            d3.select("#timeAuthorCredit").style("color", "gray");
+
+
+
+
+
     
             // If unclicked, change link colors back, remove arrowheads and glowing filter
             linkSelection
@@ -7774,13 +7701,13 @@
                 // Determine the foreground color.
                 const targetNode = allNodes.find((n) => n.id === dest_id);
                 const fgColor = trade.isSelfLoop
-                  ? "gray"
+                  ? theme.muted
                   : targetNode
                     ? nodeColor(targetNode.community)
-                    : "gray";
+                    : theme.muted;
                 const barWidth = distanceScale(trade.distance);
                 const distanceSvg = `<span class="trade-distance"><svg class="distance-bar" viewBox="0 0 50 10" width="50" height="10" aria-hidden="true" focusable="false">
-                                                      <rect x="0" y="0" width="50" height="10" fill="#eee"></rect>
+                                                      <rect x="0" y="0" width="50" height="10" fill="${theme.elevated}"></rect>
                                                       <rect x="0" y="0" width="${trade.isSelfLoop ? 0 : barWidth}" height="10" fill="${fgColor}"></rect>
                                                   </svg></span>`;
                 html += `
@@ -7827,13 +7754,13 @@
                 // For incoming, use the source node's community.
                 const sourceNode = allNodes.find((n) => n.id === src_id);
                 const fgColor = trade.isSelfLoop
-                  ? "gray"
+                  ? theme.muted
                   : sourceNode
                     ? nodeColor(sourceNode.community)
-                    : "gray";
+                    : theme.muted;
                 const barWidth = distanceScale(trade.distance);
                 const distanceSvg = `<span class="trade-distance"><svg class="distance-bar" viewBox="0 0 50 10" width="50" height="10" aria-hidden="true" focusable="false">
-                                               <rect x="0" y="0" width="50" height="10" fill="#eee"></rect>
+                                               <rect x="0" y="0" width="50" height="10" fill="${theme.elevated}"></rect>
                                                <rect x="0" y="0" width="${trade.isSelfLoop ? 0 : barWidth}" height="10" fill="${fgColor}"></rect>
                                            </svg></span>`;
                 html += `
@@ -7869,8 +7796,8 @@
           }
     
           // Focus-mode Trade Node Insight
-          const FOCUS_OUT_COLOR = "#46fa46";
-          const FOCUS_IN_COLOR = "#fcc67e";
+          const FOCUS_OUT_COLOR = theme.outgoing;
+          const FOCUS_IN_COLOR = theme.incoming;
           const FOCUS_AXIS_COLOR = "rgba(255,255,255,0.6)";
     
           function getLinkSourceId(link) {
@@ -8338,7 +8265,7 @@
                     .attr("class", "partner")
                     .attr("x", -8)
                     .attr("text-anchor", "end")
-                    .attr("fill", "white")
+                    .attr("fill", theme.text)
                     .style("font-size", "10px")
                     .style("opacity", 0)
                     .attr("y", (d) => y(d.partnerId) + y.bandwidth() / 2)
@@ -8366,7 +8293,7 @@
               .call(axis);
     
             g.selectAll("g.x-axis text")
-              .attr("fill", "white")
+              .attr("fill", theme.text)
               .style("font-size", "10px");
             g.selectAll("g.x-axis path, g.x-axis line").attr(
               "stroke",
@@ -8669,7 +8596,7 @@
             // Style axis elements
             axisG
               .selectAll("text")
-              .attr("fill", "white")
+              .attr("fill", theme.text)
               .style("font-size", "10px");
             axisG.selectAll("path,line").attr("stroke", "rgba(255,255,255,0.35)");
     
@@ -8849,7 +8776,7 @@
             const inY = outY + barH + gap;
     
             function commFill(c) {
-              return c === "NA" ? "#888" : nodeColor(c);
+              return c === "NA" ? theme.muted : nodeColor(c);
             }
     
             function buildSegments(map, total, row, y) {
@@ -8895,7 +8822,7 @@
                     .attr("class", "row-label")
                     .attr("x", -8)
                     .attr("text-anchor", "end")
-                    .attr("fill", "white")
+                    .attr("fill", theme.text)
                     .style("font-size", "10px")
                     .style("opacity", 0)
                     .attr("y", (d) => d.y)
@@ -9004,7 +8931,7 @@
                     .append("text")
                     .attr("x", 14)
                     .attr("y", -1)
-                    .attr("fill", "white")
+                    .attr("fill", theme.text)
                     .style("font-size", "10px");
     
                   return row;
@@ -9152,8 +9079,8 @@
             const edgeColor = d3
               .scaleSequential(
                 isSimulationModeActive()
-                  ? d3.interpolateYlOrRd
-                  : d3.interpolateSpectral,
+                  ? exposureIntensity
+                  : tradeIntensity,
               )
               .domain(
                 isSimulationModeActive()
@@ -9433,7 +9360,7 @@
               .attr("y1", 0)
               .attr("x2", (d) => xScale(d))
               .attr("y2", height)
-              .attr("stroke", "lightgray")
+              .attr("stroke", theme.grid)
               .attr("stroke-dasharray", "2,2");
             xGrid.exit().remove();
     
@@ -9449,8 +9376,8 @@
               .attr("x", (d) => xScale(d) + 6) // slight offset to the right
               .attr("y", height - 3) // near the bottom of the grid line
               .attr("text-anchor", "start")
-              .attr("fill", "gray")
-              .style("font", "10px sans-serif")
+              .attr("fill", theme.muted)
+              .style("font", `10px ${theme.font}`)
               .text((d) => tickFormat(d));
             xGridLabels.exit().remove();
     
@@ -9469,7 +9396,7 @@
               .attr("y1", (d) => yScale(d))
               .attr("x2", width)
               .attr("y2", (d) => yScale(d))
-              .attr("stroke", "lightgray")
+              .attr("stroke", theme.grid)
               .attr("stroke-dasharray", "2,2");
             yGrid.exit().remove();
     
@@ -9485,8 +9412,8 @@
               .attr("x", 0)
               .attr("y", (d) => yScale(d) - 5) // slightly above the grid line
               .attr("text-anchor", "start")
-              .attr("fill", "gray")
-              .style("font", "10px sans-serif")
+              .attr("fill", theme.muted)
+              .style("font", `10px ${theme.font}`)
               .text((d) => tickFormat(d));
             yGridLabels.exit().remove();
     
@@ -9524,7 +9451,7 @@
               .duration(750)
               .attr("d", d3.geoPath())
               .attr("fill", (d) => colorScale(d.value))
-              .attr("stroke", "gray")
+              .attr("stroke", theme.muted)
               .attr("opacity", 0.12);
             contours.exit().remove();
     
@@ -9550,7 +9477,7 @@
               .attr("r", 0)
               .attr("fill", (d) => {
                 const sourceNode = allNodes.find((n) => n.id === d.sourceId);
-                return sourceNode ? nodeColor(sourceNode.community) : "gray";
+                return sourceNode ? nodeColor(sourceNode.community) : theme.muted;
               })
               .attr("opacity", 0.7)
               .transition()
@@ -9588,7 +9515,7 @@
               trendLine = g
                 .append("line")
                 .attr("class", "trend-line")
-                .attr("stroke", "green")
+                .attr("stroke", theme.accent)
                 .attr("stroke-width", 2)
                 .attr("stroke-dasharray", "5,5");
             }
@@ -9608,8 +9535,8 @@
                 .append("text")
                 .attr("class", "distance-label")
                 .attr("text-anchor", "middle")
-                .attr("fill", "black")
-                .style("font", "12px sans-serif")
+                .attr("fill", theme.text)
+                .style("font", `12px ${theme.font}`)
                 .text("Distance →");
             }
             topLabel.attr(
@@ -9639,8 +9566,8 @@
                 .append("text")
                 .attr("class", "r2-label")
                 .attr("text-anchor", "end")
-                .attr("fill", "black")
-                .style("font", "11px sans-serif");
+                .attr("fill", theme.text)
+                .style("font", `11px ${theme.font}`);
             }
             r2Label.attr("x", width).attr("y", -10).text(rSquaredText);
     
@@ -9651,8 +9578,8 @@
                 .append("text")
                 .attr("class", "volume-label")
                 .attr("text-anchor", "middle")
-                .attr("fill", "black")
-                .style("font", "12px sans-serif")
+                .attr("fill", theme.text)
+                .style("font", `12px ${theme.font}`)
                 .text("Volume →");
             }
             rightLabel.attr(
@@ -9714,7 +9641,7 @@
                 .text("No data available")
                 .attr("x", width / 2)
                 .attr("y", height / 2)
-                .attr("fill", "gray")
+                .attr("fill", theme.muted)
                 .attr("text-anchor", "middle")
                 .style("font-style", "italic");
               return;
@@ -9744,8 +9671,8 @@
             const sizeScale = d3.scaleSqrt().domain(massExtent).range([3, 10]);
     
             // Colors for circles.
-            const outgoingColor = "#46fa46"; // bright green
-            const incomingColor = "#fcc67e"; // bright orange
+            const outgoingColor = theme.outgoing;
+            const incomingColor = theme.incoming;
     
             const tickFormat = d3.format("~s");
     
@@ -9763,7 +9690,7 @@
               .attr("y1", 0)
               .attr("x2", (d) => xScale(d))
               .attr("y2", height)
-              .attr("stroke", "white")
+              .attr("stroke", theme.grid)
               .attr("stroke-dasharray", "2,2");
             xGrid.exit().remove();
     
@@ -9778,8 +9705,8 @@
               .attr("x", (d) => xScale(d) + 6)
               .attr("y", height - 3)
               .attr("text-anchor", "start")
-              .attr("fill", "white")
-              .style("font", "10px sans-serif")
+              .attr("fill", theme.text)
+              .style("font", `10px ${theme.font}`)
               .text((d) => tickFormat(d));
             xGridLabels.exit().remove();
     
@@ -9797,7 +9724,7 @@
               .attr("y1", (d) => yScale(d))
               .attr("x2", width)
               .attr("y2", (d) => yScale(d))
-              .attr("stroke", "white")
+              .attr("stroke", theme.grid)
               .attr("stroke-dasharray", "2,2");
             yGrid.exit().remove();
     
@@ -9812,8 +9739,8 @@
               .attr("x", 0)
               .attr("y", (d) => yScale(d) - 5)
               .attr("text-anchor", "start")
-              .attr("fill", "white")
-              .style("font", "10px sans-serif")
+              .attr("fill", theme.text)
+              .style("font", `10px ${theme.font}`)
               .text((d) => tickFormat(d));
             yGridLabels.exit().remove();
     
@@ -9842,13 +9769,13 @@
                 .duration(750)
                 .attr("d", d3.geoPath())
                 .attr("fill", fillColor)
-                .attr("stroke", "white")
+                .attr("stroke", theme.text)
                 .attr("opacity", 0.12);
               paths.exit().remove();
               contourLayer.lower();
             }
     
-            // Overall contour (fuchsia), outgoing (#46fa46) and incoming (#fcc67e).
+            // Overall contour with incoming and outgoing routes.
             updateContourLayer(tradeDataAll, "contour-all", "fuchsia");
             if (outgoingData.length > 0) {
               updateContourLayer(outgoingData, "contour-outgoing", outgoingColor);
@@ -10026,8 +9953,8 @@
                 .append("text")
                 .attr("class", "r2-label")
                 .attr("text-anchor", "end")
-                .attr("fill", "white")
-                .style("font", "11px sans-serif");
+                .attr("fill", theme.text)
+                .style("font", `11px ${theme.font}`);
             }
             // Clear previous content.
             r2Label.html("");
@@ -10065,8 +9992,8 @@
                 .append("text")
                 .attr("class", "distance-label")
                 .attr("text-anchor", "middle")
-                .attr("fill", "white")
-                .style("font", "12px sans-serif")
+                .attr("fill", theme.text)
+                .style("font", `12px ${theme.font}`)
                 .text("Distance →");
             }
             topLabel.attr(
@@ -10082,8 +10009,8 @@
                 .append("text")
                 .attr("class", "volume-label")
                 .attr("text-anchor", "middle")
-                .attr("fill", "white")
-                .style("font", "12px sans-serif")
+                .attr("fill", theme.text)
+                .style("font", `12px ${theme.font}`)
                 .text("Volume →");
             }
             rightLabel.attr(
@@ -10189,7 +10116,7 @@
                 if (d.weight <= 0) return "none";
                 if (selectedNodeData) {
                   const src = typeof d.source === "object" ? d.source.id : d.source;
-                  return src === selectedNodeData.id ? "#46fa46" : "#fcc67e";
+                  return src === selectedNodeData.id ? theme.outgoing : theme.incoming;
                 } else {
                   return edgeColor(Math.log(d.weight));
                 }
@@ -10222,7 +10149,7 @@
               .on("click", debouncedOnClickNode)
               .on("mouseover", function (event, d) {
                 hoveredNode = d;
-                d3.select(this).select("circle.primary").attr("stroke", "black");
+                d3.select(this).select("circle.primary").attr("stroke", theme.text);
                 updateAnnotationForNode(d, annotationGroup);
               })
               .on("mousemove", function (event, d) {
@@ -10273,7 +10200,7 @@
                   .style("align-items", "center")
                   .style("justify-content", "center")
                   .style("font-size", `${iconSize * 0.7}px`)
-                  .style("color", "gray")
+                  .style("color", theme.muted)
                   .html('<i class="fa-solid fa-circle-xmark"></i>');
               }
             });
@@ -10357,7 +10284,7 @@
                   .append("path")
                   .attr("class", "donut-self")
                   .attr("d", arc({ startAngle: 0, endAngle: selfAngle }))
-                  .attr("fill", "white")
+                  .attr("fill", theme.text)
                   .attr("opacity", 0.8);
     
                 // Append arc for external trade (e.g., blue).
@@ -10365,7 +10292,7 @@
                   .append("path")
                   .attr("class", "donut-other")
                   .attr("d", arc({ startAngle: selfAngle, endAngle: 2 * Math.PI }))
-                  .attr("fill", "black")
+                  .attr("fill", theme.canvas)
                   .attr("opacity", 0.1);
               }
             });
@@ -10428,7 +10355,7 @@
                   .style("align-items", "center")
                   .style("justify-content", "center")
                   .style("font-size", iconSize * 0.7 + "px")
-                  .style("color", "gray")
+                  .style("color", theme.muted)
                   .html('<i class="fa-solid fa-circle-xmark"></i>');
                 foSel = nodeGroup.select("foreignObject.inactive-overlay");
               }
@@ -10722,7 +10649,7 @@
                     return arc(interpolate(t));
                   };
                 })
-                .attr("fill", "white")
+                .attr("fill", theme.canvas)
                 .attr("opacity", 0.8);
     
               // Transition the external trade arc.
@@ -10742,7 +10669,7 @@
                     return arc(interpolate(t));
                   };
                 })
-                .attr("fill", "black")
+                .attr("fill", theme.text)
                 .attr("opacity", 0.1);
             });
           }
@@ -10923,7 +10850,7 @@
               .append("path")
               .attr("d", path)
               .attr("fill", "none")
-              .attr("stroke", "#999");
+              .attr("stroke", theme.muted);
     
             // Fade in the map layer.
             if (instant) {
@@ -10942,7 +10869,7 @@
                 .attr("y", 0)
                 .attr("width", w)
                 .attr("height", h)
-                .attr("fill", "black")
+                .attr("fill", theme.canvas)
                 .attr("opacity", 0.4);
             }
     
@@ -11484,7 +11411,7 @@
                       return "orange"; // hovered node
                     else if (descendants.includes(n))
                       return "cyan"; // its descendants
-                    else return "lightgray"; // all others
+                    else return theme.grid; // all others
                   });
               })
               .on("mouseout", function () {
@@ -11521,7 +11448,7 @@
               .attr("dy", -4)
               .attr("dx", 14)
               .attr("font-size", "9px")
-              .attr("fill", "white")
+              .attr("fill", theme.text)
               .attr("text-anchor", "middle")
               .attr("transform", (d) => `rotate(-45)`)
               .text((d) => d.data.name);
@@ -11760,7 +11687,7 @@
           }
 
           function getTradeCommunityColor(key) {
-            return key === "NA" ? "#9ca3af" : nodeColor(Number(key));
+            return key === "NA" ? theme.muted : nodeColor(Number(key));
           }
 
           function getTradeCommunityStructureData() {
@@ -11926,7 +11853,7 @@
             );
             const maxValue = d3.max(cells, (cell) => cell.value) || 1;
             const color = d3
-              .scaleSequential(d3.interpolateYlGnBu)
+              .scaleSequential(d3.interpolateRgb(theme.surface, theme.accent))
               .domain([0, maxValue]);
 
             const summaryItems = [
@@ -12015,11 +11942,11 @@
                   .attr("width", x.bandwidth())
                   .attr("height", y.bandwidth())
                   .attr("fill", (cell) =>
-                    cell.value > 0 ? color(cell.value) : "rgba(23,34,24,0.04)",
+                    cell.value > 0 ? color(cell.value) : theme.surface,
                   )
                   .attr("stroke", (cell) =>
                     cell.source === cell.target
-                      ? "rgba(23,34,24,0.45)"
+                      ? theme.muted
                       : "rgba(255,255,255,0.9)",
                   )
                   .attr("stroke-width", (cell) =>
@@ -12272,7 +12199,7 @@
               .enter()
               .append("line")
               .attr("class", "ringLink")
-              .attr("stroke", "#999")
+              .attr("stroke", theme.muted)
               .attr("stroke-opacity", 0.6)
               .attr("stroke-width", 1.5);
     
@@ -12284,7 +12211,7 @@
               .attr("class", "ringNode")
               .attr("r", (d) => nodeSize(d.tradeTotal))
               .attr("fill", (d) => nodeColor(d.community))
-              .attr("stroke", "gray")
+              .attr("stroke", theme.muted)
               .attr("stroke-width", 1)
               .call(
                 d3
@@ -12309,7 +12236,7 @@
               .attr("class", "ringNodeLabelBg")
               .attr("rx", 4)
               .attr("ry", 4)
-              .attr("fill", "gray");
+              .attr("fill", theme.elevated);
     
             // Append the text element inside the same group
             labelGroup
@@ -12318,7 +12245,7 @@
               .attr("text-anchor", "middle")
               .attr("dy", "-0.5em")
               .style("font-size", "8px")
-              .style("fill", "white")
+              .style("fill", theme.text)
               .style("font-weight", "bold")
               .text((d) => d.id)
               .each(function () {
@@ -12372,7 +12299,7 @@
               .attr("text-anchor", "middle")
               .style("font-weight", "bold")
               .style("font-size", "14px")
-              .style("fill", "white")
+              .style("fill", theme.text)
               .text((d) => `Cluster #${d + 1}`);
     
             // Append a background rectangle behind the text inside the group.
@@ -12388,7 +12315,7 @@
                 .attr("height", bbox.height + 4)
                 .attr("rx", 4)
                 .attr("ry", 4)
-                .attr("fill", "green");
+                .attr("fill", theme.elevated);
             });
     
             clusterLabelGroup
@@ -12438,7 +12365,7 @@
                 // Style the annotation note background via the custom class
                 g.select("g.cluster-annotation")
                   .selectAll("rect.annotation-note-bg")
-                  .attr("fill", "green")
+                  .attr("fill", theme.elevated)
                   .attr("fill-opacity", 0.8)
                   .attr("rx", 4)
                   .attr("ry", 4);
@@ -12447,7 +12374,7 @@
                   .selectAll(
                     "text.annotation-note-title, text.annotation-note-label",
                   )
-                  .attr("fill", "white");
+                  .attr("fill", theme.text);
               })
               .on("mouseout", function () {
                 g.selectAll(".cluster-annotation").remove();
@@ -13267,8 +13194,8 @@
                 startPlug: "disc",
                 endPlug: "arrow3",
                 size: 3,
-                color: "rgba(255,0,0,0.95)",
-                dash: { animation: true },
+                color: theme.muted,
+                dash: { animation: false },
               });
     
               line.show("draw", { duration: 450 });
@@ -13550,7 +13477,9 @@
             const filename = `network_${timestamp}_${Math.random().toString(36).substring(7)}.png`;
     
             // Download the SVG as PNG.
-            saveSvgAsPng(document.getElementById("mainFigureSVG"), filename);
+            saveSvgAsPng(document.getElementById("mainFigureSVG"), filename, {
+              backgroundColor: theme.canvas,
+            });
           }
     
           // Screenshot button handler.
