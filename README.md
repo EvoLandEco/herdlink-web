@@ -1,6 +1,6 @@
 # HerdLink Web
 
-![Version](https://img.shields.io/badge/version-v0.6.6--alpha-2f6fed)
+![Version](https://img.shields.io/badge/version-v0.7.0--beta-2f6fed)
 ![Deployment](https://img.shields.io/badge/deployment-GitHub%20Pages-121013?logo=github)
 ![Website](https://img.shields.io/website?url=https%3A%2F%2Fherdlink.nl&label=HerdLink.nl)
 ![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)
@@ -60,6 +60,56 @@ HerdLink Web is a browser-based tool for exploring livestock trade networks in t
 │   └── favicon.ico
 ├── package.json
 └── vite.config.js
+```
+
+## Map Layers
+
+The map layer menu offers a plain background, a light BRT map, and aerial imagery
+from 2022. Major roads, water, province boundaries, place labels, and land cover
+can be switched independently. The opacity control adjusts the background,
+context overlays, and census colouring. Background imagery contains its own
+roads, water, and labels.
+
+Region colouring shows the analytical view, pig density, or pig holdings density.
+Census colours follow the trade date's calendar year and share one linear scale
+across 2018–2022. Zero and missing observations have separate appearances. The
+census measures animals and businesses at their main establishment address;
+holdings are not individual farm sites. Census definitions follow each reference
+year, while the displayed COROP boundaries are from 2024. These layers do not
+change the disease model or identify the vehicle routes behind regional flows.
+
+- [Kadaster TOP250NL](https://www.pdok.nl/introductie/-/article/basisregistratie-topografie-brt-topnl)
+  supplies the bundled context geometry in Dutch RD New coordinates. Land cover
+  distinguishes woodland, settlements, and sand; it does not classify agriculture.
+  Place labels use the source's population threshold of 50,000. Source dates,
+  licence, selections, and archive checksum are recorded in
+  [geography-sources.json](public/assets/files/herdlink/layers/geography-sources.json).
+- [CBS agricultural census](https://www.cbs.nl/nl-nl/cijfers/detail/80781ned)
+  supplies published COROP pig and holdings totals. Densities divide these totals
+  by the same year's published land area, excluding water. The
+  [census metadata](public/assets/data/pig-census.json) records source tables,
+  reference dates, and land-area survey vintages.
+- PDOK serves [BRT background tiles](https://www.pdok.nl/ogc-webservices/-/article/basisregistratie-topografie-achtergrondkaarten-brt-a-)
+  and [aerial imagery](https://www.pdok.nl/ogc-webservices/-/article/pdok-luchtfoto-rgb-open-)
+  on demand. They require an internet connection. Tiles are embedded in the SVG
+  before PNG export, together with the layer legend.
+
+The source data use CC BY 4.0. The application code's MIT licence does not replace
+the data licences.
+
+Rebuild the bundled data with Python 3:
+
+```bash
+python3 scripts/fetch-map-geography.py
+python3 scripts/fetch-pig-census.py
+```
+
+Validate the bundled data and map calculations:
+
+```bash
+python3 scripts/fetch-map-geography.py --check
+python3 scripts/fetch-pig-census.py --check
+node --test tests/map-layers.test.js
 ```
 
 ## Development

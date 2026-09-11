@@ -3343,7 +3343,9 @@
 
           function applySimulationMapPrevalence() {
             if (!nlMapData) return;
-            d3.selectAll(".map path").attr("fill", function (feature) {
+            const regions = svg.selectAll(".map-region");
+            if (mapLayers.applyRegionFill(regions, window.currentDate?.getFullYear())) return;
+            regions.attr("fill", function (feature) {
               if (!isSimulationModeActive()) return "none";
               const id = feature?.properties?.statcode;
               const state = simulationState.currentFrame?.nodeStates[id];
@@ -3386,7 +3388,7 @@
               .attr("fill", (d) => nodeColor(d.community))
               .attr("stroke", null)
               .attr("stroke-width", null);
-            d3.selectAll(".map path").attr("fill", "none").attr("fill-opacity", null);
+            applySimulationMapPrevalence();
           }
 
           function resetFocusInsightRenderState(clearSummary = false) {
@@ -3728,6 +3730,13 @@
             });
           }
     
+          const mapLayers = window.createHerdLinkMapLayers({
+            svg,
+            theme,
+            fetchAsset,
+            refreshRegions: applySimulationMapPrevalence,
+          });
+
           // Load GeoJSON files.
           const mapDataReady = fetchAsset(
             "assets/files/herdlink/nl_corop.geojson",
@@ -10838,6 +10847,7 @@
             const path = d3.geoPath().projection(projection);
     
             // Insert the map layer with initial opacity 0.
+            svg.selectAll(".map").interrupt().remove();
             const mapLayer = svg
               .insert("g", ":first-child")
               .attr("class", "map")
@@ -10848,9 +10858,12 @@
               .data(nlMapData.features)
               .enter()
               .append("path")
+              .attr("class", "map-region")
               .attr("d", path)
               .attr("fill", "none")
               .attr("stroke", theme.muted);
+
+            mapLayers.mount({ projection, geometry: nlMapData, width: w, height: h });
     
             // Fade in the map layer.
             if (instant) {
@@ -10905,6 +10918,7 @@
           }
     
           function switchToGraphMode() {
+            mapLayers.unmount();
             disableAllButtons();
             disableAllCheckboxes();
     
@@ -12602,6 +12616,7 @@
           }
     
           function initHerdLink(csvUrl) {
+            mapLayers.unmount();
             // Clear any previous network visualization.
             if (svg && svg.node().hasChildNodes()) {
               svg.selectAll("*").remove();
@@ -12853,6 +12868,7 @@
                   // Function to update the network for a given date.
                   function updateNetworkForDate(selectedDate, fullData) {
                     window.currentDate = selectedDate;
+                    applySimulationMapPrevalence();
                     const filteredData = fullData.filter(
                       (d) => d.time.getTime() === selectedDate.getTime(),
                     );
@@ -13411,6 +13427,7 @@
     
           // Disable all controls, then optionally re-enable them after a timeout.
           function disableAllButtons() {
+            mapLayers.close();
             d3.selectAll(".csv-switcher, .mode-switcher-frame").classed(
               "disabled",
               true,
@@ -13429,7 +13446,7 @@
                 if (simulationState.status !== "running") {
                   d3.selectAll(".mode-switcher-frame").classed("disabled", false);
                 }
-                d3.select("#mapLayerButton").attr("disabled", true);
+                d3.select("#mapLayerButton").attr("disabled", currentMode === "map" ? null : true);
                 d3.select("#toggleModeButton").attr("disabled", null);
                 d3.select("#screenshotButton").attr("disabled", null);
                 d3.select("#restoreButton").attr("disabled", null);
@@ -13456,18 +13473,8 @@
             }
           }
     
-          document
-            .getElementById("mapLayerButton")
-            .addEventListener("click", function () {
-              if (this.disabled) {
-                return;
-              }
-              const menu = document.getElementById("mapLayerMenu");
-              menu.classList.toggle("active");
-            });
-    
           // Save the current SVG as a PNG file.
-          function downloadSvg() {
+          async function downloadSvg() {
             // Generate a filename from timestamp and random suffix.
             const timestamp = new Date()
               .toISOString()
@@ -13477,9 +13484,14 @@
             const filename = `network_${timestamp}_${Math.random().toString(36).substring(7)}.png`;
     
             // Download the SVG as PNG.
-            saveSvgAsPng(document.getElementById("mainFigureSVG"), filename, {
-              backgroundColor: theme.canvas,
-            });
+            try {
+              await mapLayers.ready();
+              await saveSvgAsPng(document.getElementById("mainFigureSVG"), filename, {
+                backgroundColor: theme.canvas,
+              });
+            } catch (error) {
+              mapLayers.showError(error);
+            }
           }
     
           // Screenshot button handler.

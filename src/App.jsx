@@ -4,6 +4,9 @@ import { LeftPanel } from "./components/LeftPanel";
 import { NetworkPanel } from "./components/NetworkPanel";
 import { RightPanel } from "./components/RightPanel";
 import { ScreenSizeNotice } from "./components/ScreenSizeNotice";
+import { createMapLayers } from "./mapLayers";
+
+window.createHerdLinkMapLayers = createMapLayers;
 
 const basePath = import.meta.env.BASE_URL;
 

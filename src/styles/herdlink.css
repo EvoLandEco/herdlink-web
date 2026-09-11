@@ -1177,90 +1177,119 @@ body.focus-mode-active .panel-info-button:focus-visible,
 .map-layer-menu {
   position: absolute;
   bottom: 70px;
-  right: 116px;
-  overflow: hidden;
+  right: var(--space-6);
+  display: none;
+  width: min(292px, calc(100% - 40px));
+  max-height: calc(100% - 90px);
+  padding: var(--space-5);
+  overflow-y: auto;
+  scrollbar-gutter: stable;
+  overscroll-behavior: contain;
   border: 1px solid var(--color-border);
   border-radius: var(--radius-md);
   background: var(--color-surface-strong);
   box-shadow: var(--shadow-card);
   backdrop-filter: blur(12px);
-  transform-origin: bottom;
-  transform: scaleY(0);
-  opacity: 0;
-  transition:
-    transform var(--transition-base),
-    opacity var(--transition-base);
+  color: var(--color-text);
+  font-size: 0.8rem;
+  line-height: 1.4;
   z-index: 9998;
 }
+
 .map-layer-menu.active {
-  transform: scaleY(1);
-  opacity: 1;
+  display: block;
 }
 
-.map-layer-menu .menu-entry {
-  display: flex;
-  align-items: center;
-  padding: var(--space-3) 15px;
-  border-bottom: 1px solid rgba(114, 228, 212, 0.08);
-  background: transparent;
+.map-layer-menu h2 {
+  margin: 0 0 var(--space-4);
+  font-size: 0.95rem;
 }
-.map-layer-menu .menu-entry:last-child {
-  border-bottom: none;
+
+.map-layer-field {
+  display: grid;
+  gap: var(--space-1);
+  margin-bottom: var(--space-4);
 }
-.map-layer-menu .menu-entry i {
-  width: 20px;
-  margin-right: 10px;
-  text-align: center;
+
+.map-layer-field > label,
+.map-layer-context legend,
+.map-layer-opacity > label {
+  font-weight: 600;
 }
-.map-layer-menu .menu-text {
-  flex: 1;
-  font-size: 0.9rem;
+
+.map-layer-field select,
+.map-layer-reset {
+  width: 100%;
+  min-width: 0;
+  min-height: 32px;
+  padding: var(--space-1) var(--space-2);
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--color-surface-muted);
   color: var(--color-text);
 }
 
-.map-layer-menu .switch {
-  position: relative;
-  display: inline-block;
-  width: 40px;
-  height: 20px;
-}
-
-.map-layer-menu .switch input {
-  opacity: 0;
-  width: 0;
-  height: 0;
-}
-
-.map-layer-menu .slider {
-  position: absolute;
+.map-layer-reset {
+  margin-top: var(--space-3);
   cursor: pointer;
-  top: 0;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  background-color: var(--color-track);
-  transition: background-color var(--transition-base);
-  border-radius: 20px;
 }
 
-.map-layer-menu .slider:before {
-  position: absolute;
-  content: "";
-  height: 16px;
+.map-layer-reset:hover {
+  border-color: var(--color-accent);
+}
+
+.map-layer-context {
+  min-width: 0;
+  padding: 0 0 var(--space-3);
+  margin: 0 0 var(--space-3);
+  border: 0;
+  border-bottom: 1px solid var(--color-border);
+}
+
+.map-layer-context legend {
+  padding: 0;
+  margin-bottom: var(--space-1);
+  font-size: inherit;
+}
+
+.map-layer-context label {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-height: 29px;
+  cursor: pointer;
+}
+
+.map-layer-context input {
+  flex: 0 0 16px;
   width: 16px;
-  left: 2px;
-  bottom: 2px;
-  background-color: white;
-  transition: transform var(--transition-base);
-  border-radius: 50%;
+  height: 16px;
+  margin: 0;
 }
 
-.map-layer-menu .switch input:checked + .slider {
-  background-color: var(--color-accent);
+.map-layer-opacity {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: var(--space-1) var(--space-2);
 }
 
-.map-layer-menu .switch input:checked + .slider:before {
-  transform: translateX(20px);
+.map-layer-opacity input {
+  grid-column: 1 / -1;
+  width: 100%;
+  min-height: 24px;
+  margin: 0;
+  accent-color: var(--color-accent);
+}
+
+#mapLayerStatus {
+  margin: var(--space-3) 0 0;
+  color: var(--color-text-muted);
+  font-size: 0.72rem;
+  overflow-wrap: anywhere;
+}
+
+#mapLayerStatus:empty {
+  display: none;
 }
 
 .screenshot-button {
@@ -2689,7 +2718,7 @@ g.node:hover {
   animation:
     none;
   right: 20px;
-  bottom: 120px;
+  bottom: calc(120px + var(--map-layer-legend-height, 0px));
   min-width: 95px;
   height: 140px;
   position: absolute;
@@ -2864,7 +2893,6 @@ body.simulation-mode-active .hotspotInfoButton {
 }
 
 .map path {
-  fill: none;
   stroke: var(--color-border-strong);
   stroke-width: 1;
 }
@@ -3795,11 +3823,6 @@ svg.leader-line:not(:root) {
   z-index: 25000 !important;
 }
 
-
-.map-layer-menu input:focus-visible + .slider {
-  outline: 2px solid var(--color-focus);
-  outline-offset: -3px;
-}
 
 #mainFigureSVG {
   background: var(--color-canvas);

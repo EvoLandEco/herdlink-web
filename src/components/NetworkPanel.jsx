@@ -1,7 +1,9 @@
-const mapLayerEntries = [
-  { label: "Map", iconClass: "fa-solid fa-map" },
-  { label: "Roads", iconClass: "fa-solid fa-road" },
-  { label: "Satellite", iconClass: "fa-solid fa-satellite-dish" },
+const mapContextLayers = [
+  { id: "mapRoads", label: "Major roads" },
+  { id: "mapWater", label: "Water" },
+  { id: "mapProvinces", label: "Province boundaries" },
+  { id: "mapPlaces", label: "Place labels" },
+  { id: "mapLandCover", label: "Land cover" },
 ];
 
 export function NetworkPanel() {
@@ -17,8 +19,10 @@ export function NetworkPanel() {
         data-tip="Map layers"
         data-tip-placement="top"
         aria-label="Map layers"
+        aria-controls="mapLayerMenu"
+        aria-expanded="false"
       >
-        <i className="fa-solid fa-layer-group"></i>
+        <i className="fa-solid fa-layer-group" aria-hidden="true"></i>
       </button>
       <button
         id="helpOverlayButton"
@@ -30,17 +34,47 @@ export function NetworkPanel() {
       >
         <i className="fa-solid fa-question"></i>
       </button>
-      <div id="mapLayerMenu" className="map-layer-menu">
-        {mapLayerEntries.map((entry) => (
-          <div key={entry.label} className="menu-entry">
-            <i className={entry.iconClass}></i>
-            <span className="menu-text">{entry.label}</span>
-            <label className="switch">
-              <input type="checkbox" className="menu-checkbox" />
-              <span className="slider round"></span>
+      <div
+        id="mapLayerMenu"
+        className="map-layer-menu"
+        role="region"
+        aria-labelledby="mapLayerHeading"
+      >
+        <h2 id="mapLayerHeading">Map layers</h2>
+        <div className="map-layer-field">
+          <label htmlFor="mapBackground">Background</label>
+          <select id="mapBackground" defaultValue="plain">
+            <option value="plain">Plain</option>
+            <option value="light">Light map</option>
+            <option value="aerial">Aerial imagery</option>
+          </select>
+        </div>
+        <fieldset className="map-layer-context">
+          <legend>Context overlays</legend>
+          {mapContextLayers.map((layer) => (
+            <label key={layer.id} htmlFor={layer.id}>
+              <input id={layer.id} type="checkbox" defaultChecked={false} />
+              <span>{layer.label}</span>
             </label>
-          </div>
-        ))}
+          ))}
+        </fieldset>
+        <div className="map-layer-field">
+          <label htmlFor="mapRegionFill">Region colouring</label>
+          <select id="mapRegionFill" defaultValue="metric">
+            <option value="metric">Analytical metric</option>
+            <option value="pigs">Pig density</option>
+            <option value="holdings">Pig holdings density</option>
+          </select>
+        </div>
+        <div className="map-layer-opacity">
+          <label htmlFor="mapLayerOpacity">Layer opacity</label>
+          <output id="mapLayerOpacityValue" htmlFor="mapLayerOpacity">55%</output>
+          <input id="mapLayerOpacity" type="range" min="0" max="100" defaultValue="55" />
+        </div>
+        <button id="mapLayerReset" className="map-layer-reset" type="button">
+          Reset to default
+        </button>
+        <div id="mapLayerStatus" role="status" aria-live="polite"></div>
       </div>
       <div
         className="toggle-button-container has-tip"
