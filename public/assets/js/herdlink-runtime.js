@@ -185,6 +185,10 @@
           let simulationRunId = 0;
           let updateNetworkForDateHandler = null;
           let simulationRecomputeTimer = null;
+          const simulationLinkInterventions = new Map();
+          const simulationNodeInterventions = new Map();
+          let simulationControlView = "links";
+          let simulationNodeControlsPanel = null;
           let simulationState = {
             status: "idle",
             settings: null,
@@ -204,6 +208,145 @@
 
           function getLinkKey(source, target) {
             return `${getNodeId(source)}-${getNodeId(target)}`;
+          }
+
+          function setSimulationLinkIntervention(key, disabled, date) {
+            const time = date.getTime();
+            if (disabled && !simulationLinkInterventions.has(time)) {
+              simulationLinkInterventions.set(time, new Map());
+            }
+            const changes = simulationLinkInterventions.get(time);
+            if (disabled) changes.set(key, true);
+            else if (changes) {
+              changes.delete(key);
+              if (!changes.size) simulationLinkInterventions.delete(time);
+            }
+          }
+
+          function getSimulationLinkAvailability(date) {
+            return new Set(date ? simulationLinkInterventions.get(date.getTime())?.keys() : []);
+          }
+
+          function setSimulationNodeIntervention(id, direction, allowed, date) {
+            const time = date.getTime();
+            if (!simulationNodeInterventions.has(time)) {
+              simulationNodeInterventions.set(time, new Map());
+            }
+            const changes = simulationNodeInterventions.get(time);
+            changes.set(id, { ...changes.get(id), [direction]: allowed });
+          }
+
+          function setAllSimulationNodePermissions(direction, allowed, date) {
+            const permissions = getSimulationNodePermissions(date);
+            for (const id of collectSimulationRegionIds(loadedCSVData)) {
+              if ((permissions.get(id)?.[direction] ?? true) !== allowed) {
+                setSimulationNodeIntervention(id, direction, allowed, date);
+              }
+            }
+          }
+
+          function getSimulationNodePermissions(date) {
+            const permissions = new Map();
+            if (!date) return permissions;
+            const interventions = Array.from(simulationNodeInterventions)
+              .sort(([a], [b]) => a - b);
+            for (const [time, changes] of interventions) {
+              if (time > date.getTime()) break;
+              applySimulationNodePermissions(permissions, changes, time);
+            }
+            return permissions;
+          }
+
+          function applySimulationNodePermissions(permissions, changes, time) {
+            for (const [id, directions] of changes) {
+              const permission = permissions.get(id) || { exports: true, imports: true };
+              for (const [direction, allowed] of Object.entries(directions)) {
+                if (permission[direction] === allowed) continue;
+                permission[direction] = allowed;
+                permission[`${direction}Since`] = time;
+              }
+              permissions.set(id, permission);
+            }
+          }
+
+          function getSimulationRestrictionTimeline(ids, dates, interventions = simulationNodeInterventions) {
+            const events = Array.from(interventions).sort(([a], [b]) => a - b);
+            const times = dates.map((date) => date.getTime()).concat(events.map(([time]) => time));
+            if (!times.length) return { start: null, end: null, rows: [] };
+            const start = Math.min(...times);
+            const end = Math.max(...times);
+            const regions = new Map(ids.map((id) => [id, {
+              id, segments: [], points: [], cursor: start,
+              exports: true, imports: true, restricted: false,
+            }]));
+            for (const [time, changes] of events) {
+              for (const [id, directions] of changes) {
+                const region = regions.get(id);
+                if (!region) continue;
+                const changed = {};
+                for (const direction of ["exports", "imports"]) {
+                  if (direction in directions && directions[direction] !== region[direction]) {
+                    changed[direction] = directions[direction];
+                  }
+                }
+                if (!Object.keys(changed).length) continue;
+                if (time > region.cursor) {
+                  region.segments.push({
+                    start: region.cursor, end: time,
+                    exports: region.exports, imports: region.imports,
+                  });
+                }
+                Object.assign(region, changed);
+                region.cursor = time;
+                region.restricted ||= !region.exports || !region.imports;
+                region.points.push({
+                  time, exports: region.exports, imports: region.imports, changes: changed,
+                });
+              }
+            }
+            const rows = [];
+            for (const region of regions.values()) {
+              if (!region.restricted) continue;
+              if (region.cursor < end) {
+                region.segments.push({
+                  start: region.cursor, end, exports: region.exports, imports: region.imports,
+                });
+              }
+              rows.push({ id: region.id, segments: region.segments, points: region.points });
+            }
+            return { start, end, rows };
+          }
+
+          function getDisabledLinkKeys(date, ids, permissions = getSimulationNodePermissions(date)) {
+            const disabledKeys = getSimulationLinkAvailability(date);
+            if (!permissions.size) return disabledKeys;
+            ids = ids || collectSimulationRegionIds(loadedCSVData || []);
+            for (const [id, permission] of permissions) {
+              for (const partner of ids) {
+                if (id === partner) continue;
+                if (!permission.exports) disabledKeys.add(getLinkKey(id, partner));
+                if (!permission.imports) disabledKeys.add(getLinkKey(partner, id));
+              }
+            }
+            return disabledKeys;
+          }
+
+          function getSimulationTrajectoryPath(data, generator, boundaryIndices = simulationState.trajectory.boundaryIndices) {
+            if (!data.length) return null;
+            const paths = [];
+            let start = 0;
+            for (const index of boundaryIndices) {
+              if (index >= data.length) break;
+              if (index - start > 1) {
+                paths.push(generator.curve(d3.curveMonotoneX)(data.slice(start, index)));
+              }
+              paths.push(generator.curve(d3.curveStepAfter)(data.slice(index - 1, index + 1)));
+              start = index;
+            }
+            if (data.length - start > 1 || !paths.length) {
+              paths.push(generator.curve(d3.curveMonotoneX)(data.slice(start)));
+            }
+            return paths.filter(Boolean).join("");
           }
 
           function formatCount(value) {
@@ -480,16 +623,6 @@
               .domain([edgeExtent[1], edgeExtent[0]]);
           }
 
-          function createSeededRandom(seed) {
-            let state = Number(seed) || 1;
-            state = Math.abs(Math.floor(state)) % 2147483647;
-            if (state === 0) state = 1;
-            return function () {
-              state = (state * 16807) % 2147483647;
-              return (state - 1) / 2147483646;
-            };
-          }
-
           function getCurrentSliderDate() {
             const slider = document.getElementById("timeSlider");
             if (!slider || !uniqueDates.length) {
@@ -532,13 +665,11 @@
                     <option value="SEIRS">SEIRS</option>
                   </select>
                 </label>
-                <label>
-                  Seed
-                  <input id="simulationSeed" type="number" min="1" max="999999" step="1" value="2026">
-                </label>
-                <label>
-                  Seed regions
-                  <input id="simulationSeedCount" type="number" min="1" max="8" step="1" value="2">
+                <label class="simulation-seed-region">
+                  Seed region
+                  <select id="simulationSeedRegion">
+                    <option value="CR35">CR35</option>
+                  </select>
                 </label>
                 <label>
                   Initial %
@@ -567,19 +698,220 @@
             return panel;
           }
 
+          function ensureSimulationNodeControls() {
+            if (simulationNodeControlsPanel) return simulationNodeControlsPanel;
+            const panel = document.createElement("section");
+            panel.id = "simulationNodeControls";
+            panel.className = "simulation-node-controls";
+            panel.setAttribute("aria-label", "Imports and Exports");
+            panel.hidden = true;
+            panel.innerHTML = `
+              <div class="simulation-node-controls-title panel-title-label">
+                <span class="panel-label-text"><i class="fa-solid fa-arrow-right-arrow-left"></i> Imports &amp; Exports</span>
+                <button class="panel-info-button has-tip" type="button" data-tip-key="importsExports" data-tip-placement="left" aria-label="Imports and Exports guide">
+                  <i class="fa-solid fa-circle-info" aria-hidden="true"></i>
+                </button>
+              </div>
+              <div id="simulationRestrictionTimeline" class="simulation-restriction-timeline" role="group" aria-label="Import and export restriction timelines">
+                <div class="simulation-restriction-scroll">
+                  <div class="simulation-restriction-content">
+                    <div class="simulation-restriction-axis" aria-hidden="true">
+                      <span></span>
+                      <div class="simulation-restriction-axis-range"><span></span><span></span></div>
+                    </div>
+                    <div class="simulation-restriction-rows"></div>
+                  </div>
+                </div>
+                <p class="simulation-restriction-empty">No restrictions scheduled</p>
+              </div>
+              <div class="simulation-node-controls-body">
+                <label class="simulation-node-search-label" for="simulationNodeSearch">Find a node</label>
+                <input id="simulationNodeSearch" type="search" placeholder="Region name or code" autocomplete="off">
+                <table class="simulation-node-permissions-table">
+                  <caption id="simulationNodeCount"></caption>
+                  <thead><tr>
+                    <th scope="col">Node</th>
+                    <th scope="col"><label class="simulation-node-bulk-label">All exports<input type="checkbox" class="simulation-node-permission simulation-node-bulk" data-direction="exports" aria-label="Allow exports for all regions"></label></th>
+                    <th scope="col"><label class="simulation-node-bulk-label">All imports<input type="checkbox" class="simulation-node-permission simulation-node-bulk" data-direction="imports" aria-label="Allow imports for all regions"></label></th>
+                  </tr></thead>
+                  <tbody></tbody>
+                </table>
+              </div>
+            `;
+            panel.querySelector("#simulationNodeSearch").addEventListener("input", renderSimulationNodeControls);
+            panel.addEventListener("keydown", (event) => event.stopPropagation());
+            panel.addEventListener("keyup", (event) => event.stopPropagation());
+            panel.addEventListener("click", (event) => {
+              const point = event.target.closest(".simulation-restriction-point");
+              if (!point || window.isPlaying || appModeSwitchLocked || simulationState.status === "running") return;
+              const slider = document.getElementById("timeSlider");
+              slider.value = point.dataset.frameIndex;
+              slider.dispatchEvent(new Event("input", { bubbles: true }));
+            });
+            panel.addEventListener("change", (event) => {
+              const input = event.target;
+              if (!input.matches(".simulation-node-permission")) return;
+              const date = getCurrentSliderDate();
+              if (!date || !isSimulationModeActive()) return;
+              if (input.classList.contains("simulation-node-bulk")) {
+                setAllSimulationNodePermissions(input.dataset.direction, input.checked, date);
+              } else {
+                setSimulationNodeIntervention(input.dataset.nodeId, input.dataset.direction, input.checked, date);
+              }
+              renderSimulationNodeControls();
+              scheduleSimulationRecompute("Applying import and export controls");
+            });
+            simulationNodeControlsPanel = panel;
+            return panel;
+          }
+
+          function renderSimulationRestrictionTimeline(panel, ids, date) {
+            const timeline = getSimulationRestrictionTimeline(ids, uniqueDates);
+            const chart = d3.select(panel).select("#simulationRestrictionTimeline");
+            chart.select(".simulation-restriction-empty").property("hidden", timeline.rows.length > 0);
+            chart.select(".simulation-restriction-scroll").property("hidden", !timeline.rows.length);
+            let minGap = Infinity;
+            for (const row of timeline.rows) {
+              const times = Array.from(new Set([timeline.start, ...row.points.map((point) => point.time), timeline.end])).sort((a, b) => a - b);
+              for (let index = 1; index < times.length; index += 1) {
+                minGap = Math.min(minGap, times[index] - times[index - 1]);
+              }
+            }
+            chart.style("--restriction-rail-width", `${18 * (timeline.end - timeline.start) / minGap}px`);
+            const dateLabel = (time) => d3.timeFormat("%Y-%m-%d")(new Date(time));
+            const position = (time) => timeline.start === timeline.end
+              ? 50 : 100 * (time - timeline.start) / (timeline.end - timeline.start);
+            const stateClass = (state) => state.exports
+              ? (state.imports ? "is-allowed" : "is-imports")
+              : (state.imports ? "is-exports" : "is-both");
+            const describeState = (state) => `Exports ${state.exports ? "allowed" : "blocked"}; imports ${state.imports ? "allowed" : "blocked"}.`;
+            chart.select(".simulation-restriction-axis-range").selectAll("span")
+              .data([timeline.start, timeline.end]).text((time) => time == null ? "" : dateLabel(time));
+            const rows = chart.select(".simulation-restriction-rows")
+              .selectAll(".simulation-restriction-row")
+              .data(timeline.rows, (row) => row.id).join((enter) => {
+                const row = enter.append("div").attr("class", "simulation-restriction-row");
+                row.append("span").attr("class", "simulation-restriction-region has-tip")
+                  .attr("tabindex", 0).attr("data-tip-placement", "left");
+                const track = row.append("div").attr("class", "simulation-restriction-track");
+                track.append("div").attr("class", "simulation-restriction-baseline").attr("aria-hidden", "true");
+                track.append("div").attr("class", "simulation-restriction-cursor").attr("aria-hidden", "true");
+                return row;
+              }).attr("data-node-id", (row) => row.id);
+            rows.select(".simulation-restriction-region")
+              .text((row) => row.id).attr("data-tip", (row) => `${getStatnaam(row.id)} (${row.id})`);
+            rows.each(function (row) {
+              const name = `${getStatnaam(row.id)} (${row.id})`;
+              const track = d3.select(this).select(".simulation-restriction-track");
+              track.selectAll(".simulation-restriction-segment")
+                .data(row.segments, (segment) => segment.start).join("span")
+                .attr("class", (segment) => `simulation-restriction-segment has-tip ${stateClass(segment)}`)
+                .attr("tabindex", 0).attr("role", "img").attr("data-tip-placement", "left")
+                .attr("data-start", (segment) => segment.start)
+                .attr("data-end", (segment) => segment.end)
+                .style("left", (segment) => `${position(segment.start)}%`)
+                .style("width", (segment) => `${position(segment.end) - position(segment.start)}%`)
+                .attr("data-tip", (segment) => `${name}. From ${dateLabel(segment.start)} ${segment.end === timeline.end && row.points[row.points.length - 1].time < segment.end ? "onward" : `until ${dateLabel(segment.end)}`}. ${describeState(segment)}`)
+                .attr("aria-label", function () { return this.dataset.tip; });
+              const points = new Map([
+                [timeline.start, { time: timeline.start, exports: true, imports: true }],
+                [timeline.end, { ...row.points[row.points.length - 1], time: timeline.end, changes: null }],
+              ]);
+              for (const point of row.points) points.set(point.time, point);
+              track.selectAll(".simulation-restriction-point")
+                .data(Array.from(points.values()).sort((a, b) => a.time - b.time), (point) => point.time)
+                .join("button")
+                .attr("class", (point) => `simulation-restriction-point has-tip ${stateClass(point)}`)
+                .classed("is-current", (point) => point.time === date.getTime())
+                .attr("type", "button").attr("data-tip-placement", "left")
+                .attr("data-time", (point) => point.time)
+                .attr("data-frame-index", (point) => Math.min(d3.bisectLeft(uniqueDates, new Date(point.time)), uniqueDates.length - 1))
+                .property("disabled", window.isPlaying || appModeSwitchLocked || simulationState.status === "running")
+                .style("left", (point) => `${position(point.time)}%`)
+                .attr("data-tip", function (point) {
+                  const state = ["exports", "imports"].map((direction) =>
+                    `${direction === "exports" ? "Exports" : "Imports"} ${point[direction] ? (point.changes?.[direction] ? "reopened" : "allowed") : "blocked"}`).join("; ");
+                  return `${name} · ${dateLabel(point.time)}. ${state}. Jump to ${dateLabel(uniqueDates[+this.dataset.frameIndex])}.`;
+                })
+                .attr("aria-label", function () { return this.dataset.tip; });
+              track.select(".simulation-restriction-cursor").style("left", `${position(date.getTime())}%`);
+            });
+          }
+
+          function renderSimulationNodeControls() {
+            const panel = ensureSimulationNodeControls();
+            panel.hidden = !isSimulationModeActive() || !selectedNodeData || simulationControlView !== "nodes";
+            if (panel.hidden || !simulationState.trajectory) return;
+            const date = getCurrentSliderDate();
+            if (!date) return;
+            const dateLabel = d3.timeFormat("%Y-%m-%d");
+            const ids = simulationState.trajectory.ids;
+            const permissions = getSimulationNodePermissions(date);
+            for (const direction of ["exports", "imports"]) {
+              const input = panel.querySelector(`.simulation-node-bulk[data-direction="${direction}"]`);
+              const allowedCount = ids.filter((id) => permissions.get(id)?.[direction] !== false).length;
+              input.checked = allowedCount === ids.length;
+              input.indeterminate = allowedCount > 0 && allowedCount < ids.length;
+              input.disabled = window.isPlaying || simulationState.status === "running";
+              input.title = `Allow ${direction} for all ${ids.length} regions, including regions outside the search results`;
+            }
+            renderSimulationRestrictionTimeline(panel, ids, date);
+            const search = panel.querySelector("#simulationNodeSearch");
+            const selectedId = selectedNodeData?.id || "";
+            const selectionChanged = panel.dataset.selectedNode !== selectedId;
+            if (selectionChanged) search.value = "";
+            panel.dataset.selectedNode = selectedId;
+            const query = search.value.trim().toLowerCase();
+            const shownIds = ids.filter((id) => `${id} ${getStatnaam(id)}`.toLowerCase().includes(query));
+            panel.querySelector("#simulationNodeCount").textContent =
+              `${ids.length} nodes across the dataset${query ? ` · ${shownIds.length} shown` : ""}`;
+            const rows = d3.select(panel).select("tbody").selectAll("tr")
+              .data(shownIds, (id) => id).join((enter) => {
+                const row = enter.append("tr");
+                row.append("th").attr("scope", "row");
+                for (const direction of ["exports", "imports"]) {
+                  const cell = row.append("td");
+                  cell.append("input")
+                    .attr("type", "checkbox")
+                    .attr("class", "simulation-node-permission")
+                    .attr("data-direction", direction);
+                  cell.append("small").attr("class", "simulation-node-permission-since");
+                }
+                return row;
+              })
+              .classed("is-selected", (id) => id === selectedId)
+              .attr("data-node-id", (id) => id);
+            rows.select("th").text((id) => `${getStatnaam(id)} (${id})`);
+            rows.each(function (id) {
+              const permission = permissions.get(id) || { exports: true, imports: true };
+              for (const direction of ["exports", "imports"]) {
+                const input = this.querySelector(`[data-direction="${direction}"]`);
+                input.dataset.nodeId = id;
+                input.checked = permission[direction];
+                input.disabled = window.isPlaying || simulationState.status === "running";
+                input.setAttribute("aria-label", `Allow ${direction} ${direction === "exports" ? "from" : "to"} ${getStatnaam(id)} (${id}) from ${dateLabel(date)}`);
+                const since = permission[`${direction}Since`];
+                input.nextElementSibling.textContent = !permission[direction] && since != null
+                  ? `Blocked since ${dateLabel(new Date(since))}` : "";
+              }
+            });
+            if (selectionChanged && selectedId && panel.isConnected) {
+              panel.querySelector("tr.is-selected")?.scrollIntoView({ block: "nearest" });
+            }
+          }
+
           function readSimulationSettings() {
             ensureSimulationControls();
+            const regionSelect = document.getElementById("simulationSeedRegion");
+            const seedRegion = regionSelect.value;
+            d3.select(regionSelect).selectAll("option")
+              .data(collectSimulationRegionIds(loadedCSVData)).join("option")
+              .attr("value", (id) => id)
+              .text((id) => `${id} · ${getStatnaam(id)}`);
+            regionSelect.value = seedRegion;
             return {
               model: document.getElementById("simulationModel")?.value || "SEIR",
-              seed: Math.max(
-                1,
-                +(document.getElementById("simulationSeed")?.value || 2026),
-              ),
-              seedCount: clampNumber(
-                +(document.getElementById("simulationSeedCount")?.value || 2),
-                1,
-                8,
-              ),
+              seedRegion,
               initialPct: clampNumber(
                 +(document.getElementById("simulationInitialPct")?.value || 1),
                 0.05,
@@ -865,31 +1197,6 @@
             return holdings;
           }
 
-          function chooseSimulationSeeds(ids, holdings, settings) {
-            const rng = createSeededRandom(settings.seed);
-            const chosen = new Set();
-            const weightedIds = ids
-              .map((id) => ({ id, weight: Math.max(1, holdings.get(id) || 1) }))
-              .sort((a, b) => b.weight - a.weight);
-
-            while (chosen.size < settings.seedCount && chosen.size < ids.length) {
-              const remaining = weightedIds.filter((item) => !chosen.has(item.id));
-              const total = d3.sum(remaining, (item) => item.weight);
-              let draw = rng() * total;
-              let selected = remaining[0]?.id;
-              for (const item of remaining) {
-                draw -= item.weight;
-                if (draw <= 0) {
-                  selected = item.id;
-                  break;
-                }
-              }
-              if (selected) chosen.add(selected);
-            }
-
-            return Array.from(chosen);
-          }
-
           function getSimulationFrameSummary(nodeStates) {
             const summary = { S: 0, E: 0, I: 0, R: 0, N: 0, newInfections: 0 };
             Object.values(nodeStates).forEach((state) => {
@@ -914,7 +1221,7 @@
               ids,
             );
             const holdings = estimateSimulationHoldings(ids, totals);
-            const seedIds = chooseSimulationSeeds(ids, holdings, settings);
+            const seedIds = [settings.seedRegion];
             let current = new Map();
 
             ids.forEach((id) => {
@@ -932,8 +1239,30 @@
 
             const frameByKey = {};
             const frames = [];
+            const boundaryIndices = [];
+            const nodeInterventions = Array.from(simulationNodeInterventions).sort(([a], [b]) => a - b);
+            const permissions = new Map();
+            let interventionIndex = 0;
+            let previousAvailability;
+            let previousDisabledKeys = new Set();
 
-            uniqueDates.forEach((date) => {
+            uniqueDates.forEach((date, frameIndex) => {
+              let permissionsChanged = false;
+              while (interventionIndex < nodeInterventions.length && nodeInterventions[interventionIndex][0] <= date.getTime()) {
+                const [time, changes] = nodeInterventions[interventionIndex++];
+                applySimulationNodePermissions(permissions, changes, time);
+                permissionsChanged = true;
+              }
+              const availability = simulationLinkInterventions.get(date.getTime());
+              if (permissionsChanged || availability !== previousAvailability) {
+                const disabledKeys = getDisabledLinkKeys(date, ids, permissions);
+                if (frameIndex > 0 && (disabledKeys.size !== previousDisabledKeys.size ||
+                  Array.from(disabledKeys).some((key) => !previousDisabledKeys.has(key)))) {
+                  boundaryIndices.push(frameIndex);
+                }
+                previousDisabledKeys = disabledKeys;
+              }
+              previousAvailability = availability;
               const records = ledgerByDate.get(date.getTime()) || [];
               const incomingLoad = new Map(ids.map((id) => [id, 0]));
               const outgoingLoad = new Map(ids.map((id) => [id, 0]));
@@ -941,6 +1270,9 @@
               const linkStates = new Map();
 
               records.forEach((record) => {
+                const key = getLinkKey(record.source, record.target);
+                if (availability?.has(key) || (record.source !== record.target &&
+                  (permissions.get(record.source)?.exports === false || permissions.get(record.target)?.imports === false))) return;
                 const sourceState = current.get(record.source);
                 const targetState = current.get(record.target);
                 if (!sourceState || !targetState || !sourceState.N || !targetState.N) {
@@ -949,7 +1281,6 @@
                 const sourcePrev = sourceState.I / sourceState.N;
                 const targetPrev = targetState.I / targetState.N;
                 const riskLoad = record.weight * sourcePrev * settings.movementBeta;
-                const key = getLinkKey(record.source, record.target);
                 const existing = linkStates.get(key) || {
                   source: record.source,
                   target: record.target,
@@ -978,7 +1309,9 @@
                 const state = current.get(id);
                 const N = state.N || 1;
                 const prevalence = state.I / N;
-                const localForce = settings.beta * prevalence;
+                const localForce = availability?.has(getLinkKey(id, id))
+                  ? 0
+                  : settings.beta * prevalence;
                 const movementForce = (incomingLoad.get(id) || 0) / N;
                 const force = localForce + movementForce;
                 const entering = Math.min(
@@ -1089,6 +1422,7 @@
               frames,
               frameByKey,
               metricMax,
+              boundaryIndices,
             };
           }
 
@@ -1102,6 +1436,7 @@
               simulationState.trajectory.frames[0];
             if (!frame) return false;
 
+            const disabledLinkKeys = getDisabledLinkKeys(frame.date, simulationState.trajectory.ids);
             simulationState.currentFrame = frame;
             simulationState.currentDateKey = frame.key;
             simulationState.metricMax = simulationState.trajectory.metricMax;
@@ -1133,7 +1468,7 @@
                 targetPrevalence: 0,
               };
               link.weight = link.simulation.riskLoad;
-              link.disabled = false;
+              link.disabled = disabledLinkKeys.has(key);
             });
 
             enabledLinks = allLinks.filter((link) => !link.disabled && link.weight > 0);
@@ -1178,7 +1513,7 @@
               ["fa-solid fa-temperature-high", "Prevalence", formatPct(summary.prevalence)],
               ["fa-solid fa-arrow-trend-up", "New infections", formatCount(summary.newInfections)],
               ["fa-solid fa-shield-heart", "Recovered", formatCount(summary.R)],
-              ["fa-solid fa-seedling", "Seeds", frame.seedIds.join(", ")],
+              ["fa-solid fa-seedling", "Seed region", frame.seedIds.join(", ")],
             ];
             const container = d3.select(".statsContainer");
             container
@@ -1218,6 +1553,7 @@
           }
 
           function renderSimulationGlobalStatsChart() {
+            if (selectedNodeData) return;
             const data = getSimulationSeries();
             if (!data.length) return;
             const container = d3.select("#globalStats");
@@ -1272,8 +1608,7 @@
               .area()
               .x((d) => x(d.data.date))
               .y0((d) => y(d[0]))
-              .y1((d) => y(d[1]))
-              .curve(d3.curveMonotoneX);
+              .y1((d) => y(d[1]));
 
             const areaLayer = g
               .selectAll("g.simulation-area-layer")
@@ -1305,7 +1640,7 @@
                 (exit) => exit.remove(),
               )
               .attr("fill", (d) => simulationCompartmentColors[d.key])
-              .attr("d", area);
+              .attr("d", (d) => getSimulationTrajectoryPath(d, area));
 
             axisLayer
               .selectAll("g.y-grid")
@@ -1387,7 +1722,7 @@
 
           function renderSimulationNodeStatsChart() {
             const frame = simulationState.currentFrame;
-            if (!frame) return;
+            if (!frame || selectedNodeData) return;
             const container = d3.select("#nodeStats");
             const node = container.node();
             const margin = { top: 58, right: 22, bottom: 24, left: 52 };
@@ -2458,8 +2793,7 @@
               d3
                 .line()
                 .x((d) => x(d.date))
-                .y((d) => y(d[key]))
-                .curve(d3.curveMonotoneX);
+                .y((d) => y(d[key]));
 
             g.selectAll("g.simulation-focus-grid.x-grid")
               .data([null])
@@ -2513,11 +2847,10 @@
                 (update) => update,
                 (exit) => exit.remove(),
               )
+              .interrupt()
               .attr("stroke", (key) => simulationCompartmentColors[key])
               .attr("stroke-width", (key) => (key === "I" ? 2.4 : 1.6))
-              .call((selection) =>
-                transitionSelection(selection).attr("d", (key) => line(key)(data)),
-              );
+              .attr("d", (key) => getSimulationTrajectoryPath(data, line(key)));
 
             const current = simulationState.currentFrame;
             if (current) {
@@ -3195,8 +3528,7 @@
                 .line()
                 .defined((d) => Number.isFinite(d[key]))
                 .x((d) => x(d.date))
-                .y((d) => y(d[key]))
-                .curve(d3.curveMonotoneX);
+                .y((d) => y(d[key]));
 
             g.selectAll("g.simulation-focus-grid.x-grid")
               .data([null])
@@ -3258,7 +3590,7 @@
               )
               .attr("stroke", (d) => d.color)
               .attr("stroke-width", (d) => (d.key === "prevalence" ? 2.6 : 1.8))
-              .attr("d", (d) => line(d.key)(series));
+              .attr("d", (d) => getSimulationTrajectoryPath(series, line(d.key)));
 
             const current = simulationState.currentFrame;
             if (current) {
@@ -3356,6 +3688,7 @@
 
           function renderSimulationPanels() {
             if (!isSimulationModeActive()) return;
+            renderSimulationNodeControls();
             renderSimulationStatsContainer();
             renderSimulationGlobalStatsChart();
             renderSimulationNodeStatsChart();
@@ -3527,6 +3860,10 @@
             const controls = ensureSimulationControls();
             controls.hidden = !active;
             controls.style.display = active && !selectedNodeData ? "block" : "none";
+            ensureSimulationNodeControls().hidden = !active || !selectedNodeData || simulationControlView !== "nodes";
+            const restore = document.getElementById("restoreButton");
+            restore.dataset.tip = active ? "Restore all links and node permissions across all dates (R)" : "Restore links (R)";
+            restore.setAttribute("aria-label", active ? "Restore all links and node permissions (R)" : "Restore links (R)");
             document.body.classList.toggle("simulation-mode-active", active);
             if (!active) {
               document.body.classList.remove("focus-mode-active");
@@ -3550,11 +3887,9 @@
           }
 
           async function recomputeSimulationTrajectory(reason = "Simulation run") {
-            const stopRendering = () => {
-              finishModePanelsRendering();
-            };
+            clearTimeout(simulationRecomputeTimer);
             if (!loadedCSVData || !uniqueDates.length) {
-              stopRendering();
+              finishModePanelsRendering();
               return;
             }
             const runId = ++simulationRunId;
@@ -3570,16 +3905,16 @@
               return runId === simulationRunId;
             };
 
-            if (!(await stage(6, "ledger", reason))) return stopRendering();
+            if (!(await stage(6, "ledger", reason))) return;
             const settings = readSimulationSettings();
-            if (!(await stage(18, "holdings", "Estimating regional holdings"))) return stopRendering();
-            if (!(await stage(34, "contacts", "Building movement contacts"))) return stopRendering();
-            if (!(await stage(48, "states", "Integrating compartment states"))) return stopRendering();
+            if (!(await stage(18, "holdings", "Estimating regional holdings"))) return;
+            if (!(await stage(34, "contacts", "Building movement contacts"))) return;
+            if (!(await stage(48, "states", "Integrating compartment states"))) return;
             const trajectory = buildSimulationTrajectory(settings);
-            if (!(await stage(78, "frames", "Building replay ledger"))) return stopRendering();
+            if (!(await stage(78, "frames", "Building replay ledger"))) return;
 
             simulationState = {
-              status: "ready",
+              status: "running",
               settings,
               trajectory,
               currentFrame: null,
@@ -3587,12 +3922,13 @@
               metricMax: trajectory?.metricMax || null,
             };
 
-            if (!(await stage(94, "render", "Rendering simulation view"))) return stopRendering();
+            if (!(await stage(94, "render", "Rendering simulation view"))) return;
             refreshCurrentNetworkFrame();
-            renderSimulationPanels();
             finishModePanelsRendering();
             setSimulationOverlay(100, "Simulation ready", "render");
             await delaySimulationStage();
+            if (runId !== simulationRunId) return;
+            simulationState.status = "ready";
             hideSimulationOverlay();
             setSimulationInputsDisabled(false);
             enableAllButtons(0);
@@ -3631,6 +3967,8 @@
 
             simulationRunId += 1;
             clearTimeout(simulationRecomputeTimer);
+            simulationLinkInterventions.clear();
+            simulationNodeInterventions.clear();
             simulationState = {
               status: "idle",
               settings: null,
@@ -3642,6 +3980,7 @@
             restoreLedgerHotspotsMax();
             hideSimulationOverlay();
             clearSimulationRenderState();
+            d3.selectAll(".trade-checkbox, .trade-header-checkbox").property("checked", true);
             refreshCurrentNetworkFrame();
             updateNetwork(true);
             applySimulationMapPrevalence();
@@ -7074,7 +7413,7 @@
               clearSelection(false);
               return;
             }
-            clearSelection(wasSelected && !wasSameNode);
+            clearSelection(wasSelected && !wasSameNode, isSimulationModeActive() && window.isDoingTemporalUpdate);
             selectedNodeData = d;
             document.body.classList.add("focus-mode-active");
 
@@ -7247,11 +7586,10 @@
             updateTradeTable();
             updateInOutArbos();
     
-            // Update the node trade distribution
-            updateNodeTradeDistribution();
-    
-            // Update the node insight section
-            updateTradeNodeInsight(window.currentSelectedTradeNodeInsight);
+            if (!isSimulationModeActive() || !window.isDoingTemporalUpdate) {
+              updateNodeTradeDistribution();
+              updateTradeNodeInsight(window.currentSelectedTradeNodeInsight);
+            }
     
             // Compute class strings based on isTemporalUpdate
             const classStringA =
@@ -7276,7 +7614,7 @@
             d3.select("#col2").classed(classStringA, true);
             d3.select("#tradeNodeDistribution").classed(classStringA, true);
             d3.select("#tradeNodeInsight").classed(classStringA, true);
-            d3.selectAll(".trade-section").classed(classStringA, true);
+            d3.selectAll(".trade-section, .simulation-node-controls").classed(classStringA, true);
             d3.select(".trade-info-header").classed(classStringA, true);
             d3.select("#inArboContainer").classed(classStringA, true);
     
@@ -7292,10 +7630,13 @@
           }
     
           // Clear Selection (If Clicking Again/Unclicked)
-          function clearSelection(flag) {
+          function clearSelection(flag, keepFocusPanels = false) {
             clearHoveredLinkState();
             selectedNodeData = null;
-            document.body.classList.remove("focus-mode-active");
+            if (!keepFocusPanels) document.body.classList.remove("focus-mode-active");
+            if (isSimulationModeActive() && !flag && !window.isDoingTemporalUpdate) {
+              renderSimulationNodeControls();
+            }
     
             const colorScale = d3
               .scaleSequential(tradeIntensity)
@@ -7326,8 +7667,8 @@
                 "glowing-border-instant",
                 false,
               );
-              d3.selectAll(".trade-section").classed("glowing-border", false);
-              d3.selectAll(".trade-section").classed(
+              d3.selectAll(".trade-section, .simulation-node-controls").classed("glowing-border", false);
+              d3.selectAll(".trade-section, .simulation-node-controls").classed(
                 "glowing-border-instant",
                 false,
               );
@@ -7365,48 +7706,45 @@
               !!selectedNodeData,
             );
     
-            // Display the global stats display.
-            d3.select("#globalStats").style("visibility", "visible");
-            d3.select("#globalStatsControls").style(
-              "display",
-              isSimulationModeActive() ? "none" : "flex",
-            );
-            d3.select("#simulationControls").style(
-              "display",
-              isSimulationModeActive() ? "block" : "none",
-            );
-    
-            // Display the node stats display.
-            d3.select("#nodeStats").style("visibility", "visible");
-            d3.select("#nodeStatsControls").style(
-              "display",
-              isSimulationModeActive() ? "none" : "flex",
-            );
-    
-            // Show the network level gravity model and metadata groups.
-            d3.select("#tradeDistribution").style("display", "block");
-            d3.select("#tradeClusters").style("display", "block");
-    
-            // Hide the node level gravity model and metadata groups.
-            d3.select("#tradeNodeDistribution").style("visibility", "hidden");
-            d3.select("#tradeNodeInsight").style("visibility", "hidden");
+            if (!keepFocusPanels) {
+              // Display the global stats display.
+              d3.select("#globalStats").style("visibility", "visible");
+              d3.select("#globalStatsControls").style(
+                "display",
+                isSimulationModeActive() ? "none" : "flex",
+              );
+              d3.select("#simulationControls").style(
+                "display",
+                isSimulationModeActive() ? "block" : "none",
+              );
+
+              // Display the node stats display.
+              d3.select("#nodeStats").style("visibility", "visible");
+              d3.select("#nodeStatsControls").style(
+                "display",
+                isSimulationModeActive() ? "none" : "flex",
+              );
+
+              // Show the network level gravity model and metadata groups.
+              d3.select("#tradeDistribution").style("display", "block");
+              d3.select("#tradeClusters").style("display", "block");
+
+              // Hide the node level gravity model and metadata groups.
+              d3.select("#tradeNodeDistribution").style("visibility", "hidden");
+              d3.select("#tradeNodeInsight").style("visibility", "hidden");
+            }
 
 
 
 
 
     
-            // Update the global stats display.
-            updateGlobalStatsChart(window.currentSelectedStat);
-    
-            // Update the node stats display.
-            updateNodeStatsChart(window.currentSelectedNodeStat);
-    
-            // Update the trade distribution display.
-            updateTradeDistribution();
-    
-            // Update the trade clusters display.
-            updateSCCs();
+            if (!isSimulationModeActive() || !window.isDoingTemporalUpdate) {
+              updateGlobalStatsChart(window.currentSelectedStat);
+              updateNodeStatsChart(window.currentSelectedNodeStat);
+              updateTradeDistribution();
+              updateSCCs();
+            }
 
             labelSelection.attr("fill", theme.text);
     
@@ -7426,7 +7764,7 @@
 
     
             if (isSimulationModeActive() && simulationState.currentFrame) {
-              renderSimulationStatsContainer();
+              if (!window.isDoingTemporalUpdate) renderSimulationStatsContainer();
             } else {
               d3.select(".statsContainer")
                 .classed("simulation-stats-container", false)
@@ -7458,8 +7796,10 @@
               .attr("filter", null);
     
             // Hide the trade information panel
-            document.getElementById("tradeInfo").style.display = "none";
-            document.getElementById("inArboContainer").style.visibility = "hidden";
+            if (!keepFocusPanels) {
+              document.getElementById("tradeInfo").style.display = "none";
+              document.getElementById("inArboContainer").style.visibility = "hidden";
+            }
     
             // Remove the background overlay if select another node
             if (!flag) {
@@ -7478,8 +7818,10 @@
             updateNetwork((instant = true));
     
             // Clear the trade table and arborescences
-            updateTradeTable();
-            updateInOutArbos();
+            if (!keepFocusPanels) {
+              updateTradeTable();
+              updateInOutArbos();
+            }
     
             // Switch the university logo back to the black version
             fetchAsset("assets/files/herdlink/WUR_ZW_standard_2021.svg", "blob")
@@ -7519,14 +7861,24 @@
             }
 
             const focalId = selectedNodeData.id;
+            const date = getCurrentSliderDate();
+            const unavailable = getSimulationLinkAvailability(date);
+            const permissions = getSimulationNodePermissions(date);
+            const available = (link) => !unavailable.has(getLinkKey(link.source, link.target));
+            const hasRoute = (link) => getNodeId(link.source) !== getNodeId(link.target) &&
+              (link.ledgerWeight > 0 || link.weight > 0 || !available(link));
             const outgoing = allLinks
-              .filter((link) => getNodeId(link.source) === focalId && link.weight > 0)
+              .filter((link) =>
+                getNodeId(link.source) === focalId && hasRoute(link),
+              )
               .sort((a, b) => b.weight - a.weight);
             const incoming = allLinks
-              .filter((link) => getNodeId(link.target) === focalId && link.weight > 0)
+              .filter((link) =>
+                getNodeId(link.target) === focalId && hasRoute(link),
+              )
               .sort((a, b) => b.weight - a.weight);
-            const allOutgoingEnabled = outgoing.every((link) => !link.disabled);
-            const allIncomingEnabled = incoming.every((link) => !link.disabled);
+            const allOutgoingEnabled = outgoing.every(available);
+            const allIncomingEnabled = incoming.every(available);
 
             function renderRows(rows, section) {
               if (!rows.length) {
@@ -7538,6 +7890,9 @@
                   const targetId = getNodeId(link.target);
                   const partnerId = section === "outgoing" ? targetId : sourceId;
                   const partnerName = getStatnaam(partnerId);
+                  const reasons = [];
+                  if (permissions.get(sourceId)?.exports === false) reasons.push("source exports disabled");
+                  if (permissions.get(targetId)?.imports === false) reasons.push("destination imports disabled");
                   const state = link.simulation || {};
                   const prevalence =
                     section === "outgoing"
@@ -7564,11 +7919,11 @@
                               <rect x="0" y="0" width="${barWidth}" height="10" fill="${simulationPrevalenceScale(prevalence || 0)}"></rect>
                             </svg>
                           </span>
-                          <span class="trade-route-label">[${partnerId}] ${partnerName}</span>
+                          <span class="trade-route-label">[${partnerId}] ${partnerName}${reasons.length ? `<small class="simulation-link-status">Blocked: ${reasons.join("; ")}</small>` : ""}</span>
                         </span>
                         <span class="trade-volume">${formatSmall(link.weight)}</span>
                       </div>
-                      <input type="checkbox" class="trade-checkbox" data-section="${section}" data-source="${sourceId}" data-target="${targetId}" ${!link.disabled ? "checked" : ""}>
+                      <input type="checkbox" class="trade-checkbox" data-section="${section}" data-source="${sourceId}" data-target="${targetId}" aria-label="Available ${sourceId} to ${targetId} on this date" ${available(link) ? "checked" : ""}>
                     </div>
                   `;
                 })
@@ -7577,30 +7932,75 @@
 
             const state =
               simulationState.currentFrame?.nodeStates[selectedNodeData.id] || {};
-            tradePanelDiv.innerHTML = `
-              <div class="trade-info-header">
-                <i class="fa-solid fa-location-crosshairs"></i> [${focalId}] ${selectedNodeData.statnaam}
-                <span class="simulation-focus-pill">Prev ${formatPct(state.prevalence || 0)}</span>
+            const showNodeControls = simulationControlView === "nodes";
+            const nodeControls = ensureSimulationNodeControls();
+            for (const child of Array.from(tradePanelDiv.childNodes)) {
+              if (child !== nodeControls) child.remove();
+            }
+            tradePanelDiv.insertAdjacentHTML("afterbegin", `
+              <div class="simulation-controls-toolbar">
+                <button id="simulationControlSwitch" class="simulation-control-switch has-tip" type="button" data-mode="${simulationControlView}" aria-label="${showNodeControls ? "Current mode: Imports and exports. Switch to links on this date." : "Current mode: Links on this date. Switch to imports and exports."}" aria-controls="simulationDateLinkControls simulationNodeControls" data-tip="${showNodeControls ? "Switch to links on this date" : "Switch to imports and exports"}" data-tip-placement="left">
+                  <span class="simulation-control-switch-thumb" aria-hidden="true">
+                    <svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M2 5h11m-3-3 3 3-3 3M14 11H3m3-3-3 3 3 3"/></svg>
+                  </span>
+                </button>
+                <div class="trade-info-header">
+                  <span class="simulation-focus-region-name" title="[${focalId}] ${selectedNodeData.statnaam}"><i class="fa-solid fa-location-crosshairs"></i> [${focalId}] ${selectedNodeData.statnaam}</span>
+                  <span class="simulation-focus-pill">Prev ${formatPct(state.prevalence || 0)}</span>
+                </div>
               </div>
-              <div class="trade-sections">
+              <div id="simulationDateLinkControls" class="trade-sections" ${showNodeControls ? "hidden" : ""}>
+                <div class="trade-section trade-section-header simulation-local-control panel-title-label">
+                  <label class="simulation-link-control-label">
+                    <span>Local Transmission</span>
+                    <input type="checkbox" class="trade-checkbox" data-section="local" data-source="${focalId}" data-target="${focalId}" aria-label="Local Transmission on this date" ${!unavailable.has(getLinkKey(focalId, focalId)) ? "checked" : ""}>
+                  </label>
+                  <button class="panel-info-button has-tip" type="button" data-tip-key="localTransmission" data-tip-placement="left" aria-label="Local Transmission guide">
+                    <i class="fa-solid fa-circle-info" aria-hidden="true"></i>
+                  </button>
+                </div>
                 <div class="trade-section">
-                  <div class="trade-section-header">
-                    <i class="fa-solid fa-arrow-right-from-bracket"></i> Outgoing Pressure
-                    <input type="checkbox" class="trade-header-checkbox" data-section="outgoing" ${allOutgoingEnabled ? "checked" : ""}>
+                  <div class="trade-section-header panel-title-label">
+                    <label class="simulation-link-control-label">
+                      <span><i class="fa-solid fa-arrow-right-from-bracket"></i> Outgoing Pressure</span>
+                      <input type="checkbox" class="trade-header-checkbox" data-section="outgoing" aria-label="All displayed outgoing links available on this date" ${allOutgoingEnabled ? "checked" : ""}>
+                    </label>
+                    <button class="panel-info-button has-tip" type="button" data-tip-key="outgoingPressure" data-tip-placement="left" aria-label="Outgoing pressure guide">
+                      <i class="fa-solid fa-circle-info" aria-hidden="true"></i>
+                    </button>
                   </div>
                   <div class="trade-list">${renderRows(outgoing, "outgoing")}</div>
                 </div>
                 <div class="trade-section">
-                  <div class="trade-section-header">
-                    <i class="fa-solid fa-arrow-left-to-bracket"></i> Incoming Exposure
-                    <input type="checkbox" class="trade-header-checkbox" data-section="incoming" ${allIncomingEnabled ? "checked" : ""}>
+                  <div class="trade-section-header panel-title-label">
+                    <label class="simulation-link-control-label">
+                      <span><i class="fa-solid fa-arrow-left-to-bracket"></i> Incoming Exposure</span>
+                      <input type="checkbox" class="trade-header-checkbox" data-section="incoming" aria-label="All displayed incoming links available on this date" ${allIncomingEnabled ? "checked" : ""}>
+                    </label>
+                    <button class="panel-info-button has-tip" type="button" data-tip-key="incomingExposure" data-tip-placement="left" aria-label="Incoming exposure guide">
+                      <i class="fa-solid fa-circle-info" aria-hidden="true"></i>
+                    </button>
                   </div>
                   <div class="trade-list">${renderRows(incoming, "incoming")}</div>
                 </div>
               </div>
-            `;
+            `);
+            if (nodeControls.parentElement !== tradePanelDiv) tradePanelDiv.appendChild(nodeControls);
+            renderSimulationNodeControls();
+            const controlSwitch = document.getElementById("simulationControlSwitch");
+            controlSwitch.addEventListener("keydown", (event) => event.stopPropagation());
+            controlSwitch.addEventListener("keyup", (event) => event.stopPropagation());
+            controlSwitch.addEventListener("click", () => {
+              simulationControlView = simulationControlView === "links" ? "nodes" : "links";
+              const showNodes = simulationControlView === "nodes";
+              controlSwitch.dataset.mode = simulationControlView;
+              controlSwitch.setAttribute("aria-label", showNodes ? "Current mode: Imports and exports. Switch to links on this date." : "Current mode: Links on this date. Switch to imports and exports.");
+              controlSwitch.dataset.tip = showNodes ? "Switch to links on this date" : "Switch to imports and exports";
+              document.getElementById("simulationDateLinkControls").hidden = showNodes;
+              renderSimulationNodeControls();
+            });
             attachTradeCheckboxListeners();
-            if (window.isPlaying) {
+            if (window.isPlaying || simulationState.status === "running") {
               disableAllCheckboxes();
             }
           }
@@ -8970,6 +9370,22 @@
               .style("opacity", 1);
           }
     
+          function recordSimulationLinkCheckboxes() {
+            if (!isSimulationModeActive()) return;
+            const date = getCurrentSliderDate();
+            const disabledKeys = getSimulationLinkAvailability(date);
+            let changed = false;
+            d3.selectAll(".trade-checkbox").each(function () {
+              const key = getLinkKey(this.dataset.source, this.dataset.target);
+              const disabled = !this.checked;
+              if (disabled !== disabledKeys.has(key)) {
+                setSimulationLinkIntervention(key, disabled, date);
+                changed = true;
+              }
+            });
+            if (changed) scheduleSimulationRecompute("Applying availability for this date");
+          }
+
           function attachTradeCheckboxListeners() {
             // Header checkboxes toggle all trade checkboxes in that section.
             d3.selectAll(".trade-header-checkbox").on("change", function () {
@@ -8981,13 +9397,15 @@
                 checked,
               );
     
-              // For self-loops, update all self-loop checkboxes across both sections.
-              d3.selectAll(".trade-checkbox")
-                .filter(function () {
-                  return this.dataset.source === this.dataset.target;
-                })
-                .property("checked", checked);
+              if (!isSimulationModeActive()) {
+                d3.selectAll(".trade-checkbox")
+                  .filter(function () {
+                    return this.dataset.source === this.dataset.target;
+                  })
+                  .property("checked", checked);
+              }
     
+              recordSimulationLinkCheckboxes();
               updateNetwork();
               updateDonutCharts();
               updateNetworkStats((force = true));
@@ -9019,6 +9437,7 @@
                   })
                   .property("checked", isEnabled);
               }
+              recordSimulationLinkCheckboxes();
               updateNetwork();
               updateDonutCharts();
               updateNetworkStats((force = true));
@@ -9033,6 +9452,7 @@
               // Update header checkbox state for both sections.
               updateHeaderCheckboxes();
             });
+            updateHeaderCheckboxes();
           }
     
           // Helper function to update header checkbox states.
@@ -9046,7 +9466,9 @@
               const allChecked = Array.from(checkboxes).every((cb) => cb.checked);
               d3.select(
                 `.trade-header-checkbox[data-section='${section}']`,
-              ).property("checked", allChecked);
+              )
+                .property("checked", allChecked)
+                .property("indeterminate", !allChecked && checkboxes.some((cb) => cb.checked));
             });
           }
     
@@ -9059,26 +9481,24 @@
             if (nodeEnter) nodeEnter.interrupt();
             if (labelSelection) labelSelection.interrupt();
     
-            // 1. Update link.disabled based on checkboxes.
-            d3.selectAll(".trade-checkbox").each(function () {
-              const checkbox = this;
-              const source = checkbox.dataset.source;
-              const target = checkbox.dataset.target;
-              const isEnabled = checkbox.checked;
+            // Simulation routes follow dated interventions; ledger routes follow the table.
+            if (isSimulationModeActive()) {
+              const disabledKeys = getDisabledLinkKeys(getCurrentSliderDate(), simulationState.trajectory?.ids);
               allLinks.forEach((link) => {
-                let s =
-                  typeof link.source === "object" ? link.source.id : link.source;
-                let t =
-                  typeof link.target === "object" ? link.target.id : link.target;
-                if (s === source && t === target) {
-                  link.disabled = !isEnabled;
-                }
+                link.disabled = disabledKeys.has(getLinkKey(link.source, link.target));
               });
-              // Update enabledLinks array to filter out disabled and zero-weight links.
-              enabledLinks = allLinks.filter(
-                (link) => !link.disabled && link.weight > 0,
-              );
-            });
+            } else {
+              d3.selectAll(".trade-checkbox").each(function () {
+                const key = getLinkKey(this.dataset.source, this.dataset.target);
+                const disabled = !this.checked;
+                allLinks.forEach((link) => {
+                  if (getLinkKey(link.source, link.target) === key) {
+                    link.disabled = disabled;
+                  }
+                });
+              });
+            }
+            enabledLinks = allLinks.filter((link) => !link.disabled && link.weight > 0);
     
             // 2. Update link attributes.
             // When computing the log scale, ignore zero-weight links.
@@ -10051,7 +10471,7 @@
                 console.error("Selected node id is null or undefined.");
               }
               lastSelectedNodeIndex = selectedNodeData.id;
-              clearSelection(true);
+              clearSelection(true, isSimulationModeActive());
             }
     
             // Stop the current simulation.
@@ -10454,6 +10874,8 @@
               );
               if (lastSelectedNode) {
                 onClickNode("click", lastSelectedNode);
+              } else {
+                clearSelection(false);
               }
             }
     
@@ -10468,7 +10890,6 @@
             }
 
             if (isSimulationModeActive()) {
-              applySimulationNodeStyles();
               renderSimulationPanels();
             }
     
@@ -10767,6 +11188,12 @@
     
           // Restore function: re-enable all links and update the trade panel checkboxes.
           function restoreLinks() {
+            if (isSimulationModeActive() && (simulationLinkInterventions.size || simulationNodeInterventions.size)) {
+              simulationLinkInterventions.clear();
+              simulationNodeInterventions.clear();
+              renderSimulationNodeControls();
+              scheduleSimulationRecompute("Restoring all links and node permissions");
+            }
             // Stop time replay by simulating a click on the pause button.
             playBtn = document.getElementById("playPauseBtn");
             const wasPlaying = window.isPlaying;
@@ -10788,7 +11215,7 @@
             // Force all trade checkboxes to be checked.
             d3.selectAll(".trade-checkbox").property("checked", true);
             d3.selectAll(".trade-header-checkbox").property("checked", true);
-    
+
             updateTradeTable();
             updateInOutArbos();
             updateTradeNodeInsight(window.currentSelectedTradeNodeInsight);
@@ -11299,9 +11726,8 @@
             // If no edges, display message
             if (!treeEdges || treeEdges.length === 0) {
               container
-                .append("text")
-                .attr("x", 10)
-                .attr("y", 20)
+                .append("div")
+                .attr("class", "no-arbo")
                 .text("No major routes found.");
               return;
             }
@@ -12668,6 +13094,9 @@
                 hasTime = headers.includes("time");
     
                 function initNodesAndLinks(data) {
+                  const disabledLinkKeys = isSimulationModeActive()
+                    ? getDisabledLinkKeys(window.currentDate)
+                    : new Set();
                   const nodesMap = {},
                     links = [];
     
@@ -12776,6 +13205,9 @@
     
                   // Convert link source/target from strings to actual node objects.
                   links.forEach((link) => {
+                    link.disabled = disabledLinkKeys.has(
+                      getLinkKey(link.source, link.target),
+                    );
                     link.source = nodesMap[link.source];
                     link.target = nodesMap[link.target];
                   });
@@ -12784,8 +13216,8 @@
     
                   allNodes = nodes;
                   allLinks = links;
-                  // Initially, only links with weight > 0 are considered "enabled".
-                  enabledLinks = links.filter((l) => l.weight > 0);
+                  // Active routes have positive weight and a checked link control.
+                  enabledLinks = links.filter((l) => !l.disabled && l.weight > 0);
                   nonZeroLinks = links.filter((l) => l.weight > 0);
                   activeNodes = nodes.filter((n) => n.active);
     
@@ -12889,17 +13321,19 @@
                     initNodesAndLinks(filteredData);
                     applySimulationFrame(selectedDate);
     
-                    updateNetworkStats();
+                    if (!isSimulationModeActive()) updateNetworkStats();
     
                     computeSCCs();
-                    updateSCCs();
+                    if (!isSimulationModeActive()) updateSCCs();
     
                     updateTemporalNetwork();
                     debouncedUpdateHotspotMarks();
                     updateDonutCharts();
-                    updateGlobalStatsChart(window.currentSelectedStat);
-                    updateNodeStatsChart(window.currentSelectedNodeStat);
-                    updateTradeDistribution();
+                    if (!isSimulationModeActive()) {
+                      updateGlobalStatsChart(window.currentSelectedStat);
+                      updateNodeStatsChart(window.currentSelectedNodeStat);
+                      updateTradeDistribution();
+                    }
                   }
 
                   updateNetworkForDateHandler = updateNetworkForDate;
@@ -13450,20 +13884,20 @@
             d3.select("#toggleModeButton").attr("disabled", true);
             d3.select("#screenshotButton").attr("disabled", true);
             d3.select("#restoreButton").attr("disabled", true);
+            d3.selectAll(".simulation-restriction-point").property("disabled", true);
           }
     
           function enableAllButtons(timeoutVal) {
             if (!window.isPlaying) {
               d3.timeout(() => {
-                if (appModeSwitchLocked) return;
+                if (appModeSwitchLocked || window.isPlaying || simulationState.status === "running") return;
                 d3.selectAll(".csv-switcher").classed("disabled", false);
-                if (simulationState.status !== "running") {
-                  d3.selectAll(".mode-switcher-frame").classed("disabled", false);
-                }
+                d3.selectAll(".mode-switcher-frame").classed("disabled", false);
                 d3.select("#mapLayerButton").attr("disabled", currentMode === "map" ? null : true);
                 d3.select("#toggleModeButton").attr("disabled", null);
                 d3.select("#screenshotButton").attr("disabled", null);
                 d3.select("#restoreButton").attr("disabled", null);
+                d3.selectAll(".simulation-restriction-point").property("disabled", false);
               }, timeoutVal);
             }
           }
@@ -13473,16 +13907,18 @@
             d3.selectAll(".trade-checkbox").property("disabled", true);
             // Disable header checkboxes.
             d3.selectAll(".trade-header-checkbox").property("disabled", true);
+            d3.selectAll(".simulation-node-permission").property("disabled", true);
           }
     
           function enableAllCheckboxes(timeoutVal) {
             if (!window.isPlaying) {
               d3.timeout(() => {
-                if (appModeSwitchLocked) return;
+                if (appModeSwitchLocked || window.isPlaying || simulationState.status === "running") return;
                 // Enable link checkboxes.
                 d3.selectAll(".trade-checkbox").property("disabled", false);
                 // Enable header checkboxes.
                 d3.selectAll(".trade-header-checkbox").property("disabled", false);
+                d3.selectAll(".simulation-node-permission").property("disabled", false);
               }, timeoutVal);
             }
           }

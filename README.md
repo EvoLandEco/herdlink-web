@@ -1,6 +1,6 @@
 # HerdLink Web
 
-![Version](https://img.shields.io/badge/version-v0.7.3-2f6fed)
+![Version](https://img.shields.io/badge/version-v0.8.0-2f6fed)
 ![Deployment](https://img.shields.io/badge/deployment-GitHub%20Pages-121013?logo=github)
 ![Website](https://img.shields.io/website?url=https%3A%2F%2Fherdlink.nl&label=HerdLink.nl)
 ![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)
@@ -26,6 +26,45 @@ HerdLink Web is a browser-based tool for exploring livestock trade networks in t
 - Intro overlay with quick start notes, keyboard shortcuts, and guided shortcut callouts.
 - PNG export for the main network visualization.
 
+Seed region selects the single region that starts infected, with CR35 selected by
+default. Initial % sets the infected share in that region before the first time
+step. Choosing a seed region recomputes the simulation from the beginning.
+
+Simulation mode has two controls for movement:
+
+- Link availability changes an individual directed route for the displayed time
+  step. A disabled self-loop stops local transmission for that step.
+- Imports and exports controls govern all movement to or from a region,
+  starting at the displayed date and lasting until re-enabled. They include
+  partners that appear at later dates and do not stop local transmission. The
+  searchable panel lists every node in the dataset. A timeline shows each region
+  with restrictions anywhere in the schedule: teal allows both directions,
+  salmon blocks exports, purple blocks imports, and amber blocks both. Hover a
+  segment or change point for details. Click a change point to jump to its date,
+  or the first time step on or after it at coarser time resolutions. Dates outside
+  the replay range select the nearest endpoint. Closely spaced changes scroll
+  horizontally, with region labels kept in view.
+  In focus mode, the switch beside the region name selects this panel or the
+  controls for individual links. Both sets of edits remain active when switching.
+  The All exports and All imports checkboxes apply to every region, including
+  regions outside the search results. A mixed checkbox means some regions are
+  allowed and others are blocked.
+
+A route can operate when its link is available, its source can export, and its
+destination can import. Both kinds of edits can change disease outcomes from the
+selected step onward. Earlier simulated states, regional holdings, and initial
+infections stay fixed. Replay shows the controls active at each date. Restore all
+clears both kinds of edits across every date and recomputes the full simulation.
+
+Dated edits survive settings and time resolution changes. Link availability edits
+apply only to matching dates in the selected resolution. Node restrictions apply
+to every step on or after their start date until a later permission change.
+Returning to ledger mode clears both schedules.
+
+Trajectory panels use smooth curves within each period of unchanged links.
+Each intervention boundary connects the last state before the edit to the first
+state under it without smoothing across the boundary.
+
 ## Shortcuts
 
 | Key | Action |
@@ -33,7 +72,7 @@ HerdLink Web is a browser-based tool for exploring livestock trade networks in t
 | `E` | Switch between trade ledger and simulation modes |
 | `M` | Switch between map and graph views |
 | `S` | Export a screenshot |
-| `R` | Restore disabled links |
+| `R` | Restore all links and node movement permissions |
 | `Q` | Exit focus mode |
 | `H` | Open or close the help overlay |
 | `Space` | Play or pause the time slider |

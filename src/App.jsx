@@ -52,7 +52,7 @@ const richTips = {
         iconClass: "fa-solid fa-location-dot",
         title: "Starting state",
         text:
-          "Seed keeps repeatable random choices. Seed regions sets how many areas begin infected. Initial % sets starting infection pressure.",
+          "Seed region chooses the single region that begins infected, with CR35 selected by default. Initial % sets the infected share in that region at the start of the simulation.",
       },
       {
         iconClass: "fa-solid fa-arrows-turn-to-dots",
@@ -243,6 +243,98 @@ const richTips = {
       ["Spatial pattern", "Shows nearby and distant regions contributing to exposure."],
     ],
   },
+  localTransmission: {
+    title: "Local Transmission",
+    iconClass: "fa-solid fa-repeat",
+    intro:
+      "Control spread within the selected region for the displayed time step.",
+    sections: [
+      {
+        iconClass: "fa-solid fa-virus",
+        title: "Within the region",
+        text:
+          "Unchecking this box stops local contact transmission and recorded livestock movements that begin and end in this region. Import and export permissions do not control these local routes.",
+      },
+      {
+        iconClass: "fa-solid fa-calendar-day",
+        title: "Timing",
+        text:
+          "The change applies only to the displayed time step. The simulation recomputes disease outcomes from that point onward, while earlier states stay fixed.",
+      },
+    ],
+  },
+  outgoingPressure: {
+    title: "Outgoing Pressure",
+    iconClass: "fa-solid fa-arrow-right-from-bracket",
+    intro:
+      "Inspect routes carrying infection pressure from the selected region to other regions.",
+    sections: [
+      {
+        iconClass: "fa-solid fa-chart-simple",
+        title: "Reading routes",
+        text:
+          "For an allowed route, the value is movement volume multiplied by source prevalence and Movement beta. The bar shows the destination's infectious share. Blocked routes contribute zero pressure.",
+      },
+      {
+        iconClass: "fa-solid fa-list-check",
+        title: "Availability",
+        text:
+          "Each checkbox controls one route for the displayed time step. The title checkbox changes all displayed outgoing routes; a mixed mark means only some are checked. A checked route also needs source exports and destination imports to be allowed. Changes can affect later disease outcomes, while earlier states stay fixed.",
+      },
+    ],
+  },
+  incomingExposure: {
+    title: "Incoming Exposure",
+    iconClass: "fa-solid fa-arrow-left-to-bracket",
+    intro:
+      "Inspect routes carrying infection pressure into the selected region from other regions.",
+    sections: [
+      {
+        iconClass: "fa-solid fa-chart-simple",
+        title: "Reading routes",
+        text:
+          "For an allowed route, the value is movement volume multiplied by source prevalence and Movement beta. The bar shows the source's infectious share. Blocked routes contribute zero exposure.",
+      },
+      {
+        iconClass: "fa-solid fa-list-check",
+        title: "Availability",
+        text:
+          "Each checkbox controls one route for the displayed time step. The title checkbox changes all displayed incoming routes; a mixed mark means only some are checked. A checked route also needs source exports and destination imports to be allowed. Changes can affect later disease outcomes, while earlier states stay fixed.",
+      },
+    ],
+  },
+  importsExports: {
+    title: "Imports & Exports",
+    iconClass: "fa-solid fa-arrow-right-arrow-left",
+    intro:
+      "Choose whether each region can send livestock to or receive livestock from other regions.",
+    sections: [
+      {
+        iconClass: "fa-solid fa-route",
+        title: "Directions",
+        text:
+          "Exports allow movement out of a region. Imports allow movement into it. These permissions cover every partner, including routes that appear on future dates. Local transmission is controlled separately.",
+      },
+      {
+        iconClass: "fa-solid fa-calendar-days",
+        title: "Timing",
+        text:
+          "Changes start at the displayed date and stay in place until re-enabled. Earlier simulated states stay fixed. The timeline shows each region with restrictions anywhere in the schedule. Hover a segment to inspect its period and permissions, or a diamond to inspect a change. Scroll horizontally to inspect closely spaced dates. Click a diamond to jump to its date; at coarser time resolutions, this selects the first available time step on or after that date. Dates outside the replay range select the nearest endpoint.",
+      },
+      {
+        iconClass: "fa-solid fa-timeline",
+        title: "Timeline colors",
+        text:
+          "Teal allows both directions. Salmon blocks exports, purple blocks imports, and amber blocks both. The white line marks the displayed date. The timeline covers the full schedule even when the region list is filtered.",
+      },
+      {
+        iconClass: "fa-solid fa-list-check",
+        title: "Bulk controls",
+        text:
+          "All exports and All imports apply to every region, including regions outside the search results. A mixed checkbox means some regions are allowed and others are blocked. Restore all clears both link edits and these permissions across every date.",
+      },
+    ],
+  },
   exposureBackbone: {
     title: "Main Exposure Backbone",
     iconClass: "fa-solid fa-sitemap",
@@ -259,7 +351,7 @@ const richTips = {
         iconClass: "fa-solid fa-filter",
         title: "Filtered reading",
         text:
-          "Use the focus trade checkboxes to test how removing routes changes the exposure backbone.",
+          "Link checkboxes apply only to the displayed time step. The switch beside the region name opens Imports and exports controls, which apply from the selected date until re-enabled and include future partners. Both controls can change later disease outcomes; earlier states stay fixed. Restore all clears link edits and import or export restrictions across every date.",
       },
     ],
   },
