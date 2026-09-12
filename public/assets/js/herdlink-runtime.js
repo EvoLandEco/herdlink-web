@@ -7952,7 +7952,7 @@
               <div id="simulationDateLinkControls" class="trade-sections" ${showNodeControls ? "hidden" : ""}>
                 <div class="trade-section trade-section-header simulation-local-control panel-title-label">
                   <label class="simulation-link-control-label">
-                    <span>Local Transmission</span>
+                    <span><i class="fa-solid fa-repeat" aria-hidden="true"></i> Local Transmission</span>
                     <input type="checkbox" class="trade-checkbox" data-section="local" data-source="${focalId}" data-target="${focalId}" aria-label="Local Transmission on this date" ${!unavailable.has(getLinkKey(focalId, focalId)) ? "checked" : ""}>
                   </label>
                   <button class="panel-info-button has-tip" type="button" data-tip-key="localTransmission" data-tip-placement="left" aria-label="Local Transmission guide">
