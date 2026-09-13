@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 
-const archiveBranch = "codex/pages-assets";
+const archiveBranch = "herdlink-pages-assets";
 
 function files(directory, prefix = "") {
   if (!existsSync(directory)) return [];

@@ -86,8 +86,10 @@ test("asset union preserves hashes and compatibility files while replacing decla
   assert.equal(readFileSync(join(archive, "index-newHash.js"), "utf8"), "new application");
 });
 
-test("a durable archive survives successive builds without the bootstrap artifact", (t) => {
+test("a durable archive coexists with a codex branch across successive builds", (t) => {
   const { directory, working, origin } = repository(t);
+  git(working, "push", "origin", "HEAD:refs/heads/codex");
+  const codexHead = git(origin, "rev-parse", "codex");
   const bootstrap = join(directory, "bootstrap");
   write(bootstrap, "assets/index-firstHash.js", "first application");
   write(bootstrap, "assets/js/herdlink-runtime.js", "legacy runtime");
@@ -96,7 +98,7 @@ test("a durable archive survives successive builds without the bootstrap artifac
   artifactCommand(t, directory, artifact);
   write(working, "dist/assets/index-nextHash.js", "next application");
   retainPagesAssets("test/herdlink", working);
-  assert.equal(git(origin, "show", "codex/pages-assets:assets/js/herdlink-runtime.js"), "legacy runtime");
+  assert.equal(git(origin, "show", "herdlink-pages-assets:assets/js/herdlink-runtime.js"), "legacy runtime");
 
   process.env.TEST_PAGES_ARTIFACT = "";
   rmSync(join(working, "dist"), { recursive: true });
@@ -104,15 +106,16 @@ test("a durable archive survives successive builds without the bootstrap artifac
   retainPagesAssets("test/herdlink", working);
   for (const hash of ["firstHash", "nextHash", "finalHash"]) {
     assert.ok(existsSync(join(working, `dist/assets/index-${hash}.js`)));
-    assert.ok(git(origin, "show", `codex/pages-assets:assets/index-${hash}.js`));
+    assert.ok(git(origin, "show", `herdlink-pages-assets:assets/index-${hash}.js`));
   }
-  const head = git(origin, "rev-parse", "codex/pages-assets");
+  const head = git(origin, "rev-parse", "herdlink-pages-assets");
   retainPagesAssets("test/herdlink", working);
-  assert.equal(git(origin, "rev-parse", "codex/pages-assets"), head);
+  assert.equal(git(origin, "rev-parse", "herdlink-pages-assets"), head);
 
   write(working, "dist/assets/index-nextHash.js", "conflicting application");
   assert.throws(() => retainPagesAssets("test/herdlink", working), /Immutable asset changed/);
-  assert.equal(git(origin, "rev-parse", "codex/pages-assets"), head);
+  assert.equal(git(origin, "rev-parse", "herdlink-pages-assets"), head);
+  assert.equal(git(origin, "rev-parse", "codex"), codexHead);
 });
 
 test("missing bootstrap artifacts stop deployment before an empty archive can be published", (t) => {
@@ -120,5 +123,5 @@ test("missing bootstrap artifacts stop deployment before an empty archive can be
   artifactCommand(t, directory);
   write(working, "dist/assets/index-newHash.js", "new application");
   assert.throws(() => retainPagesAssets("test/herdlink", working), /Cannot retain assets from Pages run 7/);
-  assert.equal(git(origin, "branch", "--list", "codex/pages-assets"), "");
+  assert.equal(git(origin, "branch", "--list", "herdlink-pages-assets"), "");
 });

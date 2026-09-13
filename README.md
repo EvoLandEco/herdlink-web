@@ -227,7 +227,7 @@ Bootstrap, Vivus, and LeaderLine also use exact release URLs. The FontAwesome
 kit keeps its licensed icon selection; its release version is controlled in
 the [kit settings](https://docs.fontawesome.com/web/setup/use-kit#additional-settings).
 
-The Pages workflow stores published assets on `codex/pages-assets` and includes
+The Pages workflow stores published assets on `herdlink-pages-assets` and includes
 them in each deployment. This lets open tabs load their runtime, data, and
 screenshot code after another release. The archive is written before Pages
 publishes the site. A generated filename with different contents stops the
