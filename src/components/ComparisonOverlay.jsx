@@ -1,7 +1,7 @@
-import { memo, useEffect, useId, useMemo, useRef, useState } from "react";
-import { faBook, faFlask, faLayerGroup } from "@fortawesome/free-solid-svg-icons";
+import { memo, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { faBook, faCalendarDays, faChartLine, faCodeCompare, faFlask, faLayerGroup, faLocationDot, faNetworkWired, faRankingStar } from "@fortawesome/free-solid-svg-icons";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
-import { ScenarioLibrary } from "./ScenarioLibrary";
+import { ScenarioLibrary, ScenarioPresets } from "./ScenarioLibrary";
 import {
   buildComparisonChart,
   comparisonEventMarkerWidth,
@@ -22,20 +22,69 @@ function dateLabel(date) {
   return dateFormatter.format(new Date(date));
 }
 
-function ComparisonInfo({ label, children }) {
+function ComparisonInfo({ label, children, icon = faChartLine, rows = [], footer, rich = false }) {
   const id = useId();
+  const infoRef = useRef(null);
+  const tipRef = useRef(null);
+  const [active, setActive] = useState(false);
+  useLayoutEffect(() => {
+    const info = infoRef.current;
+    const body = info.closest(".comparison-body");
+    if (!active || !body) return;
+    const tip = tipRef.current;
+    const place = () => {
+      const bounds = body.getBoundingClientRect();
+      const anchor = info.getBoundingClientRect();
+      const above = Math.max(0, anchor.top - bounds.top - 10);
+      const below = Math.max(0, bounds.bottom - anchor.bottom - 10);
+      const needed = Math.min(420, tip.scrollHeight + 2);
+      const down = below >= needed || below >= above;
+      info.dataset.placement = down ? "below" : "above";
+      tip.style.maxHeight = `${Math.min(420, down ? below : above)}px`;
+    };
+    place();
+    const observer = new ResizeObserver(place);
+    observer.observe(body);
+    observer.observe(tip);
+    body.addEventListener("scroll", place);
+    window.addEventListener("resize", place);
+    return () => {
+      observer.disconnect();
+      body.removeEventListener("scroll", place);
+      window.removeEventListener("resize", place);
+    };
+  }, [active, label]);
   return (
-    <span className="comparison-info">
+    <span ref={infoRef} className="comparison-info"
+      onPointerEnter={() => setActive(true)}
+      onPointerLeave={(event) => { if (!event.currentTarget.contains(document.activeElement)) setActive(false); }}
+      onFocus={() => setActive(true)}
+      onBlur={(event) => { if (!event.currentTarget.contains(event.relatedTarget) && !event.currentTarget.matches(":hover")) setActive(false); }}
+    >
       <button
         type="button"
         className="panel-info-button has-tip"
-        data-tip={children}
+        data-tip={typeof children === "string" ? children : label}
         aria-label={`${label} explained`}
         aria-describedby={id}
       >
         <span aria-hidden="true">i</span>
       </button>
-      <span id={id} className="comparison-info__tip" role="tooltip">{children}</span>
+      <span ref={tipRef} id={id} className="comparison-info__tip" role="tooltip" tabIndex={0}>
+        {rich ? children : <span className="comparison-help">
+          <span className="comparison-help__heading">
+            <span className="comparison-help__icon"><FontAwesomeIcon icon={icon} aria-hidden="true" /></span>
+            <span><small className="comparison-help__eyebrow">Comparison guide</small><strong>{label}</strong></span>
+          </span>
+          <span className="comparison-help__body">
+            {children && <span className="comparison-help__summary">{children}</span>}
+            {rows.length > 0 && <span className="comparison-help__rows">
+              {rows.map(([heading, text]) => <span className="comparison-help__row" key={heading}><strong>{heading}</strong><span>{text}</span></span>)}
+            </span>}
+          </span>
+          {footer && <span className="comparison-help__footer">{footer}</span>}
+        </span>}
+      </span>
     </span>
   );
 }
@@ -107,7 +156,7 @@ function PairedChart({ points, metric, date, currentDate, onInspect }) {
   );
 }
 
-function ComparisonScope({ title, description, metrics, original, intervention, dates, date, currentDate, metricKey, onMetricChange, onInspect, children }) {
+function ComparisonScope({ title, description, helpRows, metrics, original, intervention, dates, date, currentDate, metricKey, onMetricChange, onInspect, children }) {
   const selectId = useId();
   const metric = metrics.find((entry) => entry.key === metricKey) || metrics[0];
   const originalFrame = original.find((frame) => frame.date === date);
@@ -120,7 +169,7 @@ function ComparisonScope({ title, description, metrics, original, intervention, 
     <section className="comparison-scope">
       <div className="comparison-scope__heading">
         <h3>{title}</h3>
-        <ComparisonInfo label={title}>{description}</ComparisonInfo>
+        <ComparisonInfo label={title} icon={title === "Network" ? faNetworkWired : faLocationDot} rows={helpRows}>{description}</ComparisonInfo>
       </div>
       <div className="comparison-scope__context">{children || <span>Across all regions</span>}</div>
       <div className="comparison-metric-select">
@@ -128,7 +177,7 @@ function ComparisonScope({ title, description, metrics, original, intervention, 
         <select id={selectId} value={metric.key} onChange={(event) => onMetricChange(event.target.value)}>
           {metrics.map((entry) => <option key={entry.key} value={entry.key}>{entry.label}</option>)}
         </select>
-        <ComparisonInfo label={metric.label}>{metric.description || metric.label}</ComparisonInfo>
+        <ComparisonInfo label={metric.label} footer={metric.format === "percent" ? "Δ uses percentage points (pp)." : "Δ = Intervention − Original"}>{metric.description || metric.label}</ComparisonInfo>
       </div>
       <div className="comparison-pair">
         <div><span className="comparison-series-label comparison-series-label--original">Original</span><strong>{formatComparisonValue(originalFrame?.[metric.key], metric.format)}</strong></div>
@@ -178,7 +227,7 @@ const InterventionMarker = memo(function InterventionMarker({ cluster, onInspect
       </button>
       <div ref={tooltipRef} id={tooltipId} className="comparison-event__tip" role={grouped ? "group" : "tooltip"} aria-label={grouped ? "Intervention steps" : undefined} tabIndex="0">
         <div className="comparison-event__heading">
-          <strong>{grouped ? `${steps.length} recorded steps` : dateLabel(firstDate)}</strong>
+          <strong><FontAwesomeIcon icon={faCalendarDays} aria-hidden="true" />{grouped ? `${steps.length} recorded steps` : dateLabel(firstDate)}</strong>
           <span>{eventCount} {eventCount === 1 ? "event" : "events"}</span>
         </div>
         {steps.map((step) => (
@@ -254,7 +303,13 @@ function ComparisonContent({ data, library, scenariosOpen }) {
         {ready ? <div className="comparison-layout">
           <ComparisonScope
             title="Network"
-            description="Original includes all routes and regional trade permissions. Intervention applies your link edits and restriction schedule. Simulation scenarios share model settings and seed. Both lines share a scale; gaps and dashes mark missing results."
+            description="Compare the whole system across both scenarios."
+            helpRows={[
+              ["Original", "All recorded routes and regional trade permissions are open."],
+              ["Intervention", "Applies your route edits and restriction schedule."],
+              ["Simulation", "Both scenarios share the same model settings and seed."],
+              ["Reading the chart", "Both lines share a scale. Gaps and dashes mark missing results."],
+            ]}
             metrics={data.globalMetrics}
             original={data.original.global}
             intervention={data.intervention.global}
@@ -264,7 +319,11 @@ function ComparisonContent({ data, library, scenariosOpen }) {
           {selectedRegion ? (
             <ComparisonScope
               title="Region"
-              description="Compare one region across both scenarios. Selecting a region here leaves your main network selection unchanged."
+              description="Follow one region across both scenarios."
+              helpRows={[
+                ["Choose a region", "Use the selector or select an entry in Largest changes. Your main network selection stays fixed."],
+                ["Read its trajectory", "Choose a metric to compare both lines on the same scale. Gaps and dashes mark missing results."],
+              ]}
               metrics={data.nodeMetrics}
               original={data.original.nodes[selectedRegion.id] || []}
               intervention={data.intervention.nodes[selectedRegion.id] || []}
@@ -282,7 +341,10 @@ function ComparisonContent({ data, library, scenariosOpen }) {
           <aside className="comparison-changes">
             <div className="comparison-scope__heading">
               <h3>Largest changes</h3>
-              <ComparisonInfo label="Largest changes">Regions ranked by the absolute difference between intervention and original for the selected region metric and inspected date. The sign shows direction, not whether a change is beneficial.</ComparisonInfo>
+              <ComparisonInfo label="Largest changes" icon={faRankingStar} rows={[
+                ["Ranking", "Up to six regions, ranked by absolute change for the selected region metric and inspected date."],
+                ["Inspect", "Select a region to show its trajectory in the Region panel."],
+              ]} footer="The sign shows direction; it does not tell you whether a change is beneficial.">Find the regions most affected by your interventions.</ComparisonInfo>
             </div>
             <p className="comparison-changes__metric">{selectedMetric?.label || "Region metric"}</p>
             {changedRegions.length ? (
@@ -317,7 +379,12 @@ function ComparisonContent({ data, library, scenariosOpen }) {
           <label htmlFor={rangeId}>Inspect date <time dateTime={date}>{dateLabel(date)}</time></label>
           <span className="comparison-timeline__actions">
             {date !== data.date && <button type="button" onClick={() => setInspectedDate(null)}>Current date</button>}
-            <ComparisonInfo label="Date inspector">Drag the ring or point at either chart to inspect a date. Hover or focus a diamond for intervention details; select it to inspect that step. A + groups nearby steps; open it to choose a date. Events between recorded dates appear at the next step, with their actual dates in the details. The main replay date stays fixed. Percent differences use percentage points (pp).</ComparisonInfo>
+            <ComparisonInfo label="Date inspector" icon={faCalendarDays} rows={[
+              ["Inspect a date", "Drag the ring or point at either chart."],
+              ["Intervention markers", "Hover or focus a diamond for details. Select it to inspect that step."],
+              ["Grouped steps (+)", "Open the group to choose a recorded date."],
+              ["Between recorded dates", "Events appear at the next recorded step; their actual dates remain in the details."],
+            ]} footer="The main replay date stays fixed." />
           </span>
         </div>
         <div className={`comparison-timeline-slider${interventionEvents.length ? " has-events" : ""}`} style={{ "--timeline-progress": `${timelineProgress * 100}%` }}>
@@ -365,17 +432,16 @@ export function ComparisonOverlay({ open, data, onClose, onModeChange, scenarioS
       onCancel={(event) => { event.preventDefault(); onClose(); }}
     >
       <header className="comparison-header">
-        <div className="comparison-header__title">
-          <span className="comparison-eyebrow">Scenario comparison</span>
-          <h2 id={titleId}>Original <span>/</span> Intervention</h2>
-          <p>{data?.datasetLabel || "Animal trade network"}{data?.mode === "simulation" && data?.scenarioContext?.settings?.model ? ` · ${data.scenarioContext.settings.model}` : ""}</p>
-        </div>
+        <h2 id={titleId} className="comparison-header__title"><FontAwesomeIcon icon={faCodeCompare} aria-hidden="true" />Scenario Comparison</h2>
         <div className="comparison-header__actions">
-          <button type="button" className="comparison-scenarios-toggle" aria-expanded={scenariosOpen} aria-controls={libraryId} onClick={() => setScenariosOpen((value) => !value)}>
-            <FontAwesomeIcon icon={faLayerGroup} aria-hidden="true" />
-            Scenarios
-            <span aria-hidden="true">{scenariosOpen ? "−" : "+"}</span>
-          </button>
+          <div className="comparison-scenario-actions">
+            <ScenarioPresets context={data?.scenarioContext} onLoadPreset={onLoadPreset} Info={ComparisonInfo} />
+            <button type="button" className="comparison-scenarios-toggle" aria-expanded={scenariosOpen} aria-controls={libraryId} onClick={() => setScenariosOpen((value) => !value)}>
+              <FontAwesomeIcon icon={faLayerGroup} aria-hidden="true" />
+              Custom
+              <span aria-hidden="true">{scenariosOpen ? "−" : "+"}</span>
+            </button>
+          </div>
           <div className="comparison-mode" data-mode={data?.mode} role="group" aria-label="Comparison mode">
             <button type="button" aria-pressed={data?.mode === "trade"} disabled={!data || data.modeSwitchDisabled} onClick={() => { if (data.mode !== "trade") onModeChange("trade"); }}>
               <FontAwesomeIcon icon={faBook} aria-hidden="true" />
@@ -393,9 +459,11 @@ export function ComparisonOverlay({ open, data, onClose, onModeChange, scenarioS
           </button>
         </div>
       </header>
+      {scenarioError && <p className="comparison-scenario-message is-error" role="alert">{scenarioError}</p>}
+      {!scenarioError && scenarioNotice && <p className="comparison-scenario-message" role="status">{scenarioNotice}</p>}
       <ComparisonContent data={data} scenariosOpen={scenariosOpen} library={
         <ScenarioLibrary id={libraryId} open={scenariosOpen} context={data?.scenarioContext} slots={scenarioSlots}
-          error={scenarioError} notice={scenarioNotice} onLoadPreset={onLoadPreset} onSaveScenario={onSaveScenario}
+          onSaveScenario={onSaveScenario}
           onLoadScenario={onLoadScenario} Info={ComparisonInfo} />
       } />
     </dialog>

@@ -1,5 +1,5 @@
 import { memo, useEffect, useId, useState } from "react";
-import { faClock, faCircleNodes, faLockOpen, faNetworkWired, faPause, faShieldHalved } from "@fortawesome/free-solid-svg-icons";
+import { faBullseye, faCircleInfo, faClock, faCircleNodes, faFlask, faHourglassHalf, faLayerGroup, faLocationDot, faLockOpen, faNetworkWired, faPause, faShieldHalved, faSliders } from "@fortawesome/free-solid-svg-icons";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 
 const presetIcons = {
@@ -9,6 +9,14 @@ const presetIcons = {
   "partner-ring": faCircleNodes,
   "hub-controls": faNetworkWired,
   "temporary-standstill": faPause,
+};
+const presetLabels = {
+  "open-trade": "Open",
+  "seed-containment": "Seed",
+  "delayed-response": "Delayed",
+  "partner-ring": "Ring",
+  "hub-controls": "Hubs",
+  "temporary-standstill": "Pause",
 };
 const savedDateFormatter = new Intl.DateTimeFormat("en-GB", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" });
 const datasetLabel = (key) => `${key[0].toUpperCase()}${key.slice(1)} trade`;
@@ -42,37 +50,81 @@ function ScenarioSlot({ slot, index, context, onSave, onLoad }) {
   );
 }
 
-export const ScenarioLibrary = memo(function ScenarioLibrary({ id, open, context, slots, error, notice, onLoadPreset, onSaveScenario, onLoadScenario, Info }) {
-  const headingId = useId();
+function PresetHelp({ preset, context }) {
+  const rows = [
+    ["Action", preset.description, faSliders],
+    ["Scope", preset.scope, faBullseye],
+    ["Timing", preset.timing, faClock],
+    ["Duration", preset.duration, faHourglassHalf],
+  ];
+  const notes = preset.id === "open-trade" ? [] : [
+    context.timingNote,
+    context.contactNote,
+    ["partner-ring", "hub-controls"].includes(preset.id) ? context.note : null,
+  ].filter(Boolean);
+
+  return (
+    <span className="preset-help">
+      <span className="preset-help__heading">
+        <span className="preset-help__icon"><FontAwesomeIcon icon={presetIcons[preset.id]} aria-hidden="true" /></span>
+        <span className="preset-help__title"><small className="preset-help__eyebrow">Intervention preset</small><strong>{preset.label}</strong></span>
+        <span className="preset-help__delay">{preset.delayDays
+          ? <><strong>{preset.delayDays}</strong><small>day delay</small></>
+          : <strong>Baseline</strong>}</span>
+      </span>
+      <span className="preset-help__rows">
+        {rows.filter(([, text]) => text).map(([label, text, icon]) => (
+          <span className="preset-help__row" key={label}>
+            <FontAwesomeIcon icon={icon} aria-hidden="true" />
+            <span><strong>{label}</strong><span>{text}</span></span>
+          </span>
+        ))}
+      </span>
+      <span className="preset-help__context">
+        <span><FontAwesomeIcon icon={faFlask} aria-hidden="true" />{context.settings.model}</span>
+        <span><FontAwesomeIcon icon={faLocationDot} aria-hidden="true" />{context.seedLabel}</span>
+      </span>
+      {notes.length > 0 && <span className="preset-help__notes">
+        {notes.map((note) => <span key={note}><FontAwesomeIcon icon={faCircleInfo} aria-hidden="true" /><span>{note}</span></span>)}
+      </span>}
+      <span className="preset-help__footer">Replaces all interventions · Keeps model settings and seed</span>
+    </span>
+  );
+}
+
+export const ScenarioPresets = memo(function ScenarioPresets({ context, onLoadPreset, Info }) {
   const disabled = !context || context.disabled;
+  return (
+    <div className="scenario-presets" role="group" aria-label="Intervention presets">
+      <span className="scenario-presets__heading" aria-hidden="true">Presets</span>
+      {(context?.presets || []).map((preset) => (
+        <div key={preset.id} className="scenario-preset">
+          <button type="button" disabled={disabled} onClick={() => onLoadPreset(preset.id)} aria-label={`Load ${preset.label} preset`}>
+            <span className="scenario-preset__icon"><FontAwesomeIcon icon={presetIcons[preset.id]} aria-hidden="true" /></span>
+            <span className="scenario-preset__label">{presetLabels[preset.id]}</span>
+          </button>
+          <Info label={preset.label} rich><PresetHelp preset={preset} context={context} /></Info>
+        </div>
+      ))}
+    </div>
+  );
+});
+
+export const ScenarioLibrary = memo(function ScenarioLibrary({ id, open, context, slots, onSaveScenario, onLoadScenario, Info }) {
+  const headingId = useId();
   return (
     <section id={id} className="scenario-library" hidden={!open} aria-labelledby={headingId}>
       <div className="scenario-library__heading">
-        <div><h3 id={headingId}>Scenario library</h3><p>Try a preset or keep your own comparison.</p></div>
-        <Info label="Scenario library">Presets replace every intervention and keep the current model settings and seed. Broader restrictions can block more trade without reducing disease further when seed exports are already contained. Custom slots save the dataset, model settings, seed, and complete intervention schedule in this browser. Loading a slot replaces the current settings and schedule.</Info>
+        <div><h3 id={headingId}>Custom scenarios</h3><p>Keep your settings and intervention schedule.</p></div>
+        <Info label="Custom scenarios" icon={faLayerGroup} rows={[
+          ["Save", "Store the dataset, model settings, seed, and complete intervention schedule."],
+          ["Overwrite", "Replace the scenario stored in that slot."],
+          ["Load", "Replace current settings and interventions. Switch to the saved dataset before loading."],
+        ]} footer="Three slots · Saved in this browser">Keep complete scenarios to revisit and compare.</Info>
       </div>
-      <div className="scenario-library__context">
-        <span>{context ? `${context.datasetLabel} · ${context.settings.model}` : "Waiting for dataset"}</span>
-        {context && <span>Seed · {context.seedLabel}</span>}
-        <span>Presets replace all interventions</span>
-      </div>
-      <div className="scenario-preset-grid">
-        {(context?.presets || []).map((preset) => (
-          <article key={preset.id} className="scenario-preset">
-            <button type="button" disabled={disabled} onClick={() => onLoadPreset(preset.id)} aria-label={`Load ${preset.label} preset`}>
-              <span className="scenario-preset__icon"><FontAwesomeIcon icon={presetIcons[preset.id]} aria-hidden="true" /></span>
-              <span className="scenario-preset__copy"><strong>{preset.label}</strong><span>{preset.summary}</span></span>
-            </button>
-            <Info label={preset.label}>{[preset.description, preset.detail].filter(Boolean).join(" ")}</Info>
-          </article>
-        ))}
-      </div>
-      <div className="scenario-library__saved-heading"><h4>Saved in this browser</h4><span>3 slots · complete scenarios</span></div>
       <div className="scenario-slot-grid">
         {Array.from({ length: 3 }, (_, index) => <ScenarioSlot key={index} slot={slots[index]} index={index} context={context} onSave={onSaveScenario} onLoad={onLoadScenario} />)}
       </div>
-      {error && <p className="scenario-library__message is-error" role="alert">{error}</p>}
-      {!error && notice && <p className="scenario-library__message" role="status">{notice}</p>}
     </section>
   );
 });
