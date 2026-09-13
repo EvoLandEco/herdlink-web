@@ -7,12 +7,16 @@ import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import { useState } from "react";
 
 export function ScreenSizeNotice({ reason }) {
-  const [hasCopied, setHasCopied] = useState(false);
+  const [copyLabel, setCopyLabel] = useState("Copy URL");
   const needsLandscape = reason === "landscape";
 
   const copyPageUrl = async () => {
-    await navigator.clipboard.writeText(window.location.href);
-    setHasCopied(true);
+    try {
+      await navigator.clipboard.writeText(window.location.href);
+      setCopyLabel("URL copied");
+    } catch {
+      setCopyLabel("Copy failed. Try again");
+    }
   };
 
   return (
@@ -82,7 +86,7 @@ export function ScreenSizeNotice({ reason }) {
                 <path d="M16 8V5H5v11h3" />
               </svg>
               <span aria-live="polite">
-                {hasCopied ? "URL copied" : "Copy URL"}
+                {copyLabel}
               </span>
             </button>
           </>

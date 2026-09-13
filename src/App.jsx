@@ -572,12 +572,15 @@ function loadRuntimeScript({ src, crossOrigin }) {
     const script = existing || document.createElement("script");
 
     const handleLoad = () => {
+      script.removeEventListener("error", handleError);
       script.dataset.loaded = "true";
       scriptLoaders.delete(src);
       resolve(script);
     };
 
     const handleError = () => {
+      script.removeEventListener("load", handleLoad);
+      script.remove();
       scriptLoaders.delete(src);
       reject(new Error(`Failed to load ${src}`));
     };

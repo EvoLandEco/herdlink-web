@@ -38,9 +38,16 @@ export function formatComparisonDelta(original, intervention, format) {
 }
 
 export function nearestComparisonDate(dates, timestamp) {
-  return dates.reduce((nearest, date, index) =>
-    Math.abs(Date.parse(date) - timestamp) < Math.abs(Date.parse(dates[nearest]) - timestamp)
-      ? index : nearest, 0);
+  let low = 0;
+  let high = dates.length;
+  while (low < high) {
+    const middle = Math.floor((low + high) / 2);
+    if (Date.parse(dates[middle]) < timestamp) low = middle + 1;
+    else high = middle;
+  }
+  if (low === 0) return 0;
+  if (low === dates.length) return dates.length - 1;
+  return timestamp - Date.parse(dates[low - 1]) <= Date.parse(dates[low]) - timestamp ? low - 1 : low;
 }
 
 export const comparisonEventMarkerWidth = 14;

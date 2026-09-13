@@ -1706,13 +1706,19 @@
           }
 
           function applyScenario(nodeInterventions, linkInterventions, settings, label) {
+            let settingsChanged = false;
             if (settings) {
-              readSimulationSettings();
+              const currentSettings = readSimulationSettings();
+              settingsChanged = Object.keys(settings).some((key) => settings[key] !== currentSettings[key]);
               const controls = { model: "Model", seedRegion: "SeedRegion", initialPct: "InitialPct", beta: "Beta", movementBeta: "MovementBeta", sigma: "Sigma", gamma: "Gamma" };
               for (const [key, suffix] of Object.entries(controls)) {
                 document.getElementById(`simulation${suffix}`).value = settings[key];
               }
             }
+            const serialize = (_, value) => value instanceof Map ? Array.from(value) : value;
+            if (!settingsChanged && !comparisonDataError && !networkStatsDirtyDates.size && networkStatsDirtyFrom === null &&
+              JSON.stringify([nodeInterventions, linkInterventions], serialize) ===
+              JSON.stringify([simulationNodeInterventions, simulationLinkInterventions], serialize)) return;
             simulationNodeInterventions.clear();
             simulationLinkInterventions.clear();
             for (const [time, changes] of nodeInterventions) simulationNodeInterventions.set(time, changes);
@@ -4402,7 +4408,31 @@
               if (!(await stage(34, "contacts", "Building movement contacts"))) return;
               if (!(await stage(48, "states", "Integrating compartment states"))) return;
               trajectory = buildSimulationTrajectory(settings);
+              if (!(await stage(78, "frames", "Building replay ledger"))) return;
+
+              simulationState = {
+                status: "running",
+                settings,
+                trajectory,
+                currentFrame: null,
+                currentDateKey: null,
+                metricMax: trajectory?.metricMax || null,
+              };
+
+              if (!(await stage(94, "render", "Rendering simulation view"))) return;
+              refreshCurrentNetworkFrame();
+              finishModePanelsRendering();
+              setSimulationOverlay(100, "Simulation ready", "render");
+              await delaySimulationStage();
+              if (runId !== simulationRunId) return;
+              simulationState.status = "ready";
+              hideSimulationOverlay();
+              setSimulationInputsDisabled(false);
+              enableAllButtons(0);
+              enableAllCheckboxes(0);
+              window.herdlinkComparison?.refresh();
             } catch (error) {
+              if (runId !== simulationRunId) return;
               simulationState.status = "error";
               comparisonDataError = `The simulation could not be calculated: ${error.message || error}`;
               finishModePanelsRendering();
@@ -4411,31 +4441,7 @@
               enableAllButtons(0);
               enableAllCheckboxes(0);
               window.herdlinkComparison?.refresh();
-              return;
             }
-            if (!(await stage(78, "frames", "Building replay ledger"))) return;
-
-            simulationState = {
-              status: "running",
-              settings,
-              trajectory,
-              currentFrame: null,
-              currentDateKey: null,
-              metricMax: trajectory?.metricMax || null,
-            };
-
-            if (!(await stage(94, "render", "Rendering simulation view"))) return;
-            refreshCurrentNetworkFrame();
-            finishModePanelsRendering();
-            setSimulationOverlay(100, "Simulation ready", "render");
-            await delaySimulationStage();
-            if (runId !== simulationRunId) return;
-            simulationState.status = "ready";
-            hideSimulationOverlay();
-            setSimulationInputsDisabled(false);
-            enableAllButtons(0);
-            enableAllCheckboxes(0);
-            window.herdlinkComparison?.refresh();
           }
 
           function scheduleSimulationRecompute(reason = "Settings changed") {

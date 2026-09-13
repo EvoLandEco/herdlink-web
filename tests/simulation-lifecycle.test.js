@@ -72,3 +72,21 @@ test("recomputation pauses replay before calculating and displaying a trajectory
   assert.equal(context.window.isPlaying, false);
   assert.equal(context.simulationState.status, "ready");
 });
+
+test("a failed replay render releases simulation controls and allows a retry", async () => {
+  const { context } = runtime();
+  const released = [];
+  context.setSimulationInputsDisabled = (disabled) => released.push(["inputs", disabled]);
+  context.enableAllButtons = () => released.push(["buttons", false]);
+  context.enableAllCheckboxes = () => released.push(["checkboxes", false]);
+  context.hideSimulationOverlay = () => released.push(["overlay", false]);
+  context.refreshCurrentNetworkFrame = () => { throw new Error("Replay render failed"); };
+  await context.recomputeSimulationTrajectory();
+  assert.equal(context.simulationState.status, "error");
+  assert.match(context.comparisonDataError, /Replay render failed/);
+  assert.deepEqual(released, [["inputs", true], ["overlay", false], ["inputs", false], ["buttons", false], ["checkboxes", false]]);
+  context.refreshCurrentNetworkFrame = () => {};
+  await context.recomputeSimulationTrajectory();
+  assert.equal(context.simulationState.status, "ready");
+  assert.equal(context.comparisonDataError, null);
+});

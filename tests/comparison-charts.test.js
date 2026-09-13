@@ -38,6 +38,23 @@ test("the chart handles a single zero sample and signed metrics", () => {
   assert.equal(nearestComparisonDate(dates, Date.parse("2020-01-03")), 1);
 });
 
+test("date inspection finds the nearest recorded date without scanning a daily trajectory", () => {
+  for (const [timestamp, expected] of [
+    ["2019-12-01", 0], ["2020-01-01", 0], ["2020-01-01T12:00:00Z", 0],
+    ["2020-01-03T12:00:00Z", 1], ["2020-01-04", 2], ["2020-02-01", 2],
+  ]) assert.equal(nearestComparisonDate(dates, Date.parse(timestamp)), expected, timestamp);
+  assert.equal(nearestComparisonDate([dates[0]], Date.parse(dates[2])), 0);
+
+  const daily = Array.from({ length: 4096 }, (_, index) => new Date(Date.UTC(2020, 0, index + 1)).toISOString());
+  let reads = 0;
+  const tracked = new Proxy(daily, { get(target, key) {
+    if (/^\d+$/.test(String(key))) reads++;
+    return Reflect.get(target, key);
+  } });
+  assert.equal(nearestComparisonDate(tracked, Date.parse(daily[3071]) + 3600000), 3071);
+  assert.ok(reads < 30, `A pointer move read ${reads} dates`);
+});
+
 test("resized charts fill their measured bounds while preserving values and calendar spacing", () => {
   const points = [
     { date: dates[0], original: 0, intervention: 10 },

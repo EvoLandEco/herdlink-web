@@ -308,7 +308,7 @@ function ComparisonContent({ data, library, scenariosOpen }) {
               ["Original", "All recorded routes and regional trade permissions are open."],
               ["Intervention", "Applies your route edits and restriction schedule."],
               ["Simulation", "Both scenarios share the same model settings and seed."],
-              ["Reading the chart", "Both lines share a scale. Gaps and dashes mark missing results."],
+              ["Reading the chart", "Both lines share a scale. The dashed line shows Original; gaps mark missing results."],
             ]}
             metrics={data.globalMetrics}
             original={data.original.global}
@@ -322,7 +322,7 @@ function ComparisonContent({ data, library, scenariosOpen }) {
               description="Follow one region across both scenarios."
               helpRows={[
                 ["Choose a region", "Use the selector or select an entry in Largest changes. Your main network selection stays fixed."],
-                ["Read its trajectory", "Choose a metric to compare both lines on the same scale. Gaps and dashes mark missing results."],
+                ["Read its trajectory", "Both lines share a scale. The dashed line shows Original; gaps mark missing results."],
               ]}
               metrics={data.nodeMetrics}
               original={data.original.nodes[selectedRegion.id] || []}

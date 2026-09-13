@@ -98,6 +98,44 @@ test("presets replace complete schedules once and preserve model controls and di
   }
 });
 
+test("identical presets and saved scenarios reuse completed calculations in both modes", () => {
+  for (const mode of ["trade", "simulation"]) {
+    const { context, applied } = runtime();
+    context.appDataMode = mode;
+    context.simulationState.status = mode === "simulation" ? "ready" : "idle";
+    context.loadPreset("open-trade");
+    assert.equal(applied.length, 0);
+    for (const id of ["seed-containment", "partner-ring", "hub-controls", "temporary-standstill", "delayed-response", "open-trade"]) {
+      context.loadPreset(id);
+      context.networkStatsDirtyDates.clear();
+      context.networkStatsDirtyFrom = null;
+      const calls = applied.length;
+      context.loadPreset(id);
+      context.loadScenario(context.captureScenario());
+      assert.equal(applied.length, calls, `${mode}: ${id}`);
+      assert.equal(context.networkStatsDirtyFrom, null);
+    }
+  }
+});
+
+test("scenario loading recalculates changed settings, pending statistics and failed calculations", () => {
+  const { context, elements, applied } = runtime();
+  const saved = context.captureScenario();
+  elements.simulationBeta.value = "0.6";
+  context.loadScenario(saved);
+  assert.equal(applied.length, 1);
+  assert.equal(context.readSimulationSettings().beta, saved.settings.beta);
+  context.networkStatsDirtyFrom = null;
+  context.networkStatsDirtyDates.add(context.uniqueDates[2].getTime());
+  context.loadScenario(saved);
+  assert.equal(applied.length, 2);
+  context.networkStatsDirtyFrom = null;
+  context.comparisonDataError = "A calculation failed.";
+  context.loadPreset("open-trade");
+  assert.equal(applied.length, 3);
+  assert.equal(context.comparisonDataError, null);
+});
+
 test("partner and hub targets use positive cross-region records with first-step partners and stable volume ties", () => {
   const { context } = runtime({}, 2);
   const [first, second] = context.uniqueDates;
