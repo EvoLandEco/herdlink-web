@@ -1,4 +1,6 @@
 import { useId, useState } from "react";
+import { faDiagramProject } from "@fortawesome/free-solid-svg-icons";
+import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import "../styles/network-basics.css";
 
 const regions = [
@@ -41,9 +43,7 @@ export function NetworkBasics() {
   return (
     <section className="network-basics" aria-labelledby="networkBasicsTitle">
       <header className="network-basics__header">
-        <span className="network-basics__eyebrow">Network basics</span>
-        <h3 id="networkBasicsTitle">A few dots. A whole trade network.</h3>
-        <p>Explore animal trade in three small steps. Illustrated examples, not live data.</p>
+        <h3 id="networkBasicsTitle"><FontAwesomeIcon icon={faDiagramProject} aria-hidden="true" />Network Basics</h3>
       </header>
 
       <div className="network-basics__cards">
@@ -193,9 +193,6 @@ export function NetworkBasics() {
           </div>
         </article>
       </div>
-      <p className="network-basics__footnote">
-        Trade routes change over time. A connected path alone does not show when animals moved.
-      </p>
     </section>
   );
 }
