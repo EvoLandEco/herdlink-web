@@ -10,6 +10,8 @@
 
     // Global state
           let loadedCSVData = null;
+          const simulationRegionIdsByDataset = new WeakMap();
+          const tradeRecordsByDataset = new WeakMap();
           let uniqueDates = [];
           let temporalUpdateTimeout;
           window.allTemporalStats = {};
@@ -83,19 +85,12 @@
           let ledgerHotspotsMax = null;
           const numberPrintedHotspots = 3;
           let edgeExtent, edgeColor, nodeColor, nodeSize;
-          const metricDisplayNames = {
-            inDegree: "Vulnerable (by In-Degree)",
-            outDegree: "Seeding (by Out-Degree)",
-            betweenness: "Bottleneck (by Betweenness)",
-            pageRank: "Sink (by PageRank)",
-            eigenvector: "Amplifier (by Eigenvector)",
-          };
           const hotspotStyles = {
-            inDegree: { color: "#009e73", dash: "none", code: "ID", pattern: "Solid" },
-            outDegree: { color: "#56b4e9", dash: "10 5", code: "OD", pattern: "Long dash" },
-            betweenness: { color: "#e69f00", dash: "0 5", code: "BT", pattern: "Dotted" },
-            pageRank: { color: "#f0e442", dash: "8 4 0 4", code: "PR", pattern: "Dash and dot" },
-            eigenvector: { color: "#cc79a7", dash: "3 5", code: "EC", pattern: "Short dash" },
+            inDegree: { color: "#009e73", dash: "none", pattern: "Solid" },
+            outDegree: { color: "#56b4e9", dash: "10 5", pattern: "Long dash" },
+            betweenness: { color: "#e69f00", dash: "0 5", pattern: "Dotted" },
+            pageRank: { color: "#f0e442", dash: "8 4 0 4", pattern: "Dash and dot" },
+            eigenvector: { color: "#cc79a7", dash: "3 5", pattern: "Short dash" },
           };
           const hotspotRingSpacing = 4;
           let newSCCs;
@@ -187,6 +182,9 @@
           let simulationRecomputeTimer = null;
           const simulationLinkInterventions = new Map();
           const simulationNodeInterventions = new Map();
+          const networkStatsDirtyDates = new Set();
+          let networkStatsDirtyFrom = null;
+          let ledgerBaselineSpectralRadius = 0;
           let simulationControlView = "links";
           let simulationNodeControlsPanel = null;
           let simulationState = {
@@ -202,6 +200,11 @@
             return appDataMode === "simulation";
           }
 
+          function areNetworkControlsLocked() {
+            return window.isPlaying || window.isSwitchingCSV || appModeSwitchLocked ||
+              simulationState.status === "running";
+          }
+
           function getNodeId(value) {
             return typeof value === "object" ? value.id : value;
           }
@@ -210,8 +213,21 @@
             return `${getNodeId(source)}-${getNodeId(target)}`;
           }
 
+          function getTradeRecordsByDate(data) {
+            if (tradeRecordsByDataset.has(data)) return tradeRecordsByDataset.get(data);
+            const recordsByDate = new Map();
+            for (const row of data) {
+              const time = row.time.getTime();
+              if (!recordsByDate.has(time)) recordsByDate.set(time, []);
+              recordsByDate.get(time).push(row);
+            }
+            tradeRecordsByDataset.set(data, recordsByDate);
+            return recordsByDate;
+          }
+
           function setSimulationLinkIntervention(key, disabled, date) {
             const time = date.getTime();
+            networkStatsDirtyDates.add(time);
             if (disabled && !simulationLinkInterventions.has(time)) {
               simulationLinkInterventions.set(time, new Map());
             }
@@ -229,6 +245,8 @@
 
           function setSimulationNodeIntervention(id, direction, allowed, date) {
             const time = date.getTime();
+            networkStatsDirtyFrom = networkStatsDirtyFrom === null
+              ? time : Math.min(networkStatsDirtyFrom, time);
             if (!simulationNodeInterventions.has(time)) {
               simulationNodeInterventions.set(time, new Map());
             }
@@ -743,23 +761,23 @@
             panel.addEventListener("keyup", (event) => event.stopPropagation());
             panel.addEventListener("click", (event) => {
               const point = event.target.closest(".simulation-restriction-point");
-              if (!point || window.isPlaying || appModeSwitchLocked || simulationState.status === "running") return;
+              if (!point || areNetworkControlsLocked()) return;
               const slider = document.getElementById("timeSlider");
               slider.value = point.dataset.frameIndex;
               slider.dispatchEvent(new Event("input", { bubbles: true }));
             });
             panel.addEventListener("change", (event) => {
               const input = event.target;
-              if (!input.matches(".simulation-node-permission")) return;
+              if (!input.matches(".simulation-node-permission") || areNetworkControlsLocked()) return;
               const date = getCurrentSliderDate();
-              if (!date || !isSimulationModeActive()) return;
+              if (!date) return;
               if (input.classList.contains("simulation-node-bulk")) {
                 setAllSimulationNodePermissions(input.dataset.direction, input.checked, date);
               } else {
                 setSimulationNodeIntervention(input.dataset.nodeId, input.dataset.direction, input.checked, date);
               }
               renderSimulationNodeControls();
-              scheduleSimulationRecompute("Applying import and export controls");
+              applyNetworkControlChanges("Applying import and export controls");
             });
             simulationNodeControlsPanel = panel;
             return panel;
@@ -826,7 +844,7 @@
                 .attr("type", "button").attr("data-tip-placement", "left")
                 .attr("data-time", (point) => point.time)
                 .attr("data-frame-index", (point) => Math.min(d3.bisectLeft(uniqueDates, new Date(point.time)), uniqueDates.length - 1))
-                .property("disabled", window.isPlaying || appModeSwitchLocked || simulationState.status === "running")
+                .property("disabled", areNetworkControlsLocked())
                 .style("left", (point) => `${position(point.time)}%`)
                 .attr("data-tip", function (point) {
                   const state = ["exports", "imports"].map((direction) =>
@@ -840,19 +858,20 @@
 
           function renderSimulationNodeControls() {
             const panel = ensureSimulationNodeControls();
-            panel.hidden = !isSimulationModeActive() || !selectedNodeData || simulationControlView !== "nodes";
-            if (panel.hidden || !simulationState.trajectory) return;
+            panel.hidden = !selectedNodeData || simulationControlView !== "nodes";
+            if (panel.hidden || !loadedCSVData) return;
             const date = getCurrentSliderDate();
             if (!date) return;
             const dateLabel = d3.timeFormat("%Y-%m-%d");
-            const ids = simulationState.trajectory.ids;
+            const ids = collectSimulationRegionIds(loadedCSVData);
+            panel.querySelector(".panel-info-button").dataset.tipKey = isSimulationModeActive() ? "importsExports" : "importsExportsTrade";
             const permissions = getSimulationNodePermissions(date);
             for (const direction of ["exports", "imports"]) {
               const input = panel.querySelector(`.simulation-node-bulk[data-direction="${direction}"]`);
               const allowedCount = ids.filter((id) => permissions.get(id)?.[direction] !== false).length;
               input.checked = allowedCount === ids.length;
               input.indeterminate = allowedCount > 0 && allowedCount < ids.length;
-              input.disabled = window.isPlaying || simulationState.status === "running";
+              input.disabled = areNetworkControlsLocked();
               input.title = `Allow ${direction} for all ${ids.length} regions, including regions outside the search results`;
             }
             renderSimulationRestrictionTimeline(panel, ids, date);
@@ -888,7 +907,7 @@
                 const input = this.querySelector(`[data-direction="${direction}"]`);
                 input.dataset.nodeId = id;
                 input.checked = permission[direction];
-                input.disabled = window.isPlaying || simulationState.status === "running";
+                input.disabled = areNetworkControlsLocked();
                 input.setAttribute("aria-label", `Allow ${direction} ${direction === "exports" ? "from" : "to"} ${getStatnaam(id)} (${id}) from ${dateLabel(date)}`);
                 const since = permission[`${direction}Since`];
                 input.nextElementSibling.textContent = !permission[direction] && since != null
@@ -1131,6 +1150,9 @@
           }
 
           function collectSimulationRegionIds(data) {
+            if (simulationRegionIdsByDataset.has(data)) {
+              return simulationRegionIdsByDataset.get(data);
+            }
             const ids = new Set();
             for (let i = 1; i <= 40; i++) {
               ids.add("CR" + (i < 10 ? "0" + i : i));
@@ -1141,11 +1163,13 @@
               if (source && source.toUpperCase() !== "NA") ids.add(source);
               if (target && target.toUpperCase() !== "NA") ids.add(target);
             });
-            return Array.from(ids).sort((a, b) => {
+            const sortedIds = Array.from(ids).sort((a, b) => {
               const aNum = parseInt(String(a).replace("CR", ""));
               const bNum = parseInt(String(b).replace("CR", ""));
               return aNum - bNum;
             });
+            simulationRegionIdsByDataset.set(data, sortedIds);
+            return sortedIds;
           }
 
           function buildSimulationLedger(data, ids) {
@@ -1265,6 +1289,7 @@
               previousAvailability = availability;
               const records = ledgerByDate.get(date.getTime()) || [];
               const incomingLoad = new Map(ids.map((id) => [id, 0]));
+              const externalIncomingLoad = new Map(ids.map((id) => [id, 0]));
               const outgoingLoad = new Map(ids.map((id) => [id, 0]));
               const newInfectionByNode = new Map(ids.map((id) => [id, 0]));
               const linkStates = new Map();
@@ -1284,6 +1309,7 @@
                 const existing = linkStates.get(key) || {
                   source: record.source,
                   target: record.target,
+                  local: record.source === record.target,
                   ledgerWeight: 0,
                   riskLoad: 0,
                   sourcePrevalence: sourcePrev,
@@ -1298,10 +1324,16 @@
                   record.target,
                   (incomingLoad.get(record.target) || 0) + riskLoad,
                 );
-                outgoingLoad.set(
-                  record.source,
-                  (outgoingLoad.get(record.source) || 0) + riskLoad,
-                );
+                if (record.source !== record.target) {
+                  externalIncomingLoad.set(
+                    record.target,
+                    (externalIncomingLoad.get(record.target) || 0) + riskLoad,
+                  );
+                  outgoingLoad.set(
+                    record.source,
+                    (outgoingLoad.get(record.source) || 0) + riskLoad,
+                  );
+                }
               });
 
               const next = new Map();
@@ -1349,11 +1381,12 @@
 
                 if (localLoad > 0) {
                   const key = getLinkKey(id, id);
+                  const localMovement = linkStates.get(key);
                   linkStates.set(key, {
                     source: id,
                     target: id,
-                    ledgerWeight: 0,
-                    riskLoad: localLoad,
+                    ledgerWeight: localMovement?.ledgerWeight || 0,
+                    riskLoad: (localMovement?.riskLoad || 0) + localLoad,
                     sourcePrevalence: prevalence,
                     targetPrevalence: prevalence,
                     local: true,
@@ -1367,7 +1400,7 @@
               const nodeMetrics = {};
               ids.forEach((id) => {
                 const state = current.get(id);
-                const incoming = incomingLoad.get(id) || 0;
+                const incoming = externalIncomingLoad.get(id) || 0;
                 const outgoing = outgoingLoad.get(id) || 0;
                 const prevalence = state.N ? state.I / state.N : 0;
                 const exposedShare = state.N ? state.E / state.N : 0;
@@ -1458,7 +1491,7 @@
             allLinks.forEach((link) => {
               const key = getLinkKey(link.source, link.target);
               const simLink = frame.linkStates.get(key);
-              link.ledgerWeight = Math.max(0, +link.weight || 0);
+              link.ledgerWeight ??= Math.max(0, +link.weight || 0);
               link.simulation = simLink || {
                 source: getNodeId(link.source),
                 target: getNodeId(link.target),
@@ -1475,7 +1508,7 @@
             nonZeroLinks = allLinks.filter((link) => link.weight > 0);
             activeNodes = allNodes.filter((node) => node.active);
             edgeExtent = d3.extent(nonZeroLinks, (link) => Math.log(link.weight));
-            if (!edgeExtent[0] || !edgeExtent[1]) {
+            if (edgeExtent[0] == null || edgeExtent[1] == null) {
               edgeExtent = [0, 1];
             }
             edgeColor = d3
@@ -3860,15 +3893,16 @@
             const controls = ensureSimulationControls();
             controls.hidden = !active;
             controls.style.display = active && !selectedNodeData ? "block" : "none";
-            ensureSimulationNodeControls().hidden = !active || !selectedNodeData || simulationControlView !== "nodes";
+            ensureSimulationNodeControls().hidden = !selectedNodeData || simulationControlView !== "nodes";
             const restore = document.getElementById("restoreButton");
-            restore.dataset.tip = active ? "Restore all links and node permissions across all dates (R)" : "Restore links (R)";
-            restore.setAttribute("aria-label", active ? "Restore all links and node permissions (R)" : "Restore links (R)");
+            restore.dataset.tip = "Restore all links and node permissions across all dates (R)";
+            restore.setAttribute("aria-label", "Restore all links and node permissions (R)");
             document.body.classList.toggle("simulation-mode-active", active);
             if (!active) {
               document.body.classList.remove("focus-mode-active");
             }
             setSimulationPanelLabels(active);
+            updateHotspotLegend();
             setTradeInsightOptionsForMode(active);
             if (active && selectedNodeData) {
               resetFocusInsightRenderState(true);
@@ -3886,12 +3920,21 @@
             updateCurrentDateDisplay(date);
           }
 
+          function cancelSimulationRecompute() {
+            simulationRunId += 1;
+            clearTimeout(simulationRecomputeTimer);
+            simulationRecomputeTimer = null;
+          }
+
           async function recomputeSimulationTrajectory(reason = "Simulation run") {
             clearTimeout(simulationRecomputeTimer);
+            simulationRecomputeTimer = null;
+            if (window.isSwitchingCSV) return;
             if (!loadedCSVData || !uniqueDates.length) {
               finishModePanelsRendering();
               return;
             }
+            if (window.isPlaying) setTimeReplayState(false);
             const runId = ++simulationRunId;
             simulationState.status = "running";
             setSimulationInputsDisabled(true);
@@ -3906,6 +3949,7 @@
             };
 
             if (!(await stage(6, "ledger", reason))) return;
+            refreshNetworkControlStats();
             const settings = readSimulationSettings();
             if (!(await stage(18, "holdings", "Estimating regional holdings"))) return;
             if (!(await stage(34, "contacts", "Building movement contacts"))) return;
@@ -3939,8 +3983,47 @@
             if (!isSimulationModeActive()) return;
             clearTimeout(simulationRecomputeTimer);
             simulationRecomputeTimer = setTimeout(() => {
+              simulationRecomputeTimer = null;
+              if (!isSimulationModeActive() || window.isSwitchingCSV) return;
               recomputeSimulationTrajectory(reason);
             }, 180);
+          }
+
+          function refreshNetworkControlStats() {
+            const dates = uniqueDates.filter((date) =>
+              networkStatsDirtyDates.has(date.getTime()) ||
+              (networkStatsDirtyFrom !== null && date.getTime() >= networkStatsDirtyFrom),
+            );
+            if (dates.length) {
+              computeTemporalNetworkStats(dates);
+              computeMaxTemporalNetworkStats();
+            }
+            networkStatsDirtyDates.clear();
+            networkStatsDirtyFrom = null;
+          }
+
+          function applyNetworkControlChanges(reason = "Applying network controls") {
+            if (isSimulationModeActive()) {
+              scheduleSimulationRecompute(reason);
+            } else {
+              refreshNetworkControlStats();
+            }
+            updateNetwork();
+            updateNetworkStats();
+            updateTradeTable();
+            updateDonutCharts();
+            updateInOutArbos();
+            updateTradeNodeInsight(window.currentSelectedTradeNodeInsight);
+            updateHotspotMarks();
+            computeSCCs();
+            updateSCCs();
+            updateAnnotationForNode(selectedNodeData, annotationGroup);
+            if (!isSimulationModeActive()) {
+              updateGlobalStatsChart(window.currentSelectedStat);
+              updateNodeStatsChart(window.currentSelectedNodeStat);
+              if (selectedNodeData) updateNodeTradeDistribution();
+              else updateTradeDistribution();
+            }
           }
 
           function setAppDataMode(mode) {
@@ -3965,10 +4048,7 @@
               return true;
             }
 
-            simulationRunId += 1;
-            clearTimeout(simulationRecomputeTimer);
-            simulationLinkInterventions.clear();
-            simulationNodeInterventions.clear();
+            cancelSimulationRecompute();
             simulationState = {
               status: "idle",
               settings: null,
@@ -3980,7 +4060,7 @@
             restoreLedgerHotspotsMax();
             hideSimulationOverlay();
             clearSimulationRenderState();
-            d3.selectAll(".trade-checkbox, .trade-header-checkbox").property("checked", true);
+            refreshNetworkControlStats();
             refreshCurrentNetworkFrame();
             updateNetwork(true);
             applySimulationMapPrevalence();
@@ -4134,6 +4214,7 @@
           function precomputeAllTradeData() {
             // Use the active date from global state.
             const currentDate = window.currentDate;
+            const disabledKeys = getDisabledLinkKeys(currentDate);
     
             // Map each node id to its trade records.
             // Store each trade once as outgoing
@@ -4161,14 +4242,14 @@
               const weight = +record.AANTAL;
               const source = record.COROP_LEV;
               const target = record.COROP_AFN;
-              // Skip self-loops.
-              if (source === target) return;
+              if (source === target || disabledKeys.has(getLinkKey(source, target))) return;
               if (weight > 0) {
                 // Distance is symmetric.
                 const sourceCoords = getCoordinatesForStatcode(source);
                 const targetCoords = getCoordinatesForStatcode(target);
                 if (!sourceCoords || !targetCoords) return;
                 const distance = computeDistance(sourceCoords, targetCoords);
+                if (!Number.isFinite(distance) || distance <= 0) return;
     
                 // Resolve source and target nodes.
                 const sourceNode = allNodes.find((n) => n.id === source);
@@ -4233,6 +4314,7 @@
               modularity,
               partition,
               numPartitions,
+              spectralRadius,
               hotSpotStats;
     
             // Format numbers safely with fixed precision.
@@ -4259,6 +4341,7 @@
               modularity = stats.modularity;
               partition = stats.partition;
               numPartitions = stats.numPartitions;
+              spectralRadius = stats.spectralRadius;
     
               // Assign partition ids to nodes.
               allNodes.forEach((node) => {
@@ -4276,7 +4359,7 @@
                 enabledLinks,
               );
               // Compute modularity.
-              modResult = computeModularity(activeNodes, enabledLinks);
+              const modResult = computeModularity(activeNodes, enabledLinks);
     
               // Compute spectral radius (risk score).
               spectralRadius = computeSpectralRadius(activeNodes, enabledLinks);
@@ -4321,6 +4404,9 @@
                 "No node stats found for the current date. Computing node stats...",
               );
             }
+
+            d3.selectAll(".nodeGroup circle.primary")
+              .attr("fill", (node) => nodeColor(node.community));
     
             // Build stat rows for rendering.
             const statItems = [
@@ -4433,16 +4519,8 @@
               item.append("span").attr("class", "stat-value").text(itemData.value);
             });
     
-            // Compute spectral radius from enabled links.
-            const currentSR = computeSpectralRadius(allNodes, enabledLinks);
-    
-            // Read maximum spectral radius from cached temporal stats.
-            maxSR = window.maxTemporalStats
-              ? window.maxTemporalStats.spectralRadius
-              : 0;
-    
-            // Normalize current spectral radius against the baseline.
-            const normalizedValue = currentSR / maxSR; // 1.0 means no change
+            const normalizedValue = ledgerBaselineSpectralRadius > 0
+              ? spectralRadius / ledgerBaselineSpectralRadius : 0;
             const formattedNormal = normalizedValue.toFixed(3); // three decimal places
     
             // Color scale for normalized risk score.
@@ -5103,10 +5181,11 @@
               }),
             );
     
-            // Compute the top five nodes within the current window
-            // For each node, find the data point (from node.values) closest to window.currentDate.
+            // Position labels for the highest eligible scores at the displayed date.
             const bisectDate = d3.bisector((d) => d.date).left;
+            const highlighted = new Set(getHotspotRankings(hotspots, false, 5)[selectedMetric]);
             const topNodes = nodesArray
+              .filter((node) => highlighted.has(node.nodeId))
               .map((node) => {
                 const index = bisectDate(node.values, window.currentDate);
                 let currentValue;
@@ -5129,9 +5208,7 @@
                   color: node.color,
                   y: y(currentValue),
                 };
-              })
-              .sort((a, b) => b.value - a.value) // sort descending by value
-              .slice(0, 5);
+              });
     
             topNodes.sort((a, b) => a.y - b.y);
     
@@ -5255,18 +5332,28 @@
            * then computes basic stats, connectivity (number of connected components), modularity, and spectral radius.
            * The results are stored globally in window.allTemporalStats, keyed by ISO date string.
            */
-          function computeTemporalNetworkStats() {
-            // Global object to store stats per date.
-            window.allTemporalStats = {};
-            window.allTemporalNodeStats = {};
+          function computeTemporalNetworkStats(dates = uniqueDates) {
+            if (dates === uniqueDates) {
+              window.allTemporalStats = {};
+              window.allTemporalNodeStats = {};
+              networkStatsDirtyDates.clear();
+              networkStatsDirtyFrom = null;
+              ledgerBaselineSpectralRadius = 0;
+            }
+            const ids = collectSimulationRegionIds(loadedCSVData);
+            const rowsByDate = getTradeRecordsByDate(loadedCSVData);
+            const nodeInterventions = Array.from(simulationNodeInterventions).sort(([a], [b]) => a - b);
+            const permissions = new Map();
+            let interventionIndex = 0;
     
             // Loop over each unique date.
-            uniqueDates.forEach((date) => {
-              // Filter the loaded CSV data to only include rows for the given date.
-              // (This filter compares the getTime() values.)
-              const filteredData = loadedCSVData.filter(
-                (d) => d.time.getTime() === date.getTime(),
-              );
+            dates.forEach((date) => {
+              while (interventionIndex < nodeInterventions.length && nodeInterventions[interventionIndex][0] <= date.getTime()) {
+                const [time, changes] = nodeInterventions[interventionIndex++];
+                applySimulationNodePermissions(permissions, changes, time);
+              }
+              const disabledKeys = getDisabledLinkKeys(date, ids, permissions);
+              const filteredData = rowsByDate.get(date.getTime()) || [];
     
               // Build nodes and links from the filtered data.
               const nodesMap = {};
@@ -5275,7 +5362,7 @@
                 const source = d.COROP_LEV,
                   target = d.COROP_AFN,
                   weight = +d.AANTAL,
-                  disabled = 0;
+                  disabled = disabledKeys.has(getLinkKey(source, target));
                 // Skip rows with missing or invalid values.
                 if (
                   !source ||
@@ -5354,6 +5441,12 @@
                 activeNodes,
                 enabledLinks,
               );
+              if (dates === uniqueDates) {
+                const baselineRadius = disabledKeys.size
+                  ? computeSpectralRadius(activeNodes, links.filter((link) => link.weight > 0))
+                  : spectralRadius;
+                ledgerBaselineSpectralRadius = Math.max(ledgerBaselineSpectralRadius, baselineRadius);
+              }
     
               // Compute node stats (use all nodes).
               const nodeStats = computeHotSpotMetrics(nodes, enabledLinks);
@@ -5538,149 +5631,98 @@
           }
     
           function computeModularity(nodes, links) {
-            // Build an array of [sourceId, targetId, weight].
-            let edgesForLouvain = [];
-            links.forEach((link) => {
-              let s =
-                typeof link.source === "object" ? link.source.id : link.source;
-              let t =
-                typeof link.target === "object" ? link.target.id : link.target;
-              let w = link.weight;
-              // For an undirected approach, add just once.
-              edgesForLouvain.push({ source: s, target: t, weight: w });
-            });
-    
-            let nodeIds = nodes.map((n) => n.id);
-    
-            // Now pass an array to .edges(...)
-            let community = jLouvain().nodes(nodeIds).edges(edgesForLouvain);
-    
-            // Run the algorithm
-            let results = community(); // node => community
-            let assignments = results["communities"];
-            let modularity = results["modularity"];
-    
-            return {
-              partition: assignments,
-              modularity: modularity,
-            };
-          }
-    
-          /**
-           * Computes eigenvector centrality for the graph using only enabled links.
-           * The graph is treated as undirected.
-           *
-           * @param {Array} allNodes Array of node objects.
-           * @param {Array} enabledLinks Array of link objects.
-           * @param {number} maxIter Maximum number of iterations for power iteration.
-           * @param {number} tol Tolerance for convergence.
-           *
-           * @returns {Object} An object mapping node IDs to their computed eigenvector centrality.
-           */
-          function computeEigenvectorCentrality(
-            allNodes,
-            enabledLinks,
-            maxIter = 100,
-            tol = 1e-6,
-          ) {
-            // Build an undirected adjacency list..
-            // For each node, create an object to map each neighbor to the sum of weights.
-            const adj = {};
-            allNodes.forEach((n) => {
-              adj[n.id] = {};
-            });
-            enabledLinks.forEach((link) => {
-              const s =
-                typeof link.source === "object" ? link.source.id : link.source;
-              const t =
-                typeof link.target === "object" ? link.target.id : link.target;
-              const w = link.weight || 1;
-              if (!adj[s][t]) {
-                adj[s][t] = 0;
-              }
-              if (!adj[t][s]) {
-                adj[t][s] = 0;
-              }
-              adj[s][t] += w;
-              adj[t][s] += w;
-            });
-    
-            // Initialize centrality for each node with a value of 1.
-            let centrality = {};
-            allNodes.forEach((n) => {
-              centrality[n.id] = 1;
-            });
-    
-            // Power iteration: update centrality until convergence.
-            for (let iter = 0; iter < maxIter; iter++) {
-              let newCentrality = {};
-              let norm = 0;
-    
-              // Compute new centrality values.
-              allNodes.forEach((n) => {
-                let sum = 0;
-                for (let neighbor in adj[n.id]) {
-                  sum += adj[n.id][neighbor] * centrality[neighbor];
-                }
-                newCentrality[n.id] = sum;
-                norm += sum * sum;
-              });
-              norm = Math.sqrt(norm);
-    
-              // Normalize the new centrality vector.
-              allNodes.forEach((n) => {
-                newCentrality[n.id] /= norm;
-              });
-    
-              // Check convergence.
-              let diff = 0;
-              allNodes.forEach((n) => {
-                diff = Math.max(
-                  diff,
-                  Math.abs(newCentrality[n.id] - centrality[n.id]),
-                );
-              });
-              centrality = newCentrality;
-              if (diff < tol) break;
+            const edges = new Map();
+            for (const link of links) {
+              const ids = [getNodeId(link.source), getNodeId(link.target)].sort();
+              const key = JSON.stringify(ids);
+              const edge = edges.get(key);
+              if (edge) edge.weight += link.weight;
+              else edges.set(key, { source: ids[0], target: ids[1], weight: link.weight });
             }
-    
+            if (!edges.size) {
+              return {
+                partition: Object.fromEntries(nodes.map((node, index) => [node.id, index])),
+                modularity: 0,
+              };
+            }
+            // Louvain uses one undirected edge for the combined volume in both directions.
+            const results = jLouvain().nodes(nodes.map((node) => node.id)).edges([...edges.values()])();
+            return { partition: results.communities, modularity: results.modularity };
+          }
+
+          /**
+           * Computes unit-length centrality from the symmetric movement adjacency.
+           * Tied dominant blocks use the projection of an all-ones starting vector.
+           * The returned vector must satisfy the requested relative residual tolerance.
+           */
+          function computeEigenvectorCentrality(allNodes, enabledLinks, maxIter = 100, tol = 1e-6) {
+            const centrality = Object.fromEntries(allNodes.map((node) => [node.id, 0]));
+            const ids = new Set(allNodes.map((node) => node.id));
+            const links = enabledLinks.filter((link) => link.weight > 0 &&
+              ids.has(getNodeId(link.source)) && ids.has(getNodeId(link.target)));
+            const symmetricLinks = links.flatMap((link) => [link,
+              { source: link.target, target: link.source, weight: link.weight }]);
+            const components = getStronglyConnectedComponents(allNodes, symmetricLinks);
+            const positions = new Map();
+            const matrices = components.map((component, componentIndex) => {
+              component.forEach((id, index) => positions.set(id, { componentIndex, index }));
+              return component.map(() => Array(component.length).fill(0));
+            });
+            for (const link of symmetricLinks) {
+              const source = positions.get(getNodeId(link.source));
+              const target = positions.get(getNodeId(link.target));
+              matrices[source.componentIndex][source.index][target.index] += link.weight;
+            }
+            const pairs = matrices.map((matrix) => matrix.length === 1
+              ? { value: matrix[0][0], lower: matrix[0][0], upper: matrix[0][0], vector: [1] }
+              : computePerronPair(matrix, maxIter, tol / 4));
+            const lower = Math.max(0, ...pairs.map((pair) => pair.lower));
+            const upper = Math.max(0, ...pairs.map((pair) => pair.upper));
+            if (upper === 0) return centrality;
+
+            // Overlapping Perron intervals describe the dominant eigenspace at this tolerance.
+            pairs.forEach((pair, componentIndex) => {
+              if (pair.upper < lower) return;
+              const projection = pair.vector.reduce((sum, value) => sum + value, 0);
+              components[componentIndex].forEach((id, index) => {
+                centrality[id] = pair.vector[index] * projection;
+              });
+            });
+            const norm = Math.hypot(...Object.values(centrality));
+            allNodes.forEach(({ id }) => { centrality[id] /= norm; });
+            const action = Object.fromEntries(allNodes.map((node) => [node.id, 0]));
+            for (const link of symmetricLinks) {
+              action[getNodeId(link.source)] += link.weight * centrality[getNodeId(link.target)];
+            }
+            const eigenvalue = allNodes.reduce((sum, { id }) => sum + centrality[id] * action[id], 0);
+            const residual = Math.hypot(...allNodes.map(({ id }) => action[id] - eigenvalue * centrality[id]));
+            if (!(residual <= tol * eigenvalue && upper - eigenvalue <= tol * upper)) {
+              throw new Error("Eigenvector centrality did not meet its residual tolerance");
+            }
             return centrality;
           }
-    
+
           /**
-           * computeHotSpotMetrics()
-           *
-           * For each node, computes:
-           *  1) Weighted In-Degree
-           *  2) Weighted Out-Degree
-           *  3) Weighted Betweenness Centrality (using a simplified Brandes approach)
-           *  4) Weighted PageRank (iterative approach)
-           *  5) Eigenvector Centrality (new metric for disease transmission importance)
-           *
-           * Returns an object: {
-           *    [nodeId]: {
-           *       inDegree: Number,
-           *       outDegree: Number,
-           *       betweenness: Number,
-           *       pageRank: Number,
-           *       eigenvector: Number
-           *    },
-           *    ...
-           * }
-           *
+           * Computes weighted degree, directed betweenness, PageRank and symmetric
+           * eigenvector centrality from available movements between regions.
            */
           function computeHotSpotMetrics(allNodes, enabledLinks) {
-            // 1) Weighted In-Degree & Out-Degree
+            const ids = new Set(allNodes.map((node) => node.id));
+            enabledLinks = enabledLinks.filter((link) => !link.disabled &&
+              Number.isFinite(link.weight) && link.weight > 0 &&
+              getNodeId(link.source) !== getNodeId(link.target) &&
+              ids.has(getNodeId(link.source)) && ids.has(getNodeId(link.target)));
             const metrics = {};
             allNodes.forEach((n) => {
               metrics[n.id] = {
                 inDegree: 0,
                 outDegree: 0,
                 betweenness: 0,
-                pageRank: 1, // initial PR guess
-                eigenvector: 0, // will be computed later
+                pageRank: allNodes.length ? 1 / allNodes.length : 0,
+                eigenvector: 0,
               };
             });
+            if (!enabledLinks.length) return metrics;
     
             // Use only enabled links.
             enabledLinks.forEach((link) => {
@@ -5688,7 +5730,7 @@
                 typeof link.source === "object" ? link.source.id : link.source;
               const t =
                 typeof link.target === "object" ? link.target.id : link.target;
-              const w = link.weight || 1;
+              const w = link.weight;
               if (metrics[s]) {
                 metrics[s].outDegree += w;
               }
@@ -5773,7 +5815,7 @@
             enabledLinks.forEach((e) => {
               const s = typeof e.source === "object" ? e.source.id : e.source;
               const t = typeof e.target === "object" ? e.target.id : e.target;
-              const w = e.weight || 1;
+              const w = e.weight;
               // For cost, use 1/weight.
               adj[s].push({ target: t, cost: 1 / w });
             });
@@ -5835,7 +5877,7 @@
                       sigma[w] = sigma[v]; // found a new shortest path to w
                       P[w] = [v];
                       Q.push(w, vwDist);
-                    } else if (Math.abs(vwDist - dist[w]) < 1e-9) {
+                    } else if (vwDist === dist[w]) {
                       // Found an alternative shortest path to w via v.
                       sigma[w] += sigma[v];
                       P[w].push(v);
@@ -5859,45 +5901,34 @@
             // Run the weighted betweenness centrality calculation.
             brandesBetweennessWeighted(allNodes, adj);
     
-            // 3) Weighted PageRank (Simplified)
-            let d = 0.85;
-            let N = allNodes.length;
-            let outWeightSum = {};
-            allNodes.forEach((n) => {
-              outWeightSum[n.id] = 0;
-            });
-            enabledLinks.forEach((link) => {
-              const s =
-                typeof link.source === "object" ? link.source.id : link.source;
-              const w = link.weight || 1;
-              outWeightSum[s] += w;
-            });
-    
-            function doPageRankIteration(allNodes, enabledLinks) {
-              let newPR = {};
-              allNodes.forEach((n) => {
-                newPR[n.id] = (1 - d) / N;
+            const count = allNodes.length;
+            if (!count) return metrics;
+            const damping = 0.85;
+            const positions = new Map(allNodes.map((node, index) => [node.id, index]));
+            const transitions = enabledLinks.map((link) => ({
+              source: positions.get(getNodeId(link.source)),
+              target: positions.get(getNodeId(link.target)),
+              probability: link.weight / metrics[getNodeId(link.source)].outDegree,
+            }));
+            const dangling = allNodes.flatMap((node, index) => metrics[node.id].outDegree === 0 ? [index] : []);
+            let ranks = Array(count).fill(1 / count);
+            let converged = false;
+            for (let iteration = 0; iteration < 200; iteration += 1) {
+              const danglingMass = dangling.reduce((sum, index) => sum + ranks[index], 0);
+              const next = Array(count).fill((1 - damping + damping * danglingMass) / count);
+              transitions.forEach(({ source, target, probability }) => {
+                next[target] += damping * ranks[source] * probability;
               });
-              enabledLinks.forEach((link) => {
-                let vId =
-                  typeof link.source === "object" ? link.source.id : link.source;
-                let uId =
-                  typeof link.target === "object" ? link.target.id : link.target;
-                let w = link.weight || 1;
-                if (outWeightSum[vId] > 0) {
-                  let contrib =
-                    d * (metrics[vId].pageRank * (w / outWeightSum[vId]));
-                  newPR[uId] += contrib;
-                }
-              });
-              allNodes.forEach((n) => {
-                metrics[n.id].pageRank = newPR[n.id];
-              });
+              const residual = next.reduce((sum, value, index) => sum + Math.abs(value - ranks[index]), 0);
+              ranks = next;
+              if (residual / (1 - damping) <= 1e-10) {
+                converged = true;
+                break;
+              }
             }
-            for (let i = 0; i < 20; i++) {
-              doPageRankIteration(allNodes, enabledLinks);
-            }
-    
+            if (!converged) throw new Error("PageRank did not meet its residual tolerance");
+            allNodes.forEach((node, index) => { metrics[node.id].pageRank = ranks[index]; });
+
             // 4) Eigenvector Centrality
             // Compute eigenvector centrality using only enabled links.
             const eigenCentrality = computeEigenvectorCentrality(
@@ -6045,12 +6076,7 @@
     
             nodeGroup = svg.append("g").attr("class", "nodes");
     
-            metricNames.forEach((metric) => {
-              // Sort the keys (node IDs) of hotspots by descending metric value.
-              topNMetric[metric] = Object.keys(hotspots)
-                .sort((a, b) => hotspots[b][metric] - hotspots[a][metric])
-                .slice(0, 3);
-            });
+            topNMetric = getHotspotRankings(hotspots);
     
             // Create a group for each node (will contain circle, hotspot strokes, and label)
             nodeEnter = nodeGroup
@@ -6361,6 +6387,23 @@
             if (defs.empty()) {
               defs = svg.append("defs");
             }
+
+            const hotspotOutline = defs.append("filter")
+              .attr("id", "hotspotOutline")
+              .attr("x", "-50%")
+              .attr("y", "-50%")
+              .attr("width", "200%")
+              .attr("height", "200%");
+            hotspotOutline.append("feMorphology")
+              .attr("in", "SourceAlpha")
+              .attr("operator", "dilate")
+              .attr("radius", 1)
+              .attr("result", "outline");
+            hotspotOutline.append("feFlood").attr("flood-color", theme.canvas);
+            hotspotOutline.append("feComposite").attr("in2", "outline").attr("operator", "in");
+            const outlineMerge = hotspotOutline.append("feMerge");
+            outlineMerge.append("feMergeNode");
+            outlineMerge.append("feMergeNode").attr("in", "SourceGraphic");
     
             svg
               .append("defs")
@@ -6482,9 +6525,11 @@
             // Compute trade volumes using only enabled links
             const incomingTrade = d3.sum(
               allLinks.filter((link) => {
+                const src =
+                  typeof link.source === "object" ? link.source.id : link.source;
                 const tgt =
                   typeof link.target === "object" ? link.target.id : link.target;
-                return tgt === d.id && !link.disabled;
+                return tgt === d.id && src !== d.id && !link.disabled;
               }),
               (link) => link.weight,
             );
@@ -6493,7 +6538,9 @@
               allLinks.filter((link) => {
                 const src =
                   typeof link.source === "object" ? link.source.id : link.source;
-                return src === d.id && !link.disabled;
+                const tgt =
+                  typeof link.target === "object" ? link.target.id : link.target;
+                return src === d.id && tgt !== d.id && !link.disabled;
               }),
               (link) => link.weight,
             );
@@ -6509,10 +6556,10 @@
               (link) => link.weight,
             );
     
-            // Calculate self-trade ratio. If outgoingTrade is zero, default to 0.
+            // Local trades count toward total outflow, alongside exports.
             const selfTradeRatio =
-              outgoingTrade > 0
-                ? ((selfTrade / outgoingTrade) * 100).toFixed(1)
+              outgoingTrade + selfTrade > 0
+                ? ((selfTrade / (outgoingTrade + selfTrade)) * 100).toFixed(1)
                 : "NA";
     
             const currentNode = allNodes.find((n) => n.id === d.id);
@@ -6524,7 +6571,7 @@
               : null;
             const noteLabel = simState
               ? `Holding: ${formatCount(simState.N)}\nSusceptible: ${formatCount(simState.S)}\nExposed: ${formatCount(simState.E)}\nInfectious: ${formatCount(simState.I)} (${formatPct(simState.prevalence)})\nRecovered: ${formatCount(simState.R)}\nIncoming Exposure: ${formatSmall(simState.incomingExposure)}\nOutgoing Pressure: ${formatSmall(simState.outgoingPressure)}`
-              : `Community ID: ${communityID}\nIncoming Trade: ${incomingTrade}\nOutgoing Trade: ${outgoingTrade}\nSelf-Trade Ratio: ${selfTradeRatio}${selfTradeRatio !== "NA" ? "%" : ""}`;
+              : `Community ID: ${communityID}\nIncoming Trade: ${incomingTrade}\nOutgoing Trade: ${outgoingTrade}\nLocal Trade: ${selfTrade}\nSelf-Trade Ratio: ${selfTradeRatio}${selfTradeRatio !== "NA" ? "%" : ""}`;
     
             const annotations = [
               {
@@ -6616,13 +6663,13 @@
             const nodeMetrics = hotspots[d.id];
             if (!nodeMetrics) return null;
             return [
-              Math.log(nodeMetrics.inDegree + 1) /
-                Math.log(hotspotsMax.inDegree + 1),
-              Math.log(nodeMetrics.outDegree + 1) /
-                Math.log(hotspotsMax.outDegree + 1),
-              nodeMetrics.betweenness / hotspotsMax.betweenness,
-              nodeMetrics.pageRank / hotspotsMax.pageRank,
-              nodeMetrics.eigenvector / hotspotsMax.eigenvector,
+              hotspotsMax.inDegree > 0
+                ? Math.log(nodeMetrics.inDegree + 1) / Math.log(hotspotsMax.inDegree + 1) : 0,
+              hotspotsMax.outDegree > 0
+                ? Math.log(nodeMetrics.outDegree + 1) / Math.log(hotspotsMax.outDegree + 1) : 0,
+              hotspotsMax.betweenness > 0 ? nodeMetrics.betweenness / hotspotsMax.betweenness : 0,
+              hotspotsMax.pageRank > 0 ? nodeMetrics.pageRank / hotspotsMax.pageRank : 0,
+              hotspotsMax.eigenvector > 0 ? nodeMetrics.eigenvector / hotspotsMax.eigenvector : 0,
             ];
           }
     
@@ -7109,8 +7156,66 @@
             return { dx, dy };
           }
     
+          function getHotspotDefinitions(simulation = isSimulationModeActive()) {
+            if (simulation) return [
+              {
+                metric: "inDegree", code: "IN", name: "Incoming Exposure", role: "Incoming Exposure", icon: "fa-arrow-down",
+                text: "Infectious movement pressure received from other regions during this step.",
+                method: "Incoming trade volume × sender infectious share at step start × movement beta, summed over allowed routes",
+              },
+              {
+                metric: "outDegree", code: "OUT", name: "Outgoing Pressure", role: "Outgoing Pressure", icon: "fa-arrow-up",
+                text: "Infectious movement pressure sent to other regions during this step. Blocking exports sets this score to zero.",
+                method: "Outgoing trade volume × regional infectious share at step start × movement beta, summed over allowed routes",
+              },
+              {
+                metric: "betweenness", code: "I%", name: "Infectious Prevalence", role: "Prevalence", icon: "fa-percent",
+                text: "The infectious share of the regional population at the end of this step. It can remain positive when movement is blocked.",
+                method: "Infectious population / total population",
+              },
+              {
+                metric: "pageRank", code: "I", name: "Infectious Burden", role: "Infectious Burden", icon: "fa-magnet",
+                text: "The number of infectious animals in the region at the end of this step.",
+                method: "Infectious compartment count",
+              },
+              {
+                metric: "eigenvector", code: "P/I", name: "Pressure per Infectious", role: "Pressure per Infectious", icon: "fa-tower-broadcast",
+                text: "Outgoing movement pressure relative to the infectious population. This is a pressure indicator, not a reproduction number.",
+                method: "Outgoing pressure / max(1, infectious population at step end)",
+              },
+            ];
+            return [
+              {
+                metric: "inDegree", code: "ID", name: "Weighted In Degree", role: "Vulnerable", icon: "fa-arrow-down",
+                text: "Regions receiving larger livestock volumes from other regions carry higher exposure pressure.",
+                method: "Sum of allowed incoming trade weights",
+              },
+              {
+                metric: "outDegree", code: "OD", name: "Weighted Out Degree", role: "Seeding", icon: "fa-arrow-up",
+                text: "Regions sending larger livestock volumes to other regions can seed wider spread. Blocking exports removes this mark.",
+                method: "Sum of allowed outgoing trade weights",
+              },
+              {
+                metric: "betweenness", code: "BT", name: "Betweenness", role: "Bottleneck", icon: "fa-route",
+                text: "Regions on directed trade paths can connect otherwise separate flows.",
+                method: "Brandes shortest paths with inverse trade weights as distances",
+              },
+              {
+                metric: "pageRank", code: "PR", name: "PageRank", role: "Sink", icon: "fa-magnet",
+                text: "Regions receiving from influential senders can collect downstream risk. This mark requires an incoming route.",
+                method: "Weighted PageRank with damping 0.85 and uniform teleportation",
+              },
+              {
+                metric: "eigenvector", code: "EC", name: "Eigenvector Centrality", role: "Amplifier", icon: "fa-tower-broadcast",
+                text: "Regions connected to influential trading partners score highly. Either incoming or outgoing routes can support this mark.",
+                method: "Leading eigenvector of the symmetrized trade adjacency matrix",
+              },
+            ];
+          }
+
           function hotspotSymbol(metric) {
-            const { color, dash, code, pattern } = hotspotStyles[metric];
+            const { color, dash, pattern } = hotspotStyles[metric];
+            const { code } = getHotspotDefinitions().find((entry) => entry.metric === metric);
             return `<svg class="hotspot-symbol" viewBox="0 0 32 32" aria-hidden="true">
               <title>${code}: ${pattern} ring</title>
               <circle cx="16" cy="16" r="13" fill="none" stroke="${color}" stroke-width="2.5" stroke-linecap="round" stroke-dasharray="${dash}" filter="url(#hotspotOutline)" />
@@ -7118,20 +7223,26 @@
             </svg>`;
           }
 
+          function updateHotspotLegend() {
+            const definitions = getHotspotDefinitions();
+            setControlTip(document.querySelector(".hotspotInfoButton"),
+              isSimulationModeActive() ? "Show simulation indicators" : controlTips.hotspotInfo);
+            document.querySelectorAll(".hotspotLegend .legendItem").forEach((item) => {
+              const icon = item.querySelector(".legendIcon");
+              const definition = definitions.find((entry) => entry.metric === icon.dataset.metric);
+              icon.innerHTML = hotspotSymbol(definition.metric);
+              item.querySelector(".legendLabel").textContent = definition.role;
+            });
+          }
+
           function addHotspotLegend() {
             const legend = d3.select(".hotspotLegend");
-            // If the container already has legend items, do nothing.
             if (!legend.empty() && legend.selectAll(".legendItem").size() > 0) {
+              updateHotspotLegend();
               return;
             }
     
-            const legendData = [
-              { name: "Vulnerable", metric: "inDegree" },
-              { name: "Seeding", metric: "outDegree" },
-              { name: "Bottleneck", metric: "betweenness" },
-              { name: "Sink", metric: "pageRank" },
-              { name: "Amplifier", metric: "eigenvector" },
-            ];
+            const legendData = getHotspotDefinitions();
     
             const itemCount = legendData.length;
             const itemHeight = 140 / itemCount;
@@ -7159,7 +7270,7 @@
                 .attr("class", "legendLabel")
                 .style("font-size", "12px")
                 .style("color", theme.muted)
-                .text(d.name);
+                .text(d.role);
             });
     
             legend.call(
@@ -7207,73 +7318,14 @@
                 }),
             );
     
-            // Append a "?" button.
-            const infoBtn = d3.select(".hotspotInfoButton");
-            infoBtn
-              .append("div")
-              .attr("class", "has-tip")
-              .attr("data-tip", controlTips.hotspotInfo)
-              .attr("data-tip-placement", "right")
-              .attr("aria-label", controlTips.hotspotInfo)
-              .html('<i class="fa-solid fa-circle-info"></i>')
-              .on("click", function () {
-                showHotspotInfoOverlay();
-              })
-              .on("mouseover", function () {
-                d3.select(this)
-                  .style("transform", "scale(1.1)")
-                  .style("filter", "brightness(1.2)");
-              })
-              .on("mouseout", function () {
-                d3.select(this)
-                  .style("transform", "scale(1)")
-                  .style("filter", "brightness(1)");
-              });
+            d3.select(".hotspotInfoButton").on("click", showHotspotInfoOverlay);
+            updateHotspotLegend();
     
-            // Define Edge Glow and Drop Shadow Filters
-            let defs = svg.select("defs");
-            if (defs.empty()) {
-              defs = svg.append("defs");
-            }
 
-            const hotspotOutline = defs.append("filter")
-              .attr("id", "hotspotOutline")
-              .attr("x", "-50%")
-              .attr("y", "-50%")
-              .attr("width", "200%")
-              .attr("height", "200%");
-            hotspotOutline.append("feMorphology")
-              .attr("in", "SourceAlpha")
-              .attr("operator", "dilate")
-              .attr("radius", 1)
-              .attr("result", "outline");
-            hotspotOutline.append("feFlood").attr("flood-color", theme.canvas);
-            hotspotOutline.append("feComposite").attr("in2", "outline").attr("operator", "in");
-            const outlineMerge = hotspotOutline.append("feMerge");
-            outlineMerge.append("feMergeNode");
-            outlineMerge.append("feMergeNode").attr("in", "SourceGraphic");
-    
-            // Define the edge glow filter.
-            const edgeGlow = defs
-              .append("filter")
-              .attr("id", "edgeGlow")
-              .attr("x", "-50%")
-              .attr("y", "-50%")
-              .attr("width", "200%")
-              .attr("height", "200%");
-    
-            edgeGlow
-              .append("feGaussianBlur")
-              .attr("in", "SourceGraphic")
-              .attr("stdDeviation", 3)
-              .attr("result", "blur");
-    
-            const feMerge = edgeGlow.append("feMerge");
-            feMerge.append("feMergeNode").attr("in", "blur");
-            feMerge.append("feMergeNode").attr("in", "SourceGraphic");
           }
     
           function showHotspotInfoOverlay() {
+            const trigger = document.activeElement;
             let overlay = d3.select("body").select("#hotspotInfoOverlay");
             if (overlay.empty()) {
               overlay = d3
@@ -7284,68 +7336,35 @@
 
             const closeOverlay = () => {
               overlay.classed("hide", true);
-              setTimeout(() => overlay.remove(), 240);
+              setTimeout(() => {
+                overlay.remove();
+                trigger?.focus();
+              }, 240);
             };
 
-            const metrics = [
-              {
-                metric: "inDegree",
-                name: "Weighted In Degree",
-                role: "Vulnerable",
-                icon: "fa-arrow-down",
-                text: "Regions receiving larger livestock volumes carry higher exposure pressure.",
-                method: "Incoming trade weights, log scaled",
-              },
-              {
-                metric: "outDegree",
-                name: "Weighted Out Degree",
-                role: "Seeding",
-                icon: "fa-arrow-up",
-                text: "Regions sending larger livestock volumes can seed wider spread.",
-                method: "Outgoing trade weights, log scaled",
-              },
-              {
-                metric: "betweenness",
-                name: "Betweenness",
-                role: "Bottleneck",
-                icon: "fa-route",
-                text: "Regions sitting on trade paths can connect otherwise separate flows.",
-                method: "Brandes shortest path score",
-              },
-              {
-                metric: "pageRank",
-                name: "PageRank",
-                role: "Sink",
-                icon: "fa-magnet",
-                text: "Regions receiving from important senders can collect downstream risk.",
-                method: "Random walk centrality",
-              },
-              {
-                metric: "eigenvector",
-                name: "Eigenvector Centrality",
-                role: "Amplifier",
-                icon: "fa-tower-broadcast",
-                text: "Regions linked to influential partners can magnify network pressure.",
-                method: "Power iteration on adjacency",
-              },
-            ];
+            const metrics = getHotspotDefinitions();
+            const simulation = isSimulationModeActive();
+            const title = simulation ? "Simulation Indicators" : "Hotspot Metrics";
 
             overlay
               .attr("class", "hotspot-info-overlay")
               .attr("role", "presentation")
               .html(`
                 <section class="hotspot-info-card" role="dialog" aria-modal="true" aria-labelledby="hotspotInfoTitle">
-                  <button class="hotspot-info-close" type="button" aria-label="Close hotspot metrics">
+                  <button class="hotspot-info-close" type="button" aria-label="Close ${title.toLowerCase()}">
                     <i class="fa-solid fa-xmark"></i>
                   </button>
                   <div class="hotspot-info-head">
                     <div>
                       <div id="hotspotInfoTitle" class="hotspot-info-badge">
                         <i class="fa-solid fa-circle-info"></i>
-                        Hotspot Metrics
+                        ${title}
                       </div>
                       <p class="hotspot-info-subtitle">
-                        Hotspot rings mark regions with high centrality or flow pressure in the trade network. Each metric has a distinct color and ring pattern, shared with the legend.
+                        ${simulation
+                          ? "Rings mark up to three regions with positive scores for each metric in the displayed simulation step. Movement pressure uses infectious shares at the start of the step; prevalence and burden use the end of the step. Incoming and outgoing pressure exclude local transmission and do not count new infections."
+                          : "Rings mark up to three regions with positive eligible scores on allowed routes between regions at the displayed date. Local trades are excluded. Sink requires imports; Amplifier requires a connection to another region."}
+                        Each metric has a distinct color and ring pattern, shared with the legend.
                       </p>
                     </div>
                   </div>
@@ -7356,12 +7375,12 @@
                           <article class="hotspot-metric-card">
                             <div class="hotspot-metric-head">
                               <span class="hotspot-metric-code" data-metric="${metric.metric}">${hotspotSymbol(metric.metric)}</span>
-                              <span class="hotspot-metric-role">
+                              <h3 class="hotspot-metric-role">
                                 <i class="fa-solid ${metric.icon}"></i>
-                                ${metric.role}
-                              </span>
+                                <span class="hotspot-metric-title">${metric.role}</span>
+                              </h3>
                             </div>
-                            <h3>${metric.name}</h3>
+                            ${simulation ? "" : `<h3>${metric.name}</h3>`}
                             <p>${metric.text}</p>
                             <div class="hotspot-metric-method">${metric.method}</div>
                           </article>
@@ -7378,6 +7397,17 @@
               }
             });
             overlay.select(".hotspot-info-close").on("click", closeOverlay);
+            overlay.on("keydown", function (event) {
+              event.stopPropagation();
+              if (event.key === "Escape") {
+                event.preventDefault();
+                closeOverlay();
+              } else if (event.key === "Tab") {
+                event.preventDefault();
+                overlay.select(".hotspot-info-close").node().focus();
+              }
+            });
+            overlay.select(".hotspot-info-close").node().focus();
           }
     
           function debounce(func, wait, immediate) {
@@ -7413,7 +7443,7 @@
               clearSelection(false);
               return;
             }
-            clearSelection(wasSelected && !wasSameNode, isSimulationModeActive() && window.isDoingTemporalUpdate);
+            clearSelection(wasSelected && !wasSameNode, window.isDoingTemporalUpdate);
             selectedNodeData = d;
             document.body.classList.add("focus-mode-active");
 
@@ -7634,7 +7664,7 @@
             clearHoveredLinkState();
             selectedNodeData = null;
             if (!keepFocusPanels) document.body.classList.remove("focus-mode-active");
-            if (isSimulationModeActive() && !flag && !window.isDoingTemporalUpdate) {
+            if (!flag && !window.isDoingTemporalUpdate) {
               renderSimulationNodeControls();
             }
     
@@ -7739,7 +7769,7 @@
 
 
     
-            if (!isSimulationModeActive() || !window.isDoingTemporalUpdate) {
+            if (!keepFocusPanels && (!isSimulationModeActive() || !window.isDoingTemporalUpdate)) {
               updateGlobalStatsChart(window.currentSelectedStat);
               updateNodeStatsChart(window.currentSelectedNodeStat);
               updateTradeDistribution();
@@ -7852,7 +7882,7 @@
             return Math.sqrt(dx * dx + dy * dy) / 1000;
           }
 
-          function updateSimulationLedgerTable() {
+          function updateTradeTable() {
             const tradePanelDiv = document.getElementById("tradePanel");
             if (!tradePanelDiv) return;
             if (!selectedNodeData) {
@@ -7861,6 +7891,10 @@
             }
 
             const focalId = selectedNodeData.id;
+            const simulationMode = isSimulationModeActive();
+            const localLabel = simulationMode ? "Local Transmission" : "Local Trades";
+            const outgoingLabel = simulationMode ? "Outgoing Pressure" : "Outgoing Trades";
+            const incomingLabel = simulationMode ? "Incoming Exposure" : "Incoming Trades";
             const date = getCurrentSliderDate();
             const unavailable = getSimulationLinkAvailability(date);
             const permissions = getSimulationNodePermissions(date);
@@ -7879,10 +7913,21 @@
               .sort((a, b) => b.weight - a.weight);
             const allOutgoingEnabled = outgoing.every(available);
             const allIncomingEnabled = incoming.every(available);
+            const distances = new Map();
+            if (!simulationMode) {
+              const selectedCoords = getCoordinatesForStatcode(focalId);
+              for (const link of [...outgoing, ...incoming]) {
+                const partnerId = getNodeId(link.source) === focalId ? getNodeId(link.target) : getNodeId(link.source);
+                distances.set(link, computeDistance(selectedCoords, getCoordinatesForStatcode(partnerId)));
+              }
+            }
+            const maxDistance = d3.max(distances.values()) || 0;
+            const localVolume = d3.sum(allLinks.filter((link) =>
+              getNodeId(link.source) === focalId && getNodeId(link.target) === focalId), (link) => link.weight);
 
             function renderRows(rows, section) {
               if (!rows.length) {
-                return `<div class="trade-item no-trades">No ${section} exposure.</div>`;
+                return `<div class="trade-item no-trades">No ${section} ${simulationMode ? "exposure" : "trades"}.</div>`;
               }
               return rows
                 .map((link) => {
@@ -7891,6 +7936,7 @@
                   const partnerId = section === "outgoing" ? targetId : sourceId;
                   const partnerName = getStatnaam(partnerId);
                   const reasons = [];
+                  if (!available(link)) reasons.push("link unavailable on this date");
                   if (permissions.get(sourceId)?.exports === false) reasons.push("source exports disabled");
                   if (permissions.get(targetId)?.imports === false) reasons.push("destination imports disabled");
                   const state = link.simulation || {};
@@ -7898,10 +7944,13 @@
                     section === "outgoing"
                       ? state.targetPrevalence
                       : state.sourcePrevalence;
-                  const barWidth = Math.min(
+                  const barWidth = simulationMode ? Math.min(
                     50,
                     Math.max(2, (prevalence || 0) * 180),
-                  );
+                  ) : maxDistance > 0 ? 50 * distances.get(link) / maxDistance : 0;
+                  const partner = allNodes.find((node) => node.id === partnerId);
+                  const barColor = simulationMode ? simulationPrevalenceScale(prevalence || 0)
+                    : partner ? nodeColor(partner.community) : theme.muted;
                   const icon =
                     sourceId === targetId
                       ? "fa-solid fa-repeat"
@@ -7916,12 +7965,12 @@
                           <span class="trade-distance">
                             <svg class="distance-bar" viewBox="0 0 50 10" width="50" height="10" aria-hidden="true" focusable="false">
                               <rect x="0" y="0" width="50" height="10" fill="rgba(255,255,255,0.18)"></rect>
-                              <rect x="0" y="0" width="${barWidth}" height="10" fill="${simulationPrevalenceScale(prevalence || 0)}"></rect>
+                              <rect x="0" y="0" width="${barWidth}" height="10" fill="${barColor}"></rect>
                             </svg>
                           </span>
                           <span class="trade-route-label">[${partnerId}] ${partnerName}${reasons.length ? `<small class="simulation-link-status">Blocked: ${reasons.join("; ")}</small>` : ""}</span>
                         </span>
-                        <span class="trade-volume">${formatSmall(link.weight)}</span>
+                        <span class="trade-volume">${simulationMode ? formatSmall(link.weight) : formatCount(link.weight)}</span>
                       </div>
                       <input type="checkbox" class="trade-checkbox" data-section="${section}" data-source="${sourceId}" data-target="${targetId}" aria-label="Available ${sourceId} to ${targetId} on this date" ${available(link) ? "checked" : ""}>
                     </div>
@@ -7941,31 +7990,32 @@
               <div class="simulation-controls-toolbar">
                 <button id="simulationControlSwitch" class="simulation-control-switch has-tip" type="button" data-mode="${simulationControlView}" aria-label="${showNodeControls ? "Current mode: Imports and exports. Switch to links on this date." : "Current mode: Links on this date. Switch to imports and exports."}" aria-controls="simulationDateLinkControls simulationNodeControls" data-tip="${showNodeControls ? "Switch to links on this date" : "Switch to imports and exports"}" data-tip-placement="left">
                   <span class="simulation-control-switch-thumb" aria-hidden="true">
-                    <svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M2 5h11m-3-3 3 3-3 3M14 11H3m3-3-3 3 3 3"/></svg>
+                    <span class="simulation-control-switch-icon"><i class="fa-solid fa-right-long"></i></span>
                   </span>
                 </button>
                 <div class="trade-info-header">
                   <span class="simulation-focus-region-name" title="[${focalId}] ${selectedNodeData.statnaam}"><i class="fa-solid fa-location-crosshairs"></i> [${focalId}] ${selectedNodeData.statnaam}</span>
-                  <span class="simulation-focus-pill">Prev ${formatPct(state.prevalence || 0)}</span>
+                  ${simulationMode ? `<span class="simulation-focus-pill">Prev ${formatPct(state.prevalence || 0)}</span>` : ""}
                 </div>
               </div>
               <div id="simulationDateLinkControls" class="trade-sections" ${showNodeControls ? "hidden" : ""}>
                 <div class="trade-section trade-section-header simulation-local-control panel-title-label">
                   <label class="simulation-link-control-label">
-                    <span><i class="fa-solid fa-repeat" aria-hidden="true"></i> Local Transmission</span>
-                    <input type="checkbox" class="trade-checkbox" data-section="local" data-source="${focalId}" data-target="${focalId}" aria-label="Local Transmission on this date" ${!unavailable.has(getLinkKey(focalId, focalId)) ? "checked" : ""}>
+                    <span><i class="fa-solid fa-repeat" aria-hidden="true"></i> ${localLabel}</span>
+                    <input type="checkbox" class="trade-checkbox" data-section="local" data-source="${focalId}" data-target="${focalId}" aria-label="${localLabel} on this date" ${!unavailable.has(getLinkKey(focalId, focalId)) ? "checked" : ""}>
                   </label>
-                  <button class="panel-info-button has-tip" type="button" data-tip-key="localTransmission" data-tip-placement="left" aria-label="Local Transmission guide">
+                  ${simulationMode ? "" : `<span class="trade-volume simulation-local-volume" title="Recorded movements within this region">${formatCount(localVolume)}</span>`}
+                  <button class="panel-info-button has-tip" type="button" data-tip-key="${simulationMode ? "localTransmission" : "localTrades"}" data-tip-placement="left" aria-label="${localLabel} guide">
                     <i class="fa-solid fa-circle-info" aria-hidden="true"></i>
                   </button>
                 </div>
                 <div class="trade-section">
                   <div class="trade-section-header panel-title-label">
                     <label class="simulation-link-control-label">
-                      <span><i class="fa-solid fa-arrow-right-from-bracket"></i> Outgoing Pressure</span>
+                      <span><i class="fa-solid fa-arrow-right-from-bracket"></i> ${outgoingLabel}</span>
                       <input type="checkbox" class="trade-header-checkbox" data-section="outgoing" aria-label="All displayed outgoing links available on this date" ${allOutgoingEnabled ? "checked" : ""}>
                     </label>
-                    <button class="panel-info-button has-tip" type="button" data-tip-key="outgoingPressure" data-tip-placement="left" aria-label="Outgoing pressure guide">
+                    <button class="panel-info-button has-tip" type="button" data-tip-key="${simulationMode ? "outgoingPressure" : "outgoingTrades"}" data-tip-placement="left" aria-label="${outgoingLabel} guide">
                       <i class="fa-solid fa-circle-info" aria-hidden="true"></i>
                     </button>
                   </div>
@@ -7974,10 +8024,10 @@
                 <div class="trade-section">
                   <div class="trade-section-header panel-title-label">
                     <label class="simulation-link-control-label">
-                      <span><i class="fa-solid fa-arrow-left-to-bracket"></i> Incoming Exposure</span>
+                      <span><i class="fa-solid fa-arrow-left-to-bracket"></i> ${incomingLabel}</span>
                       <input type="checkbox" class="trade-header-checkbox" data-section="incoming" aria-label="All displayed incoming links available on this date" ${allIncomingEnabled ? "checked" : ""}>
                     </label>
-                    <button class="panel-info-button has-tip" type="button" data-tip-key="incomingExposure" data-tip-placement="left" aria-label="Incoming exposure guide">
+                    <button class="panel-info-button has-tip" type="button" data-tip-key="${simulationMode ? "incomingExposure" : "incomingTrades"}" data-tip-placement="left" aria-label="${incomingLabel} guide">
                       <i class="fa-solid fa-circle-info" aria-hidden="true"></i>
                     </button>
                   </div>
@@ -8000,209 +8050,11 @@
               renderSimulationNodeControls();
             });
             attachTradeCheckboxListeners();
-            if (window.isPlaying || simulationState.status === "running") {
+            if (areNetworkControlsLocked()) {
               disableAllCheckboxes();
             }
           }
 
-          function updateTradeTable() {
-            if (isSimulationModeActive() && simulationState.currentFrame) {
-              updateSimulationLedgerTable();
-              return;
-            }
-
-            const tradePanelDiv = document.getElementById("tradePanel");
-            if (!selectedNodeData) {
-              tradePanelDiv.innerHTML = "";
-              return;
-            }
-    
-            // Filter outgoing and incoming links for the focal node (with weight > 0).
-            const outgoing = allLinks.filter(
-              (d) =>
-                (typeof d.source === "object" ? d.source.id : d.source) ===
-                  selectedNodeData.id && d.weight > 0,
-            );
-            const incoming = allLinks.filter(
-              (d) =>
-                (typeof d.target === "object" ? d.target.id : d.target) ===
-                  selectedNodeData.id && d.weight > 0,
-            );
-    
-            // Sort descending by weight.
-            outgoing.sort((a, b) => b.weight - a.weight);
-            incoming.sort((a, b) => b.weight - a.weight);
-    
-            // Determine if all trades are enabled.
-            const allOutgoingEnabled = outgoing.every((trade) => !trade.disabled);
-            const allIncomingEnabled = incoming.every((trade) => !trade.disabled);
-    
-            // Compute distances using geojson data
-            const selectedCoords = getCoordinatesForStatcode(selectedNodeData.id);
-    
-            // For outgoing trades, the "other" node is the target.
-            outgoing.forEach((trade) => {
-              const targetId =
-                typeof trade.target === "object" ? trade.target.id : trade.target;
-              // Self-loop if source equals target.
-              trade.isSelfLoop =
-                (typeof trade.source === "object"
-                  ? trade.source.id
-                  : trade.source) === targetId;
-              if (!trade.isSelfLoop && selectedCoords) {
-                const targetCoords = getCoordinatesForStatcode(targetId);
-                trade.distance = computeDistance(selectedCoords, targetCoords);
-              } else {
-                trade.distance = 0;
-              }
-            });
-    
-            // For incoming trades, the "other" node is the source.
-            incoming.forEach((trade) => {
-              const sourceId =
-                typeof trade.source === "object" ? trade.source.id : trade.source;
-              trade.isSelfLoop = sourceId === selectedNodeData.id;
-              if (!trade.isSelfLoop && selectedCoords) {
-                const sourceCoords = getCoordinatesForStatcode(sourceId);
-                trade.distance = computeDistance(selectedCoords, sourceCoords);
-              } else {
-                trade.distance = 0;
-              }
-            });
-    
-            // Determine maximum distance (avoid zero) for scaling.
-            const allDistances = outgoing
-              .concat(incoming)
-              .map((trade) => trade.distance);
-            const maxDistance = d3.max(allDistances) || 1; // fallback to 1 to avoid division by zero.
-            // Scale: distances map to a foreground bar width between 0 and 50px.
-            const distanceScale = d3
-              .scaleLinear()
-              .domain([0, maxDistance])
-              .range([0, 50]);
-    
-            // Build HTML.
-            let html = `
-                              <div class="trade-info-header">
-                                  <i class="fa-solid fa-location-crosshairs"></i> [${selectedNodeData.id}] ${selectedNodeData.statnaam}
-                              </div>
-                              <div class="trade-sections">
-                              <!-- Outgoing trades section -->
-                              <div class="trade-section">
-                                  <div class="trade-section-header">
-                                      <i class="fa-solid fa-arrow-right-from-bracket"></i> Outgoing Trades
-                                      <input type="checkbox" class="trade-header-checkbox" data-section="outgoing" ${allOutgoingEnabled ? "checked" : ""}>
-                                  </div>
-                                  <div class="trade-list">`;
-    
-            if (outgoing.length > 0) {
-              outgoing.forEach((trade) => {
-                const dest_id =
-                  typeof trade.target === "object" ? trade.target.id : trade.target;
-                const dest = getStatnaam(dest_id);
-                let s =
-                  typeof trade.source === "object" ? trade.source.id : trade.source;
-                let t = dest_id;
-                const iconHTML = trade.isSelfLoop
-                  ? `<span class="trade-icon"><i class="fa-solid fa-repeat"></i></span>`
-                  : `<span class="trade-icon"><i class="fa-solid fa-arrow-right-from-line"></i></span>`;
-                // Determine the foreground color.
-                const targetNode = allNodes.find((n) => n.id === dest_id);
-                const fgColor = trade.isSelfLoop
-                  ? theme.muted
-                  : targetNode
-                    ? nodeColor(targetNode.community)
-                    : theme.muted;
-                const barWidth = distanceScale(trade.distance);
-                const distanceSvg = `<span class="trade-distance"><svg class="distance-bar" viewBox="0 0 50 10" width="50" height="10" aria-hidden="true" focusable="false">
-                                                      <rect x="0" y="0" width="50" height="10" fill="${theme.elevated}"></rect>
-                                                      <rect x="0" y="0" width="${trade.isSelfLoop ? 0 : barWidth}" height="10" fill="${fgColor}"></rect>
-                                                  </svg></span>`;
-                html += `
-                                      <div class="trade-item">
-                                          <div class="trade-item-main">
-                                              <span class="trade-dest">
-                                                  ${iconHTML}
-                                                  ${distanceSvg}
-                                                  <span class="trade-route-label">[${dest_id}] ${dest}</span>
-                                              </span>
-                                              <span class="trade-volume">${trade.weight}</span>
-                                          </div>
-                                          <input type="checkbox" class="trade-checkbox" data-section="outgoing" data-source="${s}" data-target="${t}" ${!trade.disabled ? "checked" : ""}>
-                                      </div>
-                                  `;
-              });
-            } else {
-              html += `<div class="trade-item no-trades">No outgoing trades.</div>`;
-            }
-    
-            html += `
-                          </div> <!-- .trade-list -->
-                              </div> <!-- .trade-section -->
-    
-                              <!-- Incoming trades section -->
-                              <div class="trade-section">
-                                  <div class="trade-section-header">
-                                      <i class="fa-solid fa-arrow-left-to-bracket"></i> Incoming Trades
-                                      <input type="checkbox" class="trade-header-checkbox" data-section="incoming" ${allIncomingEnabled ? "checked" : ""}>
-                                  </div>
-                                  <div class="trade-list">`;
-    
-            if (incoming.length > 0) {
-              incoming.forEach((trade) => {
-                const src_id =
-                  typeof trade.source === "object" ? trade.source.id : trade.source;
-                const src = getStatnaam(src_id);
-                let s = src_id;
-                let t =
-                  typeof trade.target === "object" ? trade.target.id : trade.target;
-                const iconHTML = trade.isSelfLoop
-                  ? `<span class="trade-icon"><i class="fa-solid fa-repeat"></i></span>`
-                  : `<span class="trade-icon"><i class="fa-solid fa-arrow-left-to-line"></i></span>`;
-                // For incoming, use the source node's community.
-                const sourceNode = allNodes.find((n) => n.id === src_id);
-                const fgColor = trade.isSelfLoop
-                  ? theme.muted
-                  : sourceNode
-                    ? nodeColor(sourceNode.community)
-                    : theme.muted;
-                const barWidth = distanceScale(trade.distance);
-                const distanceSvg = `<span class="trade-distance"><svg class="distance-bar" viewBox="0 0 50 10" width="50" height="10" aria-hidden="true" focusable="false">
-                                               <rect x="0" y="0" width="50" height="10" fill="${theme.elevated}"></rect>
-                                               <rect x="0" y="0" width="${trade.isSelfLoop ? 0 : barWidth}" height="10" fill="${fgColor}"></rect>
-                                           </svg></span>`;
-                html += `
-                                  <div class="trade-item">
-                                      <div class="trade-item-main">
-                                          <span class="trade-src">
-                                              ${iconHTML}
-                                              ${distanceSvg}
-                                              <span class="trade-route-label">[${src_id}] ${src}</span>
-                                          </span>
-                                          <span class="trade-volume">${trade.weight}</span>
-                                      </div>
-                                      <input type="checkbox" class="trade-checkbox" data-section="incoming" data-source="${s}" data-target="${t}" ${!trade.disabled ? "checked" : ""}>
-                                  </div>
-                              `;
-              });
-            } else {
-              html += `<div class="trade-item no-trades">No incoming trades.</div>`;
-            }
-    
-            html += `
-                          </div> <!-- .trade-list -->
-                              </div> <!-- .trade-section -->
-                          </div> <!-- .trade-sections -->
-                      `;
-    
-            tradePanelDiv.innerHTML = html;
-            attachTradeCheckboxListeners();
-    
-            if (isPlaying) {
-              disableAllCheckboxes();
-            }
-          }
-    
           // Focus-mode Trade Node Insight
           const FOCUS_OUT_COLOR = theme.outgoing;
           const FOCUS_IN_COLOR = theme.incoming;
@@ -9371,8 +9223,8 @@
           }
     
           function recordSimulationLinkCheckboxes() {
-            if (!isSimulationModeActive()) return;
             const date = getCurrentSliderDate();
+            if (!date) return;
             const disabledKeys = getSimulationLinkAvailability(date);
             let changed = false;
             d3.selectAll(".trade-checkbox").each(function () {
@@ -9383,7 +9235,7 @@
                 changed = true;
               }
             });
-            if (changed) scheduleSimulationRecompute("Applying availability for this date");
+            if (changed) applyNetworkControlChanges("Applying availability for this date");
           }
 
           function attachTradeCheckboxListeners() {
@@ -9397,24 +9249,7 @@
                 checked,
               );
     
-              if (!isSimulationModeActive()) {
-                d3.selectAll(".trade-checkbox")
-                  .filter(function () {
-                    return this.dataset.source === this.dataset.target;
-                  })
-                  .property("checked", checked);
-              }
-    
               recordSimulationLinkCheckboxes();
-              updateNetwork();
-              updateDonutCharts();
-              updateNetworkStats((force = true));
-              updateInOutArbos();
-              updateTradeNodeInsight(window.currentSelectedTradeNodeInsight);
-              debouncedUpdateHotspotMarks();
-              computeSCCs();
-              updateSCCs();
-              updateAnnotationForNode(selectedNodeData, annotationGroup);
     
               // Update header checkbox state based on the current state of individuals.
               updateHeaderCheckboxes();
@@ -9438,16 +9273,6 @@
                   .property("checked", isEnabled);
               }
               recordSimulationLinkCheckboxes();
-              updateNetwork();
-              updateDonutCharts();
-              updateNetworkStats((force = true));
-              updateInOutArbos();
-              updateTradeNodeInsight(window.currentSelectedTradeNodeInsight);
-              //updateHotspotLists();
-              debouncedUpdateHotspotMarks();
-              computeSCCs();
-              updateSCCs();
-              updateAnnotationForNode(selectedNodeData, annotationGroup);
     
               // Update header checkbox state for both sections.
               updateHeaderCheckboxes();
@@ -9481,23 +9306,10 @@
             if (nodeEnter) nodeEnter.interrupt();
             if (labelSelection) labelSelection.interrupt();
     
-            // Simulation routes follow dated interventions; ledger routes follow the table.
-            if (isSimulationModeActive()) {
-              const disabledKeys = getDisabledLinkKeys(getCurrentSliderDate(), simulationState.trajectory?.ids);
-              allLinks.forEach((link) => {
-                link.disabled = disabledKeys.has(getLinkKey(link.source, link.target));
-              });
-            } else {
-              d3.selectAll(".trade-checkbox").each(function () {
-                const key = getLinkKey(this.dataset.source, this.dataset.target);
-                const disabled = !this.checked;
-                allLinks.forEach((link) => {
-                  if (getLinkKey(link.source, link.target) === key) {
-                    link.disabled = disabled;
-                  }
-                });
-              });
-            }
+            const disabledKeys = getDisabledLinkKeys(getCurrentSliderDate());
+            allLinks.forEach((link) => {
+              link.disabled = disabledKeys.has(getLinkKey(link.source, link.target));
+            });
             enabledLinks = allLinks.filter((link) => !link.disabled && link.weight > 0);
     
             // 2. Update link attributes.
@@ -9676,6 +9488,30 @@
             }
           }
     
+          function computeGravityRegression(data) {
+            const points = data.filter((point) =>
+              Number.isFinite(point.distance) && point.distance > 0 &&
+              Number.isFinite(point.weight) && point.weight > 0 &&
+              Number.isFinite(point.massProduct) && point.massProduct > 0,
+            );
+            if (new Set(points.map((point) => point.distance)).size < 2) return null;
+            const logs = points.map((point) => ({
+              x: Math.log(point.distance), y: Math.log(point.weight), w: point.massProduct,
+            }));
+            const sumW = logs.reduce((sum, point) => sum + point.w, 0);
+            const xBar = logs.reduce((sum, point) => sum + point.w * point.x, 0) / sumW;
+            const yBar = logs.reduce((sum, point) => sum + point.w * point.y, 0) / sumW;
+            const covariance = logs.reduce((sum, point) => sum + point.w * (point.x - xBar) * (point.y - yBar), 0);
+            const variance = logs.reduce((sum, point) => sum + point.w * (point.x - xBar) ** 2, 0);
+            const slope = covariance / variance;
+            const intercept = yBar - slope * xBar;
+            const ssTot = logs.reduce((sum, point) => sum + point.w * (point.y - yBar) ** 2, 0);
+            const ssRes = logs.reduce((sum, point) => sum + point.w * (point.y - intercept - slope * point.x) ** 2, 0);
+            const rSquared = new Set(points.map((point) => point.weight)).size > 1
+              ? 1 - ssRes / ssTot : null;
+            return { slope, intercept, rSquared };
+          }
+
           function updateTradeDistribution() {
             if (isSimulationModeActive() && simulationState.currentFrame) {
               renderSimulationSpatialPatternPanel();
@@ -9712,7 +9548,7 @@
             // Build tradeData from allLinks: Exclude self-loops.
             const tradeData = [];
             allLinks.forEach((link) => {
-              if (link.weight > 0) {
+              if (!link.disabled && link.weight > 0) {
                 const sourceId =
                   typeof link.source === "object" ? link.source.id : link.source;
                 const targetId =
@@ -9725,6 +9561,7 @@
                 const targetCoords = getCoordinatesForStatcode(targetId);
                 if (!sourceCoords || !targetCoords) return;
                 const distance = computeDistance(sourceCoords, targetCoords);
+                if (!Number.isFinite(distance) || distance <= 0) return;
                 const massProduct = sourceNode.tradeTotal * targetNode.tradeTotal;
                 tradeData.push({
                   sourceId,
@@ -9740,12 +9577,14 @@
             if (tradeData.length === 0) {
               g.selectAll("*").remove();
               g.append("text")
+                .attr("class", "no-trade-data")
                 .text("No trade data available for gravity model analysis.")
                 .attr("x", width / 2)
                 .attr("y", height / 2)
                 .attr("text-anchor", "middle");
               return;
             }
+            g.select(".no-trade-data").remove();
     
             // X-scale: distance (log scale). Maximum is fixed at 380 (km).
             const xMin = d3.min(tradeData, (d) => d.distance);
@@ -9915,46 +9754,23 @@
             // Add tooltip on mouseover
             // Not working, placeholder here
     
-            // Regression Trend Line
-            const logData = tradeData.map((d) => ({
-              logDistance: Math.log(d.distance),
-              logWeight: Math.log(d.weight),
-              w: d.massProduct,
-            }));
-            const sumW = d3.sum(logData, (d) => d.w);
-            const xBar = d3.sum(logData, (d) => d.w * d.logDistance) / sumW;
-            const yBar = d3.sum(logData, (d) => d.w * d.logWeight) / sumW;
-            const num = d3.sum(
-              logData,
-              (d) => d.w * (d.logDistance - xBar) * (d.logWeight - yBar),
-            );
-            const den = d3.sum(
-              logData,
-              (d) => d.w * Math.pow(d.logDistance - xBar, 2),
-            );
-            const slope = num / den;
-            const intercept = yBar - slope * xBar;
+            const regression = computeGravityRegression(tradeData);
             const xTrendMin = xScale.domain()[0] + 4;
             const xTrendMax = xScale.domain()[1] - 50;
-            const yTrendMin = Math.exp(intercept + slope * Math.log(xTrendMin));
-            const yTrendMax = Math.exp(intercept + slope * Math.log(xTrendMax));
-            let trendLine = g.select(".trend-line");
-            if (trendLine.empty()) {
-              trendLine = g
-                .append("line")
-                .attr("class", "trend-line")
-                .attr("stroke", theme.accent)
-                .attr("stroke-width", 2)
-                .attr("stroke-dasharray", "5,5");
-            }
-            trendLine
-              .transition()
-              .duration(750)
+            const trendLine = g.selectAll(".trend-line").data(regression ? [regression] : []);
+            trendLine.exit().remove();
+            trendLine.enter().append("line")
+              .attr("class", "trend-line")
+              .attr("stroke", theme.accent)
+              .attr("stroke-width", 2)
+              .attr("stroke-dasharray", "5,5")
+              .merge(trendLine)
+              .transition().duration(750)
               .attr("x1", xScale(xTrendMin))
-              .attr("y1", yScale(yTrendMin))
+              .attr("y1", (fit) => yScale(Math.exp(fit.intercept + fit.slope * Math.log(xTrendMin))))
               .attr("x2", xScale(xTrendMax))
-              .attr("y2", yScale(yTrendMax));
-    
+              .attr("y2", (fit) => yScale(Math.exp(fit.intercept + fit.slope * Math.log(xTrendMax))));
+
             // Axis Labeling
             let topLabel = svg.select(".top-label");
             if (topLabel.empty()) {
@@ -9973,20 +9789,8 @@
             );
             topLabel.select(".distance-label").attr("y", 20);
     
-            // R² Display at Top Right
-            const ssTot = d3.sum(
-              logData,
-              (d) => d.w * Math.pow(d.logWeight - yBar, 2),
-            );
-            const ssRes = d3.sum(
-              logData,
-              (d) =>
-                d.w *
-                Math.pow(d.logWeight - (intercept + slope * d.logDistance), 2),
-            );
-            const rSquared = 1 - ssRes / ssTot;
-            const rSquaredText = `R² = ${rSquared.toFixed(3)}`;
-    
+            const rSquaredText = `R² = ${regression?.rSquared == null ? "NA" : regression.rSquared.toFixed(3)}`;
+
             // Create or update the text element.
             let r2Label = g.select(".r2-label");
             if (r2Label.empty()) {
@@ -10066,6 +9870,7 @@
             if (tradeDataAll.length === 0) {
               g.selectAll("*").remove();
               g.append("text")
+                .attr("class", "no-trade-data")
                 .text("No data available")
                 .attr("x", width / 2)
                 .attr("y", height / 2)
@@ -10074,6 +9879,7 @@
                 .style("font-style", "italic");
               return;
             }
+            g.select(".no-trade-data").remove();
     
             // Scales
             // X-scale: distance (log scale). Maximum is fixed at 380 km.
@@ -10205,12 +10011,8 @@
     
             // Overall contour with incoming and outgoing routes.
             updateContourLayer(tradeDataAll, "contour-all", "fuchsia");
-            if (outgoingData.length > 0) {
-              updateContourLayer(outgoingData, "contour-outgoing", outgoingColor);
-            }
-            if (incomingData.length > 0) {
-              updateContourLayer(incomingData, "contour-incoming", incomingColor);
-            }
+            updateContourLayer(outgoingData, "contour-outgoing", outgoingColor);
+            updateContourLayer(incomingData, "contour-incoming", incomingColor);
     
             // Update Scatter Points
             const sampledData =
@@ -10245,134 +10047,29 @@
               .duration(750)
               .attr("r", (d) => sizeScale(d.massProduct));
     
-            // Regression Lines & R² for Each Subset
-            // Compute regression parameters for a data array.
-            function computeRegression(data) {
-              const logData = data.map((d) => ({
-                logDistance: Math.log(d.distance),
-                logWeight: Math.log(d.weight),
-                w: d.massProduct,
-              }));
-              const sumW = d3.sum(logData, (d) => d.w);
-              const xBar = d3.sum(logData, (d) => d.w * d.logDistance) / sumW;
-              const yBar = d3.sum(logData, (d) => d.w * d.logWeight) / sumW;
-              const num = d3.sum(
-                logData,
-                (d) => d.w * (d.logDistance - xBar) * (d.logWeight - yBar),
-              );
-              const den = d3.sum(
-                logData,
-                (d) => d.w * Math.pow(d.logDistance - xBar, 2),
-              );
-              const slope = num / den;
-              const intercept = yBar - slope * xBar;
-              // Use same trend limits based on xScale domain.
-              const xTMin = xScale.domain()[0] + 4;
-              const xTMax = xScale.domain()[1] - 50;
-              const yTMin = Math.exp(intercept + slope * Math.log(xTMin));
-              const yTMax = Math.exp(intercept + slope * Math.log(xTMax));
-              return {
-                slope,
-                intercept,
-                xTMin,
-                xTMax,
-                yTMin,
-                yTMax,
-                logData,
-                xBar,
-                yBar,
-              };
-            }
-    
-            // Helper to compute R² from a regression result.
-            function computeRSquared(reg) {
-              const ssTot = d3.sum(
-                reg.logData,
-                (d) => d.w * Math.pow(d.logWeight - reg.yBar, 2),
-              );
-              const ssRes = d3.sum(
-                reg.logData,
-                (d) =>
-                  d.w *
-                  Math.pow(
-                    d.logWeight - (reg.intercept + reg.slope * d.logDistance),
-                    2,
-                  ),
-              );
-              return 1 - ssRes / ssTot;
-            }
-    
-            // Regression Lines & R² for Each Subset
-            // Compute regression for overall.
-            const overallReg = computeRegression(tradeDataAll);
-            let regLineAll = g.select(".regression-all");
-            if (regLineAll.empty()) {
-              regLineAll = g
-                .append("line")
-                .attr("class", "regression-all")
-                .attr("stroke", "fuchsia")
+            function updateRegression(data, className, color, dash) {
+              const fit = computeGravityRegression(data);
+              const lines = g.selectAll(`.${className}`).data(fit ? [fit] : []);
+              lines.exit().remove();
+              const xMin = xScale.domain()[0] + 4;
+              const xMax = xScale.domain()[1] - 50;
+              lines.enter().append("line")
+                .attr("class", className)
+                .attr("stroke", color)
                 .attr("stroke-width", 2)
-                .attr("stroke-dasharray", "5,5");
+                .attr("stroke-dasharray", dash)
+                .merge(lines)
+                .transition().duration(750)
+                .attr("x1", xScale(xMin))
+                .attr("y1", (reg) => yScale(Math.exp(reg.intercept + reg.slope * Math.log(xMin))))
+                .attr("x2", xScale(xMax))
+                .attr("y2", (reg) => yScale(Math.exp(reg.intercept + reg.slope * Math.log(xMax))));
+              return fit?.rSquared ?? null;
             }
-            regLineAll
-              .transition()
-              .duration(750)
-              .attr("x1", xScale(overallReg.xTMin))
-              .attr("y1", yScale(overallReg.yTMin))
-              .attr("x2", xScale(overallReg.xTMax))
-              .attr("y2", yScale(overallReg.yTMax));
-    
-            // Compute regression for outgoing.
-            let outgoingReg, regLineOut;
-            if (outgoingData.length > 0) {
-              outgoingReg = computeRegression(outgoingData);
-              regLineOut = g.select(".regression-outgoing");
-              if (regLineOut.empty()) {
-                regLineOut = g
-                  .append("line")
-                  .attr("class", "regression-outgoing")
-                  .attr("stroke", outgoingColor)
-                  .attr("stroke-width", 2)
-                  .attr("stroke-dasharray", "4,4");
-              }
-              regLineOut
-                .transition()
-                .duration(750)
-                .attr("x1", xScale(outgoingReg.xTMin))
-                .attr("y1", yScale(outgoingReg.yTMin))
-                .attr("x2", xScale(outgoingReg.xTMax))
-                .attr("y2", yScale(outgoingReg.yTMax));
-            }
-    
-            // Compute regression for incoming.
-            let incomingReg, regLineIn;
-            if (incomingData.length > 0) {
-              incomingReg = computeRegression(incomingData);
-              regLineIn = g.select(".regression-incoming");
-              if (regLineIn.empty()) {
-                regLineIn = g
-                  .append("line")
-                  .attr("class", "regression-incoming")
-                  .attr("stroke", incomingColor)
-                  .attr("stroke-width", 2)
-                  .attr("stroke-dasharray", "4,4");
-              }
-              regLineIn
-                .transition()
-                .duration(750)
-                .attr("x1", xScale(incomingReg.xTMin))
-                .attr("y1", yScale(incomingReg.yTMin))
-                .attr("x2", xScale(incomingReg.xTMax))
-                .attr("y2", yScale(incomingReg.yTMax));
-            }
-    
-            // Compute R² values.
-            const overallRSq = computeRSquared(overallReg);
-            const outgoingRSq =
-              outgoingData.length > 0 ? computeRSquared(outgoingReg) : null;
-            const incomingRSq =
-              incomingData.length > 0 ? computeRSquared(incomingReg) : null;
-    
+            const overallRSq = updateRegression(tradeDataAll, "regression-all", "fuchsia", "5,5");
+            const outgoingRSq = updateRegression(outgoingData, "regression-outgoing", outgoingColor, "4,4");
+            const incomingRSq = updateRegression(incomingData, "regression-incoming", incomingColor, "4,4");
+
             // R² Display at Top Right
             // Use a single text element with three tspans.
             let r2Label = g.select(".r2-label");
@@ -10392,7 +10089,7 @@
               .attr("x", width)
               .attr("dy", "0em")
               .attr("fill", "fuchsia")
-              .text("All: R² = " + overallRSq.toFixed(3));
+              .text("All: R² = " + (overallRSq === null ? "NA" : overallRSq.toFixed(3)));
             r2Label
               .append("tspan")
               .attr("x", width)
@@ -10453,6 +10150,7 @@
           }
     
           function updateTemporalNetwork() {
+            topNMetric = getHotspotRankings(hotspots);
             isDoingTemporalUpdate = true;
             window.isDoingTemporalUpdate = true;
             let previousLinkIndex = hoveredLink ? hoveredLink.id : null;
@@ -10471,16 +10169,15 @@
                 console.error("Selected node id is null or undefined.");
               }
               lastSelectedNodeIndex = selectedNodeData.id;
-              clearSelection(true, isSimulationModeActive());
+              clearSelection(true, true);
             }
     
             // Stop the current simulation.
-            forceSim.stop();
+            forceSim.alphaTarget(0).stop();
     
             // Update simulation data.
             forceSim.nodes(allNodes);
             forceSim.force("link").links(nonZeroLinks);
-            forceSim.alpha(1).restart();
     
             // Define a composite key function for links.
             const linkKey = (d) => {
@@ -10532,11 +10229,11 @@
             linkSelection = linksEnter.merge(linksSelection);
             linkSelection
               .interrupt()
-              .attr("display", (d) => (d.weight > 0 ? "block" : "none"))
+              .attr("display", (d) => (!d.disabled && d.weight > 0 ? "block" : "none"))
               .attr("class", "link")
               .attr("filter", null)
               .attr("marker-end", null)
-              .attr("opacity", (d) => (d.weight > 0 ? null : 0))
+              .attr("opacity", (d) => (!d.disabled && d.weight > 0 ? null : 0))
               .style("opacity", null)
               .transition()
               .duration(400)
@@ -10850,7 +10547,7 @@
     
             // Restart simulation in graph mode.
             if (currentMode === "graph") {
-              forceSim.alphaTarget(0.1).restart();
+              forceSim.alpha(1).restart();
             } else {
               updateMapPositionsWithTransition(
                 (instant = true),
@@ -10861,7 +10558,7 @@
             // If previously hovered over a link, first check if it has zero weight.
             if (previousLinkIndex !== null) {
               const previousLink = allLinks.find((d) => d.id === previousLinkIndex);
-              if (previousLink && previousLink.weight > 0) {
+              if (previousLink && !previousLink.disabled && previousLink.weight > 0) {
                 hoveredLink = previousLink;
                 updateAnnotationForLink(hoveredLink, annotationGroup);
               }
@@ -11108,11 +10805,20 @@
             });
           }
     
-          const debouncedUpdateHotspotMarks = debounce(
-            updateHotspotMarks,
-            200,
-            false,
-          );
+          function getHotspotRankings(metrics, simulation = isSimulationModeActive(), limit = numberPrintedHotspots) {
+            return Object.fromEntries(metricNames.map((metric) => {
+              const eligible = Object.keys(metrics || {}).filter((id) => {
+                const scores = metrics[id];
+                if (!Number.isFinite(scores[metric]) || scores[metric] <= 0) return false;
+                if (simulation) return true;
+                if (metric === "pageRank") return scores.inDegree > 0;
+                if (metric === "eigenvector") return scores.inDegree + scores.outDegree > 0;
+                return true;
+              });
+              eligible.sort((a, b) => metrics[b][metric] - metrics[a][metric] || a.localeCompare(b));
+              return [metric, eligible.slice(0, limit)];
+            }));
+          }
     
           function hotspotLabelDy(d) {
             const ringCount = metricNames.filter((metric) =>
@@ -11122,14 +10828,8 @@
           }
 
           function updateHotspotMarks() {
-            metricNames.forEach((metric) => {
-              // Sort the keys (node IDs) of hotspots by descending metric value.
-              topNMetric[metric] = Object.keys(hotspots)
-                .sort((a, b) => hotspots[b][metric] - hotspots[a][metric])
-                .slice(0, 3);
-            });
-            // Use all node groups, not only the initial enter selection.
-            d3.selectAll(".nodeGroup").each(function (d) {
+            topNMetric = getHotspotRankings(hotspots);
+            nodeGroup.selectAll(".nodeGroup").each(function (d) {
               const group = d3.select(this).select(".hotspot-rings");
     
               // Compute the updated list of metrics (hotspots) for this node.
@@ -11162,6 +10862,7 @@
                 .transition()
                 .duration(150)
                 .attr("r", (m, i) => d.r + (i + 1) * hotspotRingSpacing)
+                .style("opacity", 1)
                 .attr("stroke", (m) => hotspotStyles[m].color);
     
               // Append new strokes for any newly added metrics.
@@ -11186,60 +10887,22 @@
             labelSelection.attr("dy", hotspotLabelDy);
           }
     
-          // Restore function: re-enable all links and update the trade panel checkboxes.
           function restoreLinks() {
-            if (isSimulationModeActive() && (simulationLinkInterventions.size || simulationNodeInterventions.size)) {
-              simulationLinkInterventions.clear();
-              simulationNodeInterventions.clear();
-              renderSimulationNodeControls();
-              scheduleSimulationRecompute("Restoring all links and node permissions");
-            }
-            // Stop time replay by simulating a click on the pause button.
-            playBtn = document.getElementById("playPauseBtn");
+            if (!simulationLinkInterventions.size && !simulationNodeInterventions.size) return;
+            const playBtn = document.getElementById("playPauseBtn");
             const wasPlaying = window.isPlaying;
-            if (wasPlaying) {
-              playBtn.click();
-            }
-    
-            // Buttons are already managed by updateNetwork().
-            // Set all links to enabled.
-            allLinks.forEach((link) => {
-              link.disabled = false;
-            });
-    
-            // Update enabledLinks array to filter out disabled and zero-weight links.
-            enabledLinks = allLinks.filter(
-              (link) => !link.disabled && link.weight > 0,
-            );
-    
-            // Force all trade checkboxes to be checked.
-            d3.selectAll(".trade-checkbox").property("checked", true);
-            d3.selectAll(".trade-header-checkbox").property("checked", true);
+            if (wasPlaying) playBtn.click();
 
-            updateTradeTable();
-            updateInOutArbos();
-            updateTradeNodeInsight(window.currentSelectedTradeNodeInsight);
-    
-            // Update the network so that all links are shown.
-            updateNetwork();
-            updateDonutCharts();
-            updateNetworkStats();
-            //updateHotspotLists();
-            debouncedUpdateHotspotMarks();
-            computeSCCs();
-            updateSCCs();
-            updateAnnotationForNode(selectedNodeData, annotationGroup);
-    
-            // Even though updateNetwork() toggles checkbox states, we still need to mimic
-            // this visual change here because updateTradeTable() above re-initializes the checkboxes.
+            simulationLinkInterventions.clear();
+            simulationNodeInterventions.clear();
+            networkStatsDirtyFrom = uniqueDates[0]?.getTime() ?? null;
+            applyNetworkControlChanges("Restoring all links and node permissions");
             disableAllCheckboxes();
             enableAllCheckboxes(550);
-    
-            if (wasPlaying && !window.isPlaying) {
-              playBtn.click();
-            }
+
+            if (wasPlaying && !window.isPlaying) playBtn.click();
           }
-    
+
           // Force Simulation Drag Handler
           function drag(simulation) {
             function dragstarted(event, d) {
@@ -11258,6 +10921,7 @@
             }
             return d3
               .drag()
+              .filter((event) => currentMode === "graph" && !event.ctrlKey && !event.button)
               .on("start", dragstarted)
               .on("drag", dragged)
               .on("end", dragended);
@@ -11265,7 +10929,7 @@
     
           // Functions to switch between graph and map mode
           function switchToMapMode(instant = false) {
-            if (forceSim) forceSim.stop();
+            if (forceSim) forceSim.alphaTarget(0).stop();
             if (!nlMapData) {
               console.error("Failed to load NL map data.");
               return;
@@ -11382,7 +11046,7 @@
               d.fy = null;
             });
             if (forceSim) {
-              forceSim.alpha(1).restart();
+              forceSim.alpha(1).alphaTarget(0).restart();
             }
     
             enableAllButtons(550);
@@ -11541,176 +11205,98 @@
           // }
     
           /**
-           * chuLiuEdmonds(nodes, edges, root, direction)
-           *
-           * Computes a maximum spanning arborescence using a simplified Chu-Liu/Edmonds approach.
-           *
-           * @param {Array} nodes - Array of node objects, each with at least {id: string}.
-           * @param {Array} edges - Array of edge objects, each with {source, target, weight}.
-           *                        source/target can be either a node object or an ID string.
-           * @param {Object} root - The root node object for the arborescence, e.g. {id: "Root"}
-           * @param {String} direction - "in" or "out".
-           *    - "in":   each node except root has exactly one incoming edge (a standard in-arborescence).
-           *    - "out":  each node except root has exactly one outgoing edge (equivalent to reversing edges,
-           *              computing an in-arbo, then reversing them back).
-           * @returns {Array} an array of edges ( {source, target, weight} ) forming the maximum arborescence.
+           * Maximum-weight rooted tree over allowed positive routes.
+           * "in" gives each reachable node one incoming edge, leading away from root.
+           * "out" reverses that construction, giving paths toward root.
            */
           function chuLiuEdmonds(nodes, edges, root, direction) {
-            // If OUT-arborescence, reverse edges first.
-            let reversed = false;
-            let workingEdges = edges;
-            if (direction === "out") {
-              reversed = true;
-              workingEdges = edges.map((e) => ({
-                source: e.target,
-                target: e.source,
-                weight: e.weight,
-              }));
-            }
-    
-            // Step 1: For each node (except root), pick the single incoming edge of maximum weight
-            //         in the (possibly reversed) graph
-            let inEdges = {};
-            nodes.forEach((node) => {
-              if (node.id === root.id) return;
-              // all edges that lead *into* this node
-              const incoming = workingEdges.filter((e) => {
-                const t = typeof e.target === "object" ? e.target.id : e.target;
-                return t === node.id;
-              });
-              if (incoming.length > 0) {
-                // pick the heaviest edge
-                inEdges[node.id] = incoming.reduce((a, b) =>
-                  a.weight > b.weight ? a : b,
-                );
-              }
-            });
-    
-            // Step 2: Detect a cycle by DFS
-            let cycle = null;
-            let visited = {};
-    
-            // DFS to detect a cycle
-            function dfsCycle(nodeId, path) {
-              if (visited[nodeId]) {
-                // if visited before in the current path, then there's a cycle
-                const idx = path.indexOf(nodeId);
-                if (idx !== -1) {
-                  cycle = path.slice(idx);
-                }
-                return;
-              }
-              visited[nodeId] = true;
-              if (inEdges[nodeId]) {
-                // follow the one incoming edge
-                const src =
-                  typeof inEdges[nodeId].source === "object"
-                    ? inEdges[nodeId].source.id
-                    : inEdges[nodeId].source;
-                dfsCycle(src, path.concat([nodeId]));
-              }
-            }
-    
-            // run DFS for each node except root
-            nodes.forEach((node) => {
-              if (node.id !== root.id && !visited[node.id]) {
-                dfsCycle(node.id, []);
-              }
-            });
-    
-            // if there's no cycle, there's a valid arborescence
-            if (!cycle) {
-              // collecting all the inEdges values is enough to define the arborescence
-              let result = Object.values(inEdges);
-    
-              // if reversed edges for "out", should also reverse the result back
-              if (reversed) {
-                result = result.map((e) => ({
-                  source: e.target,
-                  target: e.source,
-                  weight: e.weight,
-                }));
-              }
-              return result;
-            }
-    
-            // Step 3: Contract the cycle
-            // create a synthetic node ID for the entire cycle
-            let cycleId = cycle.join("_");
-    
-            // remove cycle nodes from 'nodes' and add one new "contracted" node
-            let contractedNodes = nodes.filter((n) => !cycle.includes(n.id));
-            contractedNodes.push({ id: cycleId });
-    
-            // build new edges with cycle references replaced by 'cycleId'
-            let contractedEdges = [];
-            for (const e of workingEdges) {
-              const s = typeof e.source === "object" ? e.source.id : e.source;
-              const t = typeof e.target === "object" ? e.target.id : e.target;
-              let newS = cycle.includes(s) ? cycleId : s;
-              let newT = cycle.includes(t) ? cycleId : t;
-    
-              // skip self loops
-              if (newS === newT) continue;
-    
-              let newWeight = e.weight;
-              // if t is in the cycle, but s is not, subtract the weight of that node's chosen edge
-              if (cycle.includes(t) && !cycle.includes(s)) {
-                newWeight = e.weight - inEdges[t].weight;
-              }
-    
-              contractedEdges.push({
-                source: newS,
-                target: newT,
-                weight: newWeight,
-              });
-            }
-    
-            // recursively compute arbo on contracted graph
-            const contractedRoot = root.id === cycleId ? { id: cycleId } : root;
-            let T = chuLiuEdmonds(
-              contractedNodes,
-              contractedEdges,
-              contractedRoot,
-              "in",
+            const rootId = getNodeId(root);
+            const nodeIds = new Set(nodes.map(getNodeId));
+            if (!nodeIds.has(rootId)) return [];
+            const workingEdges = edges.map((edge) => ({
+              source: getNodeId(direction === "out" ? edge.target : edge.source),
+              target: getNodeId(direction === "out" ? edge.source : edge.target),
+              weight: +edge.weight,
+              original: edge,
+            })).filter((edge) =>
+              !edge.original.disabled && Number.isFinite(edge.weight) && edge.weight > 0 &&
+              edge.source !== edge.target && nodeIds.has(edge.source) && nodeIds.has(edge.target),
             );
-            // ^ pass direction = "in" here
-    
-            // Step 4: Expand the cycle
-            // find the edge pointing to the cycleId in T
-            let cycleEdge = T.find((e) => {
-              const tid = typeof e.target === "object" ? e.target.id : e.target;
-              return tid === cycleId;
-            });
-    
-            // remove that edge from T
-            T = T.filter((e) => {
-              const tid = typeof e.target === "object" ? e.target.id : e.target;
-              return tid !== cycleId;
-            });
-    
-            // restore the cycle's chosen edges
-            cycle.forEach((id) => {
-              T.push(inEdges[id]);
-            });
-    
-            // if reversed edges for "out", should also reverse the final result back
-            if (reversed) {
-              T = T.map((e) => ({
-                source: e.target,
-                target: e.source,
-                weight: e.weight,
-              }));
+            const outgoing = new Map(Array.from(nodeIds, (id) => [id, []]));
+            workingEdges.forEach((edge) => outgoing.get(edge.source).push(edge.target));
+            const reachable = new Set([rootId]);
+            const queue = [rootId];
+            for (let index = 0; index < queue.length; index++) {
+              for (const target of outgoing.get(queue[index])) {
+                if (reachable.has(target)) continue;
+                reachable.add(target);
+                queue.push(target);
+              }
             }
-    
-            return T;
+
+            function maximumTree(ids, routes) {
+              const incoming = new Map();
+              routes.forEach((edge) => {
+                if (edge.target === rootId) return;
+                const chosen = incoming.get(edge.target);
+                if (!chosen || edge.weight > chosen.weight) incoming.set(edge.target, edge);
+              });
+
+              let cycle = null;
+              const visited = new Set();
+              for (const id of ids) {
+                const path = new Map();
+                let current = id;
+                while (current !== rootId && !visited.has(current)) {
+                  if (path.has(current)) {
+                    cycle = Array.from(path.keys()).slice(path.get(current));
+                    break;
+                  }
+                  path.set(current, path.size);
+                  current = incoming.get(current).source;
+                }
+                if (cycle) break;
+                path.forEach((_, nodeId) => visited.add(nodeId));
+              }
+              if (!cycle) return Array.from(incoming.values());
+
+              const cycleNodes = new Set(cycle);
+              const contractedId = Symbol("cycle");
+              const contractedIds = ids.filter((id) => !cycleNodes.has(id));
+              contractedIds.push(contractedId);
+              const contractedRoutes = [];
+              routes.forEach((edge) => {
+                const sourceInCycle = cycleNodes.has(edge.source);
+                const targetInCycle = cycleNodes.has(edge.target);
+                if (sourceInCycle && targetInCycle) return;
+                contractedRoutes.push({
+                  source: sourceInCycle ? contractedId : edge.source,
+                  target: targetInCycle ? contractedId : edge.target,
+                  weight: edge.weight - (targetInCycle ? incoming.get(edge.target).weight : 0),
+                  original: edge,
+                });
+              });
+              const contractedTree = maximumTree(contractedIds, contractedRoutes);
+              const enteringEdge = contractedTree.find((edge) => edge.target === contractedId);
+              if (!enteringEdge) throw new Error("Reachable tree cycle has no entering route");
+              const tree = contractedTree.map((edge) => edge.original);
+              cycle.forEach((id) => {
+                if (id !== enteringEdge.original.target) tree.push(incoming.get(id));
+              });
+              return tree;
+            }
+
+            return maximumTree(
+              Array.from(reachable),
+              workingEdges.filter((edge) => reachable.has(edge.source) && reachable.has(edge.target)),
+            ).map((edge) => edge.original);
           }
     
           /**
            * visualizeArborescence(treeEdges, containerSelector, rootId)
            *
            * Displays a directed arborescence in a top-down tree layout using d3.tree().
-           * If 'treeEdges' is empty, shows "No arborescence found."
+           * Empty trees have no outgoing route to another region.
            *
            * @param {Array} treeEdges - Arborescence edges: {source, target, weight}
            * @param {String} containerSelector - e.g. "#inArboSVG"
@@ -11728,7 +11314,9 @@
               container
                 .append("div")
                 .attr("class", "no-arbo")
-                .text("No major routes found.");
+                .text(isSimulationModeActive()
+                  ? "No outgoing movement pressure."
+                  : "No outgoing trade routes.");
               return;
             }
     
@@ -11969,22 +11557,9 @@
             return maxClique;
           }
     
-          /**
-           * computeSCCs()
-           *
-           * Uses Tarjan’s Algorithm to find strongly connected components (SCCs)
-           * in a directed graph.
-           *
-           * @param {Array} nodes - Array of node objects, each with at least {id: string}.
-           * @param {Array} edges - Array of directed edges: {source, target}.
-           *                        source/target may be node objects or strings.
-           * @returns {Array} array of SCCs, where each SCC is array of node IDs
-           *
-           * Complexity: O(V + E)
-           */
-          function computeSCCs() {
+          function getStronglyConnectedComponents(nodes, edges) {
             // 1) Build adjacency list from enabled edges
-            const adj = buildAdjList(activeNodes, enabledLinks);
+            const adj = buildAdjList(nodes, edges);
     
             // 2) Tarjan’s data structures
             let indexCounter = 0;
@@ -11994,7 +11569,7 @@
             const lowLink = {}; // lowLink[nodeId]
             const sccList = []; // final array of SCCs
     
-            activeNodes.forEach((n) => {
+            nodes.forEach((n) => {
               index[n.id] = -1; // uninitialized
               lowLink[n.id] = -1;
               onStack[n.id] = false;
@@ -12035,90 +11610,110 @@
             }
     
             // 3) Run Tarjan’s procedure for each unvisited node.
-            activeNodes.forEach((n) => {
+            nodes.forEach((n) => {
               if (index[n.id] === -1) {
                 strongConnect(n.id);
               }
             });
     
-            newSCCs = sccList;
+            return sccList;
           }
     
-          function computeSpectralRadius(
-            allNodes,
-            enabledLinks,
-            maxIter = 100,
-            tol = 1e-6,
-          ) {
-            // 1. Filter out disabled links.
-            // Already configured globally.
-    
-            // 2. Create a mapping from node id to index.
-            const n = allNodes.length;
-            const idToIndex = {};
-            allNodes.forEach((node, i) => {
-              idToIndex[node.id] = i;
-            });
-    
-            // 3. Build the adjacency matrix.
-            // Here use a 2D array with dimensions n x n, initialized to 0.
-            const A = Array.from({ length: n }, () => Array(n).fill(0));
-            enabledLinks.forEach((link) => {
-              const source =
-                typeof link.source === "object" ? link.source.id : link.source;
-              const target =
-                typeof link.target === "object" ? link.target.id : link.target;
-              const i = idToIndex[source];
-              const j = idToIndex[target];
-              if (i !== undefined && j !== undefined) {
-                A[i][j] += link.weight || 1;
+          function computeSCCs() {
+            newSCCs = getStronglyConnectedComponents(activeNodes, enabledLinks);
+          }
+
+          function computePerronPair(matrix, maxIter, tol) {
+            const n = matrix.length;
+            const scale = Math.max(...matrix.map((row) => row.reduce((sum, value) => sum + value, 0)));
+            const normalized = matrix.map((row) => row.map((value) => value / scale));
+            let vector = Array(n).fill(1);
+
+            // Collatz–Wielandt bounds certify the relative error of the Perron root.
+            // Noda iteration solves (upper I - A)y = x and converges for periodic blocks too.
+            // https://arxiv.org/abs/1309.3926
+            for (let iteration = 0; iteration < maxIter; iteration++) {
+              const ratios = normalized.map((row, i) =>
+                row.reduce((sum, value, j) => sum + value * vector[j], 0) / vector[i]);
+              const lower = Math.min(...ratios);
+              const upper = Math.max(...ratios);
+              if (upper - lower <= tol * upper) {
+                const norm = Math.hypot(...vector);
+                return {
+                  value: scale * (lower + upper) / 2,
+                  lower: scale * lower, upper: scale * upper,
+                  vector: vector.map((value) => value / norm),
+                };
               }
-            });
-    
-            // 4. Use power iteration to estimate the spectral radius.
-            // Start with a random vector (or a vector of ones).
-            let v = Array(n).fill(1);
-    
-            // Function to compute matrix-vector multiplication.
-            function matVecMult(matrix, vec) {
-              const result = Array(vec.length).fill(0);
-              for (let i = 0; i < matrix.length; i++) {
-                for (let j = 0; j < matrix[i].length; j++) {
-                  result[i] += matrix[i][j] * vec[j];
+
+              // Diagonal similarity makes the current vector one. The shifted matrix
+              // is an M-matrix with nonnegative row gaps, so GTH elimination uses additions.
+              const rates = normalized.map((row, i) => row.map((value, j) =>
+                i === j ? 0 : value * vector[j] / vector[i]));
+              const gaps = ratios.map((ratio) => upper - ratio);
+              const rhs = Array(n).fill(1);
+              const diagonal = Array(n);
+              for (let col = 0; col < n; col++) {
+                diagonal[col] = gaps[col];
+                for (let j = col + 1; j < n; j++) diagonal[col] += rates[col][j];
+                if (!(diagonal[col] > 0)) throw new Error("Singular Perron iteration system");
+                for (let row = col + 1; row < n; row++) {
+                  const factor = rates[row][col] / diagonal[col];
+                  rates[row][col] = 0;
+                  gaps[row] += factor * gaps[col];
+                  rhs[row] += factor * rhs[col];
+                  for (let j = col + 1; j < n; j++) {
+                    if (j !== row) rates[row][j] += factor * rates[col][j];
+                  }
                 }
               }
-              return result;
-            }
-    
-            // Function to compute the Euclidean norm of a vector.
-            function norm(vec) {
-              return Math.sqrt(vec.reduce((sum, x) => sum + x * x, 0));
-            }
-    
-            let eigenvalue = 0;
-            for (let iter = 0; iter < maxIter; iter++) {
-              // Multiply matrix by vector.
-              let newV = matVecMult(A, v);
-              const newNorm = norm(newV);
-              // Normalize the new vector.
-              newV = newV.map((x) => x / newNorm);
-    
-              // Estimate eigenvalue using Rayleigh quotient.
-              const Av = matVecMult(A, newV);
-              const rayleigh = newV.reduce((sum, x, i) => sum + x * Av[i], 0);
-    
-              // Check for convergence.
-              if (Math.abs(rayleigh - eigenvalue) < tol) {
-                eigenvalue = rayleigh;
-                break;
+              const solution = Array(n);
+              for (let row = n - 1; row >= 0; row--) {
+                let value = rhs[row];
+                for (let col = row + 1; col < n; col++) value += rates[row][col] * solution[col];
+                solution[row] = value / diagonal[row];
               }
-              eigenvalue = rayleigh;
-              v = newV;
+              const next = vector.map((value, index) => value * solution[index]);
+              if (next.some((value) => !Number.isFinite(value) || value <= 0)) {
+                throw new Error("Perron iteration lost its positive vector");
+              }
+              const norm = Math.max(...next);
+              vector = next.map((value) => value / norm);
             }
-    
-            return eigenvalue;
+            throw new Error(`Spectral radius did not converge within ${maxIter} iterations`);
           }
-    
+
+          function computePerronRoot(matrix, maxIter, tol) {
+            return computePerronPair(matrix, maxIter, tol).value;
+          }
+
+          function computeSpectralRadius(allNodes, enabledLinks, maxIter = 100, tol = 1e-6) {
+            const ids = new Set(allNodes.map((node) => node.id));
+            const links = enabledLinks.filter((link) => link.weight > 0 &&
+              ids.has(getNodeId(link.source)) && ids.has(getNodeId(link.target)));
+            const components = getStronglyConnectedComponents(allNodes, links);
+            const positions = new Map();
+            const matrices = components.map((component, componentIndex) => {
+              component.forEach((id, index) => positions.set(id, { componentIndex, index }));
+              return component.map(() => Array(component.length).fill(0));
+            });
+            for (const link of links) {
+              const source = positions.get(getNodeId(link.source));
+              const target = positions.get(getNodeId(link.target));
+              if (source.componentIndex === target.componentIndex) {
+                matrices[source.componentIndex][source.index][target.index] += link.weight;
+              }
+            }
+
+            // The spectrum of a reducible graph is the union of its SCC spectra.
+            let radius = 0;
+            for (const matrix of matrices) {
+              const value = matrix.length === 1 ? matrix[0][0] : computePerronRoot(matrix, maxIter, tol);
+              radius = Math.max(radius, value);
+            }
+            return radius;
+          }
+
           // Build an adjacency list for a directed graph.
           function buildAdjList(nodes, edges) {
             const adj = {};
@@ -13037,7 +12632,36 @@
           let sliderKeyListener = null;
           let playPauseKeyListener = null;
           let fromStartKeyListener = null;
+          let playInterval = null;
           let persistentUiHandlersBound = false;
+
+          function setTimeReplayState(playing) {
+            window.isPlaying = playing;
+            const playButton = document.getElementById("playPauseBtn");
+            if (playButton) {
+              setControlTip(playButton, playing ? controlTips.pause : controlTips.play);
+              playButton.innerHTML = playing
+                ? '<i class="fa-solid fa-pause"></i>'
+                : '<i class="fa-solid fa-play"></i>';
+            }
+            setSimulationInputsDisabled(playing || window.isSwitchingCSV || simulationState.status === "running");
+            if (playing) {
+              disableAllButtons();
+              disableAllCheckboxes();
+            } else {
+              clearInterval(playInterval);
+              playInterval = null;
+              if (!window.isSwitchingCSV) {
+                enableAllButtons(550);
+                enableAllCheckboxes(550);
+              }
+            }
+          }
+
+          function handlesAppShortcut(event) {
+            return !screenshotInProgress && !event.defaultPrevented && !event.altKey && !event.ctrlKey && !event.metaKey &&
+              !event.target?.closest("input, select, textarea, button, [contenteditable]:not([contenteditable='false'])");
+          }
     
           // Helper function to remove existing document-level listeners for time controls.
           function removeTimeControlListeners() {
@@ -13056,6 +12680,8 @@
           }
     
           function initHerdLink(csvUrl) {
+            cancelSimulationRecompute();
+            if (forceSim) forceSim.stop();
             mapLayers.unmount();
             // Clear any previous network visualization.
             if (svg && svg.node().hasChildNodes()) {
@@ -13063,7 +12689,9 @@
             }
     
             window.isSwitchingCSV = true;
+            setTimeReplayState(false);
             disableAllButtons();
+            disableAllCheckboxes();
             removeTimeControlListeners();
     
             // Hide/reset UI elements that depend on the CSV.
@@ -13094,9 +12722,7 @@
                 hasTime = headers.includes("time");
     
                 function initNodesAndLinks(data) {
-                  const disabledLinkKeys = isSimulationModeActive()
-                    ? getDisabledLinkKeys(window.currentDate)
-                    : new Set();
+                  const disabledLinkKeys = getDisabledLinkKeys(window.currentDate);
                   const nodesMap = {},
                     links = [];
     
@@ -13136,6 +12762,7 @@
                       source: source,
                       target: target,
                       weight: weight,
+                      ledgerWeight: weight,
                       disabled: disabled,
                     });
                   });
@@ -13154,14 +12781,11 @@
     
                   // Get an array of all node IDs.
                   const nodeIds = Object.keys(nodesMap);
+                  const recordedLinks = new Set(links.map((link) => link.id));
     
                   // First, add missing self-loops.
                   nodeIds.forEach((id) => {
-                    if (
-                      !links.some(
-                        (link) => link.source === id && link.target === id,
-                      )
-                    ) {
+                    if (!recordedLinks.has(getLinkKey(id, id))) {
                       links.push({
                         id: id + "-" + id,
                         source: id,
@@ -13176,12 +12800,7 @@
                   nodeIds.forEach((sourceId) => {
                     nodeIds.forEach((targetId) => {
                       if (sourceId === targetId) return;
-                      if (
-                        !links.some(
-                          (link) =>
-                            link.source === sourceId && link.target === targetId,
-                        )
-                      ) {
+                      if (!recordedLinks.has(getLinkKey(sourceId, targetId))) {
                         links.push({
                           id: sourceId + "-" + targetId,
                           source: sourceId,
@@ -13304,8 +12923,6 @@
                   slider.value = 0;
                   timeControls.appendChild(slider);
     
-                  let playInterval = null;
-    
                   // Store the loaded data for later use.
                   loadedCSVData = data;
                   computeTemporalNetworkStats();
@@ -13315,9 +12932,7 @@
                   function updateNetworkForDate(selectedDate, fullData) {
                     window.currentDate = selectedDate;
                     applySimulationMapPrevalence();
-                    const filteredData = fullData.filter(
-                      (d) => d.time.getTime() === selectedDate.getTime(),
-                    );
+                    const filteredData = getTradeRecordsByDate(fullData).get(selectedDate.getTime()) || [];
                     initNodesAndLinks(filteredData);
                     applySimulationFrame(selectedDate);
     
@@ -13327,7 +12942,7 @@
                     if (!isSimulationModeActive()) updateSCCs();
     
                     updateTemporalNetwork();
-                    debouncedUpdateHotspotMarks();
+                    updateHotspotMarks();
                     updateDonutCharts();
                     if (!isSimulationModeActive()) {
                       updateGlobalStatsChart(window.currentSelectedStat);
@@ -13347,6 +12962,7 @@
     
                   // Shortcut for the slider
                   sliderKeyListener = function (event) {
+                    if (!handlesAppShortcut(event)) return;
                     let currentValue = +slider.value;
                     if (
                       event.key === "ArrowLeft" &&
@@ -13354,6 +12970,7 @@
                       !window.isSwitchingAppMode &&
                       !window.isDoingTemporalUpdate
                     ) {
+                      event.preventDefault();
                       if (currentValue > +slider.min) {
                         slider.value = currentValue - 1;
                         const idx = +slider.value;
@@ -13366,6 +12983,7 @@
                       !window.isSwitchingAppMode &&
                       !window.isDoingTemporalUpdate
                     ) {
+                      event.preventDefault();
                       if (currentValue < +slider.max) {
                         slider.value = currentValue + 1;
                         const idx = +slider.value;
@@ -13378,33 +12996,26 @@
     
                   // Play/Pause event.
                   playPauseBtn.addEventListener("click", function () {
-                    if (playPauseBtn.innerHTML.includes("play")) {
-                      window.isPlaying = true;
-                      setControlTip(playPauseBtn, controlTips.pause);
-                      playPauseBtn.innerHTML = '<i class="fa-solid fa-pause"></i>';
+                    if (!window.isPlaying) {
+                      if (+slider.value >= +slider.max) return;
+                      setTimeReplayState(true);
                       playInterval = setInterval(() => {
                         let currentIdx = +slider.value;
                         if (currentIdx < uniqueDates.length - 1) {
                           slider.value = currentIdx + 1;
                           updateNetworkForDate(uniqueDates[slider.value], data);
                           updateCurrentDateDisplay(uniqueDates[slider.value]);
-                        } else {
-                          clearInterval(playInterval);
-                          setControlTip(playPauseBtn, controlTips.play);
-                          playPauseBtn.innerHTML =
-                            '<i class="fa-solid fa-play"></i>';
                         }
+                        if (+slider.value >= +slider.max) setTimeReplayState(false);
                       }, 1000);
                     } else {
-                      setControlTip(playPauseBtn, controlTips.play);
-                      playPauseBtn.innerHTML = '<i class="fa-solid fa-play"></i>';
-                      clearInterval(playInterval);
-                      window.isPlaying = false;
+                      setTimeReplayState(false);
                     }
                   });
     
                   // Shortcut for the play/pause button
                   playPauseKeyListener = function (event) {
+                    if (!handlesAppShortcut(event) || event.repeat) return;
                     if (
                       event.key === " " &&
                       !window.isSwitchingCSV &&
@@ -13414,14 +13025,8 @@
                       // Space key pressed
                       const playPauseBtn = document.getElementById("playPauseBtn");
                       if (playPauseBtn && !playPauseBtn.disabled) {
+                        event.preventDefault();
                         playPauseBtn.click();
-                        if (window.isPlaying) {
-                          disableAllButtons();
-                          disableAllCheckboxes();
-                        } else {
-                          enableAllButtons(10);
-                          enableAllCheckboxes(10);
-                        }
                       }
                     }
                   };
@@ -13436,6 +13041,7 @@
     
                   // Shortcut for the from-start button
                   fromStartKeyListener = function (event) {
+                    if (!handlesAppShortcut(event) || event.repeat) return;
                     if (
                       event.key === "f" &&
                       !window.isSwitchingAppMode &&
@@ -13444,6 +13050,7 @@
                     ) {
                       const fromStartBtn = document.getElementById("fromStartBtn");
                       if (fromStartBtn && !fromStartBtn.disabled) {
+                        event.preventDefault();
                         fromStartBtn.click();
                       }
                     }
@@ -13466,9 +13073,7 @@
                 if (hasTime && uniqueDates.length > 0) {
                   const firstDate = uniqueDates[0];
                   window.currentDate = firstDate;
-                  initialData = data.filter(
-                    (d) => d.time.getTime() === firstDate.getTime(),
-                  );
+                  initialData = getTradeRecordsByDate(data).get(firstDate.getTime()) || [];
                 }
     
                 // Build nodes and links.
@@ -13490,9 +13095,7 @@
                 disableAllCheckboxes();
     
                 window.isSwitchingCSV = false;
-    
-                enableAllButtons(550);
-                enableAllCheckboxes(550);
+                setTimeReplayState(false);
 
                 if (isSimulationModeActive()) {
                   recomputeSimulationTrajectory("Preparing simulation trajectory");
@@ -13890,7 +13493,7 @@
           function enableAllButtons(timeoutVal) {
             if (!window.isPlaying) {
               d3.timeout(() => {
-                if (appModeSwitchLocked || window.isPlaying || simulationState.status === "running") return;
+                if (appModeSwitchLocked || window.isSwitchingCSV || window.isPlaying || simulationState.status === "running") return;
                 d3.selectAll(".csv-switcher").classed("disabled", false);
                 d3.selectAll(".mode-switcher-frame").classed("disabled", false);
                 d3.select("#mapLayerButton").attr("disabled", currentMode === "map" ? null : true);
@@ -13913,7 +13516,7 @@
           function enableAllCheckboxes(timeoutVal) {
             if (!window.isPlaying) {
               d3.timeout(() => {
-                if (appModeSwitchLocked || window.isPlaying || simulationState.status === "running") return;
+                if (appModeSwitchLocked || window.isSwitchingCSV || window.isPlaying || simulationState.status === "running") return;
                 // Enable link checkboxes.
                 d3.selectAll(".trade-checkbox").property("disabled", false);
                 // Enable header checkboxes.
@@ -13923,31 +13526,32 @@
             }
           }
     
-          // Save the current SVG as a PNG file.
-          async function downloadSvg() {
-            // Generate a filename from timestamp and random suffix.
+          let screenshotInProgress = false;
+
+          async function downloadScreenshot() {
+            if (screenshotInProgress) return;
+            screenshotInProgress = true;
             const timestamp = new Date()
               .toISOString()
               .replace(/[-:]/g, "")
               .replace("T", "_")
               .split(".")[0];
-            const filename = `network_${timestamp}_${Math.random().toString(36).substring(7)}.png`;
+            const filename = `herdlink_${timestamp}_${Math.random().toString(36).substring(7)}.png`;
     
-            // Download the SVG as PNG.
             try {
               await mapLayers.ready();
-              await saveSvgAsPng(document.getElementById("mainFigureSVG"), filename, {
-                backgroundColor: theme.canvas,
-              });
+              await window.downloadHerdLinkScreenshot(filename);
             } catch (error) {
               mapLayers.showError(error);
+            } finally {
+              screenshotInProgress = false;
             }
           }
     
           // Screenshot button handler.
           document
             .getElementById("screenshotButton")
-            .addEventListener("click", downloadSvg);
+            .addEventListener("click", downloadScreenshot);
     
           // Restore button handler.
           document
@@ -13967,23 +13571,15 @@
     
           matchButtonWidths();
 
-          function isShortcutTextTarget(target) {
-            const tag = target?.tagName ? target.tagName.toLowerCase() : "";
-            return (
-              tag === "input" ||
-              tag === "textarea" ||
-              tag === "select" ||
-              Boolean(target?.isContentEditable)
-            );
-          }
-	    
           // Keyboard shortcuts
     
           // Shortcut: press "s" to take a screenshot.
           const screenshotButton = document.getElementById("screenshotButton");
           document.addEventListener("keydown", function (event) {
+            if (!handlesAppShortcut(event)) return;
             if (
               event.key === "s" &&
+              !event.repeat &&
               !window.isSwitchingCSV &&
               !window.isSwitchingAppMode &&
               !window.isPlaying &&
@@ -14005,6 +13601,7 @@
           // Shortcut: press "m" to toggle network mode.
           const toggleModeButton = document.getElementById("toggleModeButton");
           document.addEventListener("keydown", function (event) {
+            if (!handlesAppShortcut(event)) return;
             if (
               event.key === "m" &&
               !window.isSwitchingCSV &&
@@ -14026,13 +13623,13 @@
           });
 
           document.addEventListener("keydown", function (event) {
+            if (!handlesAppShortcut(event)) return;
             if (
               event.key.toLowerCase() !== "e" ||
               event.repeat ||
               event.metaKey ||
               event.ctrlKey ||
               event.altKey ||
-              isShortcutTextTarget(event.target) ||
               window.isSwitchingCSV ||
               window.isSwitchingAppMode ||
               window.isPlaying ||
@@ -14062,6 +13659,7 @@
           // Shortcut: press "q" to exit focus mode.
           // Clears node focus using clearSelection(false).
           document.addEventListener("keydown", function (event) {
+            if (!handlesAppShortcut(event)) return;
             if (
               event.key === "q" &&
               !window.isSwitchingCSV &&
@@ -14078,6 +13676,7 @@
           // Shortcut: press "r" to restore links.
           const restoreButton = document.getElementById("restoreButton");
           document.addEventListener("keydown", function (event) {
+            if (!handlesAppShortcut(event)) return;
             if (
               event.key === "r" &&
               !window.isSwitchingCSV &&
@@ -14103,6 +13702,7 @@
     
           // Shortcut: up/down arrows switch focal nodes.
           document.addEventListener("keydown", function (e) {
+            if (!handlesAppShortcut(e)) return;
             if (e.key === "ArrowDown" || e.key === "ArrowUp") {
               if (
                 !window.isSwitchingCSV &&
@@ -14149,12 +13749,7 @@
     
           // Shortcut: press "h" to toggle the intro overlay.
           document.addEventListener("keydown", function (event) {
-            // Do not intercept typing in editable fields.
-            const t = event.target;
-            const tag = t && t.tagName ? t.tagName.toLowerCase() : "";
-            if (tag === "input" || tag === "textarea" || (t && t.isContentEditable))
-              return;
-    
+            if (!handlesAppShortcut(event)) return;
             if (event.key === "h" || event.key === "H") {
               event.preventDefault();
     

@@ -7,8 +7,14 @@ const source = readFileSync(
   new URL("../public/assets/js/herdlink-runtime.js", import.meta.url),
   "utf8",
 );
+function extractFunction(name) {
+  const match = source.match(new RegExp(`^([ ]*)function ${name}\\([^]*?^\\1}`, "m"));
+  assert.ok(match, `Runtime function ${name} exists`);
+  return match[0];
+}
+
 const functions = [
-  "isSimulationModeActive", "getNodeId", "getLinkKey", "getDisabledLinkKeys",
+  "isSimulationModeActive", "getNodeId", "getLinkKey", "getDisabledLinkKeys", "getTradeRecordsByDate",
   "setSimulationLinkIntervention", "getSimulationLinkAvailability",
   "setSimulationNodeIntervention", "getSimulationNodePermissions", "applySimulationNodePermissions",
   "getSimulationRestrictionTimeline",
@@ -16,12 +22,10 @@ const functions = [
   "setTradeEdgeScales", "collectSimulationRegionIds",
   "buildSimulationLedger", "estimateSimulationHoldings",
   "getSimulationFrameSummary", "buildSimulationTrajectory", "applySimulationFrame",
-  "initNodesAndLinks", "restoreLinks", "getSimulationTrajectoryPath",
-].map((name) => {
-  const match = source.match(new RegExp(`^([ ]*)function ${name}\\([^]*?^\\1}`, "m"));
-  assert.ok(match, `Runtime function ${name} exists`);
-  return match[0];
-}).join("\n");
+  "initNodesAndLinks", "restoreLinks", "getSimulationTrajectoryPath", "setAppDataMode", "cancelSimulationRecompute",
+  "applyNetworkControlChanges", "refreshNetworkControlStats", "computeTemporalNetworkStats",
+  "computeMaxTemporalNetworkStats", "computeSimpleStats", "computeNumberOfConnectedComponents",
+].map(extractFunction).join("\n");
 
 const settings = {
   model: "SIR", seedRegion: "CR01", initialPct: 5,
@@ -36,10 +40,16 @@ function runtime(edges = [["CR01", "CR02", 1000], ["CR02", "CR01", 100], ["CR02"
   const values = (items, accessor = (item) => item) => Array.from(items, accessor);
   const context = vm.createContext({
     Date, Map, Set, uniqueDates, loadedCSVData,
+    simulationRegionIdsByDataset: new WeakMap(),
+    tradeRecordsByDataset: new WeakMap(),
     appDataMode: "simulation", allNodes: [], allLinks: [], nlLabelPoints: null,
     simulationState: {}, simulationLinkInterventions: new Map(),
     simulationNodeInterventions: new Map(),
+    networkStatsDirtyDates: new Set(), networkStatsDirtyFrom: null, ledgerBaselineSpectralRadius: 0,
     window: { currentDate: uniqueDates[0] }, tradeIntensity: null, exposureIntensity: null,
+    computeModularity: () => ({ partition: {}, modularity: 0 }),
+    computeSpectralRadius: () => 0, computeHotSpotMetrics: () => ({}),
+    setLedgerHotspotsMax: () => {},
     metricNames: ["inDegree", "outDegree", "betweenness", "pageRank", "eigenvector"],
     d3: {
       min: (items, accessor) => Math.min(...values(items, accessor)),
@@ -52,6 +62,7 @@ function runtime(edges = [["CR01", "CR02", 1000], ["CR02", "CR01", 100], ["CR02"
   });
   vm.runInContext(functions, context);
   context.initNodesAndLinks(loadedCSVData.filter((row) => row.time === uniqueDates[0]));
+  context.computeTemporalNetworkStats();
   return context;
 }
 
@@ -62,6 +73,203 @@ function toggle(context, sourceId, targetId, disabled, date = context.uniqueDate
 function snapshot(trajectory) {
   return JSON.stringify(trajectory, (_, value) => value instanceof Map ? Array.from(value) : value);
 }
+
+test("Restore skips recomputation when no controls have been changed", () => {
+  const context = runtime();
+  context.document = { getElementById() { assert.fail("An unchanged network does not need a UI refresh"); } };
+  for (const mode of ["trade", "simulation"]) {
+    context.appDataMode = mode;
+    context.restoreLinks();
+  }
+});
+
+function prepareModeSwitching(context) {
+  Object.assign(context, {
+    clearTimeout, simulationRunId: 0, simulationRecomputeTimer: null,
+    canSwitchAppDataMode: () => true,
+    beginAppModeSwitchBounce: () => true,
+    refreshCurrentNetworkFrame: () => {
+      const date = context.window.currentDate;
+      context.initNodesAndLinks(context.loadedCSVData.filter((row) => row.time === date));
+      context.applySimulationFrame(date);
+    },
+    recomputeSimulationTrajectory: () => {
+      context.simulationState = {
+        status: "ready", trajectory: context.buildSimulationTrajectory(settings),
+      };
+      context.refreshCurrentNetworkFrame();
+    },
+  });
+  context.d3.selectAll = () => ({ property() {} });
+  for (const name of [
+    "syncModeSwitcherRadios", "setModePanelsRendering", "resetRadarRenderState",
+    "configureSimulationModeUi", "restoreLedgerHotspotsMax", "hideSimulationOverlay",
+    "clearSimulationRenderState", "updateNetwork", "applySimulationMapPrevalence",
+    "finishModePanelsRendering", "setSimulationInputsDisabled", "enableAllButtons",
+    "enableAllCheckboxes",
+  ]) context[name] = () => {};
+}
+
+test("network and simulation modes share dated controls while preserving ledger weights and earlier states", () => {
+  const context = runtime();
+  prepareModeSwitching(context);
+  const dates = context.uniqueDates;
+  const rawLedger = snapshot(context.loadedCSVData);
+  const baseline = context.buildSimulationTrajectory(settings);
+  assert.equal(context.setAppDataMode("trade"), true);
+
+  toggle(context, "CR01", "CR02", true, dates[2]);
+  context.setSimulationNodeIntervention("CR02", "exports", false, dates[3]);
+  context.setSimulationNodeIntervention("CR02", "exports", true, dates[5]);
+  const assertCurrentNetwork = (index) => {
+    context.window.currentDate = dates[index];
+    context.refreshCurrentNetworkFrame();
+    const disabled = context.allLinks.filter((link) => link.disabled)
+      .map((link) => context.getLinkKey(link.source, link.target)).sort();
+    const expected = Array.from(context.getDisabledLinkKeys(dates[index])).sort();
+    assert.deepEqual(Array.from(disabled), expected);
+    assert.equal(context.enabledLinks.some((link) => link.disabled), false);
+    if (context.appDataMode === "trade") {
+      for (const row of context.loadedCSVData.filter((row) => row.time === dates[index])) {
+        const link = context.allLinks.find((item) => item.id === `${row.COROP_LEV}-${row.COROP_AFN}`);
+        assert.equal(link.weight, row.AANTAL);
+        assert.equal(link.simulation, undefined);
+      }
+    }
+  };
+  for (const index of [0, 2, 4, 5, 1]) assertCurrentNetwork(index);
+
+  assert.equal(context.setAppDataMode("simulation"), true);
+  const edited = context.simulationState.trajectory;
+  assert.equal(snapshot(edited.frames.slice(0, 2)), snapshot(baseline.frames.slice(0, 2)));
+  assert.equal(edited.frames[2].linkStates.has("CR01-CR02"), false);
+  assert.equal(edited.frames[4].linkStates.has("CR02-CR03"), false);
+  assert.ok(edited.frames[5].linkStates.get("CR02-CR03").riskLoad > 0);
+  for (const index of [2, 3, 5]) assertCurrentNetwork(index);
+
+  toggle(context, "CR02", "CR01", true, dates[4]);
+  context.setSimulationNodeIntervention("CR01", "imports", false, dates[4]);
+  const linkSchedule = snapshot(context.simulationLinkInterventions);
+  const nodeSchedule = snapshot(context.simulationNodeInterventions);
+  const combined = context.buildSimulationTrajectory(settings);
+  assert.equal(context.setAppDataMode("trade"), true);
+  assert.equal(snapshot(context.simulationLinkInterventions), linkSchedule);
+  assert.equal(snapshot(context.simulationNodeInterventions), nodeSchedule);
+  assert.deepEqual(dates.map((date) => context.window.allTemporalStats[date.toISOString()].totalTradeVolume),
+    [1200, 1200, 200, 1000, 1000, 1100]);
+  for (const index of [4, 2, 0, 5]) assertCurrentNetwork(index);
+  assert.equal(context.setAppDataMode("simulation"), true);
+  assert.equal(snapshot(context.simulationState.trajectory), snapshot(combined));
+  assert.equal(snapshot(context.loadedCSVData), rawLedger);
+});
+
+test("network analytics refresh edited dates and persistent restriction periods without replacing untouched dates", () => {
+  const context = runtime();
+  const dates = context.uniqueDates;
+  const rawLedger = snapshot(context.loadedCSVData);
+  const baseline = { ...context.window.allTemporalStats };
+  const stats = (index) => context.window.allTemporalStats[dates[index].toISOString()];
+  assert.equal(stats(0).totalTradeVolume, 1200);
+
+  toggle(context, "CR01", "CR02", true, dates[2]);
+  context.refreshNetworkControlStats();
+  assert.equal(stats(2).totalTradeVolume, 200);
+  for (const index of [0, 1, 3, 4, 5]) {
+    assert.equal(stats(index), baseline[dates[index].toISOString()]);
+  }
+  assert.equal(context.networkStatsDirtyDates.size, 0);
+
+  context.setSimulationNodeIntervention("CR02", "exports", false, dates[3]);
+  context.setSimulationNodeIntervention("CR02", "exports", true, dates[5]);
+  context.refreshNetworkControlStats();
+  assert.deepEqual(dates.map((_, index) => stats(index).totalTradeVolume), [1200, 1200, 200, 1000, 1000, 1200]);
+  assert.equal(stats(3).totalEdges, 1);
+  assert.equal(stats(3).totalNodes, 2);
+  assert.equal(stats(3).numComponents, 2);
+  assert.equal(stats(0), baseline[dates[0].toISOString()]);
+  assert.equal(context.networkStatsDirtyFrom, null);
+  assert.equal(context.window.maxTemporalStats.totalTradeVolume, 1200);
+  assert.equal(snapshot(context.loadedCSVData), rawLedger);
+});
+
+test("network statistics group interleaved records by timestamp and refresh only requested dates", () => {
+  const context = runtime();
+  const dates = context.uniqueDates;
+  const record = (index, source, target, weight) => ({
+    time: new Date(dates[index]), COROP_LEV: source, COROP_AFN: target, AANTAL: weight,
+  });
+  context.loadedCSVData = [
+    record(2, "CR02", "CR03", 20),
+    record(0, "CR01", "CR02", 11),
+    record(2, "CR03", "CR02", 10),
+  ];
+  context.computeTemporalNetworkStats();
+  const stats = (index) => context.window.allTemporalStats[dates[index].toISOString()];
+  assert.deepEqual(dates.map((_, index) => stats(index).totalTradeVolume), [11, 0, 30, 0, 0, 0]);
+  assert.equal(stats(2).totalEdges, 2);
+  const untouched = stats(0);
+  context.setSimulationNodeIntervention("CR02", "exports", false, dates[2]);
+  context.computeTemporalNetworkStats([new Date(dates[2])]);
+  assert.equal(stats(0), untouched);
+  assert.equal(stats(2).totalTradeVolume, 10);
+  assert.equal(stats(2).totalEdges, 1);
+});
+
+test("region IDs are reused within a dataset and include new partners when its data is replaced", () => {
+  const context = runtime();
+  const originalData = context.loadedCSVData;
+  const originalIds = context.collectSimulationRegionIds(originalData);
+  assert.equal(context.collectSimulationRegionIds(originalData), originalIds);
+  context.loadedCSVData = originalData.concat({
+    time: context.uniqueDates[4], COROP_LEV: "CR01", COROP_AFN: "CR41", AANTAL: 100,
+  });
+  const replacementIds = context.collectSimulationRegionIds(context.loadedCSVData);
+  assert.ok(replacementIds.includes("CR41"));
+  assert.ok(!originalIds.includes("CR41"));
+  context.setAllSimulationNodePermissions("imports", false, context.uniqueDates[0]);
+  assert.equal(context.getDisabledLinkKeys(context.uniqueDates[4]).has("CR01-CR41"), true);
+});
+
+test("empty and acyclic networks have finite spectral and centrality values", () => {
+  const graph = vm.createContext({});
+  vm.runInContext([
+    "getNodeId", "buildAdjList", "getStronglyConnectedComponents", "computePerronPair", "computePerronRoot",
+    "computeModularity", "computeSpectralRadius", "computeEigenvectorCentrality",
+  ].map(extractFunction).join("\n"), graph);
+  const nodes = ["CR01", "CR02", "CR03"].map((id) => ({ id }));
+  const empty = graph.computeModularity(nodes, []);
+  assert.equal(empty.modularity, 0);
+  assert.deepEqual(Object.keys(empty.partition), nodes.map(({ id }) => id));
+  assert.equal(new Set(Object.values(empty.partition)).size, nodes.length);
+  for (const regions of [[], nodes]) {
+    assert.equal(graph.computeSpectralRadius(regions, []), 0);
+    assert.deepEqual(Object.values(graph.computeEigenvectorCentrality(regions, [])),
+      regions.map(() => 0));
+  }
+  const chain = [
+    { source: nodes[0], target: nodes[1], weight: 7 },
+    { source: nodes[1], target: nodes[2], weight: 3 },
+  ];
+  assert.equal(graph.computeSpectralRadius(nodes, chain), 0);
+});
+
+test("restrictions preserve the raw spectral baseline across partial and full statistics refreshes", () => {
+  const context = runtime([["CR01", "CR02", 10], ["CR02", "CR01", 10]]);
+  vm.runInContext(["buildAdjList", "getStronglyConnectedComponents", "computePerronPair", "computePerronRoot", "computeSpectralRadius"]
+    .map(extractFunction).join("\n"), context);
+  context.computeTemporalNetworkStats();
+  assert.ok(Math.abs(context.ledgerBaselineSpectralRadius - 10) < 1e-9);
+  const baseline = context.ledgerBaselineSpectralRadius;
+
+  context.setSimulationNodeIntervention("CR01", "exports", false, context.uniqueDates[0]);
+  context.refreshNetworkControlStats();
+  assert.ok(Object.values(context.window.allTemporalStats).every(({ spectralRadius }) => spectralRadius === 0));
+  assert.equal(context.ledgerBaselineSpectralRadius, baseline);
+
+  context.computeTemporalNetworkStats();
+  assert.equal(context.ledgerBaselineSpectralRadius, baseline);
+  assert.ok(Object.values(context.window.allTemporalStats).every(({ spectralRadius }) => spectralRadius === 0));
+});
 
 function recordTrajectoryPath(context, points) {
   context.simulationState.trajectory = context.buildSimulationTrajectory(settings);
@@ -300,7 +508,7 @@ test("a date-specific link edit preserves earlier frames and affects later infec
 
 test("node exports stay restricted for every partner, including a route first seen on a future date", () => {
   const context = runtime();
-  context.loadedCSVData.push({
+  context.loadedCSVData = context.loadedCSVData.concat({
     COROP_LEV: "CR01", COROP_AFN: "CR41", AANTAL: 100,
     time: context.uniqueDates[4],
   });
@@ -340,35 +548,38 @@ test("node imports restrict every source without stopping the node's exports", (
   }
 });
 
-test("bulk permissions cover every region, including future partners, without changing earlier frames or the other direction", () => {
-  for (const direction of ["exports", "imports"]) {
-    const context = runtime();
-    context.loadedCSVData.push({
-      COROP_LEV: "CR01", COROP_AFN: "CR41", AANTAL: 100,
-      time: context.uniqueDates[4],
-    });
-    const baseline = context.buildSimulationTrajectory(settings);
-    assert.ok(baseline.frames[4].linkStates.get("CR01-CR41").riskLoad > 0);
-    context.setAllSimulationNodePermissions(direction, false, context.uniqueDates[2]);
-    const blocked = context.buildSimulationTrajectory(settings);
-    const otherDirection = direction === "exports" ? "imports" : "exports";
+for (const mode of ["trade", "simulation"]) {
+  test(`${mode} bulk permissions cover future partners without changing earlier frames or the other direction`, () => {
+    for (const direction of ["exports", "imports"]) {
+      const context = runtime();
+      context.appDataMode = mode;
+      context.loadedCSVData = context.loadedCSVData.concat({
+        COROP_LEV: "CR01", COROP_AFN: "CR41", AANTAL: 100,
+        time: context.uniqueDates[4],
+      });
+      const baseline = context.buildSimulationTrajectory(settings);
+      assert.ok(baseline.frames[4].linkStates.get("CR01-CR41").riskLoad > 0);
+      context.setAllSimulationNodePermissions(direction, false, context.uniqueDates[2]);
+      const blocked = context.buildSimulationTrajectory(settings);
+      const otherDirection = direction === "exports" ? "imports" : "exports";
 
-    assert.equal(snapshot(blocked.frames.slice(0, 2)), snapshot(baseline.frames.slice(0, 2)));
-    for (const frame of blocked.frames.slice(2)) {
-      const permissions = context.getSimulationNodePermissions(frame.date);
-      const disabled = context.getDisabledLinkKeys(frame.date);
-      for (const id of blocked.ids) {
-        assert.equal(permissions.get(id)[direction], false, `${direction}: ${id}`);
-        assert.equal(permissions.get(id)[otherDirection], true, `${otherDirection}: ${id}`);
-        assert.equal(disabled.has(`${id}-${id}`), false);
-        for (const partner of blocked.ids) {
-          if (id !== partner) assert.equal(disabled.has(`${id}-${partner}`), true);
+      assert.equal(snapshot(blocked.frames.slice(0, 2)), snapshot(baseline.frames.slice(0, 2)));
+      for (const frame of blocked.frames.slice(2)) {
+        const permissions = context.getSimulationNodePermissions(frame.date);
+        const disabled = context.getDisabledLinkKeys(frame.date);
+        for (const id of blocked.ids) {
+          assert.equal(permissions.get(id)[direction], false, `${direction}: ${id}`);
+          assert.equal(permissions.get(id)[otherDirection], true, `${otherDirection}: ${id}`);
+          assert.equal(disabled.has(`${id}-${id}`), false);
+          for (const partner of blocked.ids) {
+            if (id !== partner) assert.equal(disabled.has(`${id}-${partner}`), true);
+          }
         }
+        assert.equal(frame.linkStates.size, 0);
       }
-      assert.equal(frame.linkStates.size, 0);
     }
-  }
-});
+  });
+}
 
 test("bulk reopening preserves history, independent imports, date availability, and future scheduled restrictions", () => {
   const context = runtime();
@@ -438,47 +649,68 @@ test("date availability, source exports, and target imports must all permit a ro
   assert.equal(context.getDisabledLinkKeys(date).has("CR01-CR02"), false);
 });
 
-test("Restore clears both schedules across past and future dates when the current date has every route enabled", () => {
-  const context = runtime();
-  const baseline = context.buildSimulationTrajectory(settings);
-  toggle(context, "CR01", "CR02", true, context.uniqueDates[1]);
-  context.setSimulationNodeIntervention("CR02", "imports", false, context.uniqueDates[1]);
-  context.setSimulationNodeIntervention("CR02", "imports", true, context.uniqueDates[2]);
-  toggle(context, "CR02", "CR03", true, context.uniqueDates[4]);
-  context.setSimulationNodeIntervention("CR03", "exports", false, context.uniqueDates[4]);
-  context.window.currentDate = context.uniqueDates[3];
-  assert.equal(context.getDisabledLinkKeys(context.window.currentDate).size, 0);
-  context.simulationState.trajectory = context.buildSimulationTrajectory(settings);
-  assert.notEqual(snapshot(context.simulationState.trajectory), snapshot(baseline));
+for (const mode of ["trade", "simulation"]) {
+  test(`Restore in ${mode} mode clears past and future schedules when the current date has every route enabled`, () => {
+    const context = runtime();
+    context.appDataMode = mode;
+    const rawLedger = snapshot(context.loadedCSVData);
+    const baseline = context.buildSimulationTrajectory(settings);
+    toggle(context, "CR01", "CR02", true, context.uniqueDates[1]);
+    context.setSimulationNodeIntervention("CR02", "imports", false, context.uniqueDates[1]);
+    context.setSimulationNodeIntervention("CR02", "imports", true, context.uniqueDates[2]);
+    toggle(context, "CR02", "CR03", true, context.uniqueDates[4]);
+    context.setSimulationNodeIntervention("CR03", "exports", false, context.uniqueDates[4]);
+    context.window.currentDate = context.uniqueDates[3];
+    assert.equal(context.getDisabledLinkKeys(context.window.currentDate).size, 0);
+    context.simulationState.trajectory = context.buildSimulationTrajectory(settings);
+    assert.notEqual(snapshot(context.simulationState.trajectory), snapshot(baseline));
+    context.refreshNetworkControlStats();
+    assert.ok(context.uniqueDates.some((date) =>
+      context.window.allTemporalStats[date.toISOString()].totalTradeVolume !== 1200));
 
-  const recomputes = [];
-  Object.assign(context, {
-    document: { getElementById: () => ({}) },
-    selectedNodeData: null, annotationGroup: null,
-    scheduleSimulationRecompute: (reason) => {
-      recomputes.push(reason);
-      context.simulationState.trajectory = context.buildSimulationTrajectory(settings);
-    },
+    const recomputes = [];
+    const gravityRenders = [];
+    Object.assign(context, {
+      document: { getElementById: () => ({}) },
+      selectedNodeData: { id: "CR01" }, annotationGroup: null,
+      updateNodeTradeDistribution: () => gravityRenders.push("node"),
+      updateTradeDistribution: () => gravityRenders.push("network"),
+      scheduleSimulationRecompute: (reason) => {
+        recomputes.push(reason);
+        context.simulationState.trajectory = context.buildSimulationTrajectory(settings);
+      },
+    });
+    context.d3.selectAll = () => ({ property() {} });
+    for (const name of [
+      "updateTradeTable", "updateInOutArbos", "updateTradeNodeInsight", "updateNetwork",
+      "updateDonutCharts", "updateNetworkStats", "updateHotspotMarks", "computeSCCs",
+      "updateSCCs", "updateAnnotationForNode", "disableAllCheckboxes", "enableAllCheckboxes",
+      "renderSimulationNodeControls", "updateGlobalStatsChart", "updateNodeStatsChart",
+    ]) context[name] = () => {};
+
+    context.restoreLinks();
+
+    assert.equal(context.simulationLinkInterventions.size, 0);
+    assert.equal(context.simulationNodeInterventions.size, 0);
+    assert.equal(recomputes.length, mode === "simulation" ? 1 : 0);
+    assert.deepEqual(gravityRenders, mode === "trade" ? ["node"] : []);
+    for (const date of context.uniqueDates) {
+      assert.equal(context.getDisabledLinkKeys(date).size, 0);
+    }
+    if (mode === "simulation") {
+      assert.equal(context.networkStatsDirtyFrom, context.uniqueDates[0].getTime());
+      context.refreshNetworkControlStats();
+    }
+    assert.ok(context.uniqueDates.every((date) =>
+      context.window.allTemporalStats[date.toISOString()].totalTradeVolume === 1200));
+    assert.equal(snapshot(context.buildSimulationTrajectory(settings)), snapshot(baseline));
+    if (mode === "simulation") {
+      assert.equal(snapshot(context.simulationState.trajectory), snapshot(baseline));
+    }
+    assert.equal(context.allLinks.some((link) => link.disabled), false);
+    assert.equal(snapshot(context.loadedCSVData), rawLedger);
   });
-  context.d3.selectAll = () => ({ property() {} });
-  for (const name of [
-    "updateTradeTable", "updateInOutArbos", "updateTradeNodeInsight", "updateNetwork",
-    "updateDonutCharts", "updateNetworkStats", "debouncedUpdateHotspotMarks", "computeSCCs",
-    "updateSCCs", "updateAnnotationForNode", "disableAllCheckboxes", "enableAllCheckboxes",
-    "renderSimulationNodeControls",
-  ]) context[name] = () => {};
-
-  context.restoreLinks();
-
-  assert.equal(context.simulationLinkInterventions.size, 0);
-  assert.equal(context.simulationNodeInterventions.size, 0);
-  assert.equal(recomputes.length, 1);
-  for (const date of context.uniqueDates) {
-    assert.equal(context.getDisabledLinkKeys(date).size, 0);
-  }
-  assert.equal(snapshot(context.simulationState.trajectory), snapshot(baseline));
-  assert.equal(context.allLinks.some((link) => link.disabled), false);
-});
+}
 
 test("backdated and same-date availability edits leave other dates independent", () => {
   const context = runtime();
@@ -559,7 +791,9 @@ test("node movement restrictions preserve local transmission and self-loop movem
   const localSettings = { ...settings, beta: 0.3 };
   const baseline = context.buildSimulationTrajectory(localSettings);
   assert.ok(baseline.frames[0].nodeStates.CR01.newInfections > 0);
-  assert.ok(baseline.frames[0].nodeStates.CR01.incomingExposure > 0);
+  assert.equal(baseline.frames[0].nodeStates.CR01.incomingExposure, 0);
+  assert.equal(baseline.frames[0].nodeStates.CR01.outgoingPressure, 0);
+  assert.ok(baseline.frames[0].linkStates.get("CR01-CR01").riskLoad > 0);
   context.setSimulationNodeIntervention("CR01", "exports", false, context.uniqueDates[2]);
   context.setSimulationNodeIntervention("CR01", "imports", false, context.uniqueDates[2]);
   assert.equal(snapshot(context.buildSimulationTrajectory(localSettings).frames), snapshot(baseline.frames));
@@ -593,9 +827,12 @@ test("replay applies both intervention scopes and restores flags when stepping b
         .filter((id) => id !== "CR02").map((id) => `CR02-${id}`).sort() : [];
     const disabledFlags = () => context.allLinks.filter((link) => link.disabled)
       .map((link) => context.getLinkKey(link.source, link.target)).sort();
+    const ledgerWeights = new Map(context.allLinks.map((link) => [link.id, link.weight]));
     assert.deepEqual(Array.from(disabledFlags()), Array.from(expected));
     context.allLinks.forEach((link) => { link.disabled = true; });
     assert.equal(context.applySimulationFrame(date), true);
+    assert.equal(context.applySimulationFrame(date), true);
+    for (const link of context.allLinks) assert.equal(link.ledgerWeight, ledgerWeights.get(link.id));
     assert.deepEqual(Array.from(disabledFlags()), Array.from(expected));
     assert.equal(context.enabledLinks.some((link) => link.disabled), false);
     assert.equal(snapshot(context.simulationState.currentFrame), snapshot(context.simulationState.trajectory.frames[index]));
@@ -619,5 +856,54 @@ test("all compartment models conserve holdings with restricted links", () => {
       }
       assert.ok(Math.abs(frame.summary.S + frame.summary.E + frame.summary.I + frame.summary.R - frame.summary.N) < 1e-8);
     }
+  }
+});
+
+test("simulation edge colors retain a valid zero logarithmic endpoint", () => {
+  const context = runtime([["CR01", "CR02", 1000], ["CR01", "CR03", 8000]]);
+  context.simulationState.trajectory = context.buildSimulationTrajectory({ ...settings, movementBeta: 0.02 });
+  context.applySimulationFrame(context.uniqueDates[0]);
+  assert.deepEqual(Array.from(context.enabledLinks, (link) => link.weight).sort((a, b) => a - b), [1, 8]);
+  assert.deepEqual(Array.from(context.edgeExtent), [0, Math.log(8)]);
+});
+
+test("zero transition and transmission rates freeze all compartment models", () => {
+  const context = runtime([["CR01", "CR01", 500], ["CR01", "CR02", 1000]]);
+  for (const model of ["SIR", "SIS", "SEIR", "SEIRS"]) {
+    const trajectory = context.buildSimulationTrajectory({ ...settings, model, beta: 0, movementBeta: 0, gamma: 0, sigma: 0 });
+    const first = trajectory.frames[0];
+    for (const frame of trajectory.frames) {
+      assert.equal(snapshot(frame.nodeStates), snapshot(first.nodeStates));
+      assert.equal(frame.summary.newInfections, 0);
+      assert.ok(Array.from(frame.linkStates.values()).every((link) => link.riskLoad === 0));
+    }
+  }
+});
+
+test("blocking every movement and local route preserves earlier states and stops new infections", () => {
+  for (const model of ["SIR", "SIS", "SEIR", "SEIRS"]) {
+    const context = runtime([["CR01", "CR01", 500], ["CR01", "CR02", 1000]]);
+    const parameters = { ...settings, model, beta: 2, movementBeta: 2, gamma: 0, sigma: 0 };
+    const baseline = context.buildSimulationTrajectory(parameters);
+    const block = () => {
+      context.setAllSimulationNodePermissions("exports", false, context.uniqueDates[2]);
+      for (const date of context.uniqueDates.slice(2)) {
+        for (const id of baseline.ids) toggle(context, id, id, true, date);
+      }
+    };
+    block();
+    const trajectory = context.buildSimulationTrajectory(parameters);
+    assert.equal(snapshot(trajectory.frames.slice(0, 2)), snapshot(baseline.frames.slice(0, 2)));
+    for (const frame of trajectory.frames.slice(2)) {
+      assert.equal(frame.linkStates.size, 0);
+      assert.equal(frame.summary.newInfections, 0);
+      for (const [id, state] of Object.entries(frame.nodeStates)) {
+        for (const field of ["S", "E", "I", "R", "N"]) assert.equal(state[field], baseline.frames[1].nodeStates[id][field]);
+        assert.equal(state.incomingExposure, 0);
+        assert.equal(state.outgoingPressure, 0);
+      }
+    }
+    block();
+    assert.equal(snapshot(context.buildSimulationTrajectory(parameters)), snapshot(trajectory));
   }
 });

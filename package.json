@@ -1,7 +1,7 @@
 {
   "name": "herdlink-web",
   "private": true,
-  "version": "0.8.1",
+  "version": "0.8.8",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -11,6 +11,7 @@
   "dependencies": {
     "@fortawesome/free-solid-svg-icons": "^7.3.1",
     "@fortawesome/react-fontawesome": "^3.5.0",
+    "modern-screenshot": "4.7.0",
     "react": "^18.3.1",
     "react-dom": "^18.3.1"
   },

@@ -1618,11 +1618,19 @@ body.focus-mode-active .simulation-progress-item.is-done {
   padding: 6px 10px;
 }
 
-#networkTransRiskScore {
+.network-score-toolbar {
   position: absolute;
   top: var(--space-6);
   left: 22px;
   z-index: 9999;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  max-width: calc(100% - 80px);
+}
+
+#networkTransRiskScore {
+  min-width: 0;
   display: none;
   color: var(--color-accent-strong);
   font-size: 1rem;
@@ -2023,11 +2031,6 @@ body.focus-mode-active .simulation-progress-item.is-done {
   font-size: 0.65rem;
 }
 
-body.simulation-mode-active .trade-route-label {
-  white-space: normal;
-  overflow-wrap: anywhere;
-}
-
 .simulation-link-status {
   display: block;
   margin-top: 3px;
@@ -2151,11 +2154,23 @@ body.simulation-mode-active .trade-route-label {
   height: 18px;
 }
 
+.simulation-local-control .simulation-local-volume {
+  flex: 0 0 auto;
+  min-width: 0;
+  margin-left: auto;
+  font-size: inherit;
+}
+
+.simulation-local-volume + .panel-info-button {
+  margin-left: 0;
+}
+
 .simulation-control-switch {
+  --switch-icon-turn: 0deg;
   position: relative;
   display: flex;
   flex: 0 0 auto;
-  aspect-ratio: 54 / 30;
+  aspect-ratio: 2 / 1;
   align-items: stretch;
   min-height: 30px;
   padding: 3px;
@@ -2168,35 +2183,85 @@ body.simulation-mode-active .trade-route-label {
 }
 
 .simulation-control-switch-thumb {
+  position: relative;
   display: grid;
-  width: calc(50% - 1px);
+  width: calc(50% - 4px);
   min-height: 22px;
   place-items: center;
+  overflow: hidden;
   border-radius: var(--radius-md);
   color: #3b1b16;
   background: salmon;
   box-shadow: var(--shadow-control);
-  transition: transform var(--transition-base), color var(--transition-base), background var(--transition-base);
+  transition: transform 360ms cubic-bezier(0.22, 1, 0.36, 1), color var(--transition-base), background var(--transition-base), box-shadow var(--transition-base);
 }
 
-.simulation-control-switch-thumb svg {
-  width: 14px;
-  height: 14px;
+.simulation-control-switch-thumb::after {
+  content: "";
+  position: absolute;
+  inset: -30% 0;
+  background: linear-gradient(110deg, transparent 25%, rgba(255, 255, 255, 0.45) 50%, transparent 75%);
+  transform: translateX(-140%);
+  transition: transform 500ms ease;
+  pointer-events: none;
+}
+
+.simulation-control-switch-icon {
+  position: relative;
+  display: grid;
+  width: 26px;
+  height: 26px;
+  place-items: center;
+  font-size: 18px;
+  line-height: 1;
+  transform: rotate(var(--switch-icon-turn));
+  transition: transform 420ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.simulation-control-switch-icon::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border: 1px solid currentColor;
+  border-left-color: transparent;
+  border-right-color: transparent;
+  border-radius: 50%;
+  opacity: 0.25;
+  transform: rotate(-45deg) scale(0.9);
+  transition: transform 420ms ease, opacity var(--transition-base);
 }
 
 .simulation-control-switch[data-mode="nodes"] {
+  --switch-icon-turn: 180deg;
   border-color: var(--color-accent);
   background: linear-gradient(135deg, #12766b, #185e55);
 }
 
 .simulation-control-switch[data-mode="nodes"] .simulation-control-switch-thumb {
-  transform: translateX(calc(100% + 2px));
+  transform: translateX(calc(100% + 8px));
   color: var(--color-on-accent);
   background: var(--color-accent-strong);
 }
 
-.simulation-control-switch:hover {
+.simulation-control-switch:hover,
+.simulation-control-switch:focus-visible {
   filter: brightness(1.12);
+}
+
+.simulation-control-switch:hover .simulation-control-switch-icon,
+.simulation-control-switch:focus-visible .simulation-control-switch-icon {
+  transform: rotate(calc(var(--switch-icon-turn) + 15deg)) scale(1.08);
+}
+
+.simulation-control-switch:hover .simulation-control-switch-icon::before,
+.simulation-control-switch:focus-visible .simulation-control-switch-icon::before {
+  opacity: 0.6;
+  transform: rotate(45deg) scale(1);
+}
+
+.simulation-control-switch:hover .simulation-control-switch-thumb::after,
+.simulation-control-switch:focus-visible .simulation-control-switch-thumb::after {
+  transform: translateX(140%);
 }
 
 .trade-list::-webkit-scrollbar {
@@ -2284,7 +2349,8 @@ body.simulation-mode-active .trade-route-label {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
-  white-space: nowrap;
+  white-space: normal;
+  overflow-wrap: anywhere;
 }
 
 .trade-volume {
@@ -3189,13 +3255,11 @@ g.node:hover {
 }
 
 .hotspotInfoButton {
-  position: absolute;
-  left: 238px;
-  top: 18px;
-  z-index: 9999;
+  flex: 0 0 auto;
   display: inline-flex;
   width: 26px;
   height: 26px;
+  padding: 0;
   align-items: center;
   justify-content: center;
   cursor: var(--cursor-pointer);
@@ -3209,26 +3273,14 @@ g.node:hover {
     visibility var(--transition-base);
 }
 
-body.simulation-mode-active .hotspotInfoButton {
-  opacity: 0;
-  visibility: hidden;
-  pointer-events: none;
-}
-
-.hotspotInfoButton > div {
-  display: inline-flex;
-  width: 100%;
-  height: 100%;
-  align-items: center;
-  justify-content: center;
-}
-
 .hotspotInfoButton i {
   color: currentColor;
 }
 
-.hotspotInfoButton:hover {
-  transform: none;
+.hotspotInfoButton:hover,
+.hotspotInfoButton:focus-visible {
+  transform: scale(1.1);
+  filter: brightness(1.2);
 }
 
 .statsContainer {
@@ -3807,6 +3859,7 @@ circle.vertex.selected {
 .hotspot-metric-head {
   display: flex;
   min-width: 0;
+  min-height: 36px;
   align-items: center;
   justify-content: space-between;
   gap: var(--space-2);
@@ -3821,16 +3874,28 @@ circle.vertex.selected {
 
 .hotspot-metric-role {
   display: inline-flex;
+  flex: 1;
   min-width: 0;
+  margin: 0;
   align-items: center;
   gap: 5px;
   color: var(--color-accent-strong);
   font-size: 0.78rem;
   font-weight: 600;
-  white-space: nowrap;
+  line-height: 1.3;
+  white-space: normal;
 }
 
-.hotspot-metric-card h3 {
+.hotspot-metric-role i {
+  flex: 0 0 auto;
+}
+
+.hotspot-metric-title {
+  min-width: 0;
+  overflow-wrap: break-word;
+}
+
+.hotspot-metric-card > h3 {
   margin: 0;
   color: var(--color-text);
   font-size: 0.96rem;
@@ -3908,7 +3973,7 @@ body.focus-mode-active .hotspot-metric-role {
   color: var(--color-accent-strong);
 }
 
-body.focus-mode-active .hotspot-metric-card h3 {
+body.focus-mode-active .hotspot-metric-card > h3 {
   color: #fff;
 }
 
@@ -4356,9 +4421,6 @@ select:focus-visible,
     --time-controls-width: min(60%, 390px);
   }
 
-  .hotspotInfoButton {
-    left: 224px;
-  }
 }
 
 @media (max-width: 1040px) {
@@ -4375,9 +4437,6 @@ select:focus-visible,
     width: 204px;
   }
 
-  .hotspotInfoButton {
-    left: 208px;
-  }
 
   .watermark-logo {
     width: 112px;

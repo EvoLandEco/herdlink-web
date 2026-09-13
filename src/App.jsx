@@ -5,8 +5,10 @@ import { NetworkPanel } from "./components/NetworkPanel";
 import { RightPanel } from "./components/RightPanel";
 import { ScreenSizeNotice } from "./components/ScreenSizeNotice";
 import { createMapLayers } from "./mapLayers";
+import { downloadAppScreenshot } from "./screenshot";
 
 window.createHerdLinkMapLayers = createMapLayers;
+window.downloadHerdLinkScreenshot = downloadAppScreenshot;
 
 const basePath = import.meta.env.BASE_URL;
 
@@ -14,7 +16,6 @@ const runtimeScripts = [
   { src: "https://d3js.org/d3.v6.min.js" },
   { src: `${basePath}assets/js/jLouvain.js` },
   { src: "https://cdnjs.cloudflare.com/ajax/libs/vivus/0.3.1/vivus.min.js" },
-  { src: `${basePath}assets/js/savesvg.js` },
   { src: `${basePath}assets/js/d3anno.js` },
   { src: "https://unpkg.com/simple-keyboard@latest/build/index.js" },
   {
@@ -33,6 +34,45 @@ const oppositePlacements = {
   right: "left",
   bottom: "top",
   left: "right",
+};
+
+const importsExportsGuide = {
+  title: "Imports & Exports",
+  iconClass: "fa-solid fa-arrow-right-arrow-left",
+  intro:
+    "Choose whether each region can send livestock to or receive livestock from other regions. These permissions are shared by network and simulation modes.",
+  sections: [
+    {
+      iconClass: "fa-solid fa-route",
+      title: "Directions",
+      text:
+        "Exports allow movement out of a region. Imports allow movement into it. These permissions cover every partner, including routes that appear on future dates. The local checkbox controls movement within a region separately.",
+    },
+    {
+      iconClass: "fa-solid fa-calendar-days",
+      title: "Timing",
+      text:
+        "Changes start at the displayed date and stay in place until re-enabled. The timeline shows each region with restrictions anywhere in the schedule. Hover a segment to inspect its period and permissions, or a diamond to inspect a change. Scroll horizontally to inspect closely spaced dates. Click a diamond to jump to its date; at coarser time resolutions, this selects the first available time step on or after that date. Dates outside the replay range select the nearest endpoint.",
+    },
+    {
+      iconClass: "fa-solid fa-timeline",
+      title: "Timeline colors",
+      text:
+        "Teal allows both directions. Salmon blocks exports, purple blocks imports, and amber blocks both. The white line marks the displayed date. The timeline covers the full schedule even when the region list is filtered.",
+    },
+    {
+      iconClass: "fa-solid fa-list-check",
+      title: "Bulk controls",
+      text:
+        "All exports and All imports apply to every region, including regions outside the search results. A mixed checkbox means some regions are allowed and others are blocked. Restore all in either mode clears link edits and import or export permissions across every date.",
+    },
+    {
+      iconClass: "fa-solid fa-flask",
+      title: "Shared network",
+      text:
+        "Network mode measures the allowed trade routes by movement volume. Simulation mode uses the same routes to calculate disease pressure. Restrictions set in either mode can change later disease outcomes; earlier simulated states stay fixed.",
+    },
+  ],
 };
 
 const richTips = {
@@ -98,7 +138,7 @@ const richTips = {
     title: "Trade Clusters",
     iconClass: "fa-regular fa-circle-nodes",
     intro:
-      "This panel shows how trade volume is organized across detected communities.",
+      "This panel shows how trade volume is organized across detected communities. Communities use the combined allowed volume in both directions.",
     sections: [
       {
         iconClass: "fa-solid fa-table-cells",
@@ -140,7 +180,7 @@ const richTips = {
     title: "Node Metric",
     iconClass: "fa-regular fa-share-nodes",
     intro:
-      "Each line is a region. Labels mark the highest ranked regions at the current date.",
+      "Each line is a region. Scores use allowed routes between regions, excluding local trades. Labels mark the highest ranked regions at the current date.",
     options: [
       ["Sink (PageRank)", "Regions that receive risk from important senders."],
       ["Bottleneck (Betweenness)", "Regions that sit on many trade paths."],
@@ -204,6 +244,12 @@ const richTips = {
         text:
           "Use it to find which upstream and downstream areas anchor the selected region's trade role.",
       },
+      {
+        iconClass: "fa-solid fa-list-check",
+        title: "Controls",
+        text:
+          "Link checkboxes change routes for the displayed time step. The switch beside the region name opens Imports & Exports, where regional permissions last until re-enabled. Both controls are shared with simulation mode. Restore all clears both schedules across every date.",
+      },
     ],
   },
   focusTrajectory: {
@@ -243,6 +289,66 @@ const richTips = {
       ["Spatial pattern", "Shows nearby and distant regions contributing to exposure."],
     ],
   },
+  localTrades: {
+    title: "Local Trades",
+    iconClass: "fa-solid fa-repeat",
+    intro:
+      "Control recorded livestock movements that begin and end within the selected region. The value shows their recorded volume.",
+    sections: [
+      {
+        iconClass: "fa-solid fa-calendar-day",
+        title: "Timing",
+        text:
+          "The checkbox applies only to the displayed time step. Import and export permissions do not control these local routes.",
+      },
+      {
+        iconClass: "fa-solid fa-flask",
+        title: "Shared with simulation",
+        text:
+          "This is the same setting as Local Transmission in simulation mode. Unchecking it also stops local contact transmission for this time step, even when no local trade is recorded. Later disease outcomes can change; earlier simulated states stay fixed.",
+      },
+    ],
+  },
+  outgoingTrades: {
+    title: "Outgoing Trades",
+    iconClass: "fa-solid fa-arrow-right-from-bracket",
+    intro:
+      "Inspect livestock movements from the selected region to other regions.",
+    sections: [
+      {
+        iconClass: "fa-solid fa-chart-simple",
+        title: "Reading routes",
+        text:
+          "The value is recorded movement volume. The bar shows distance to the destination, with its color indicating the destination's community. Blocked routes are excluded from network analysis.",
+      },
+      {
+        iconClass: "fa-solid fa-list-check",
+        title: "Availability",
+        text:
+          "Each checkbox controls one route for the displayed time step. The title checkbox changes all displayed outgoing routes; a mixed mark means only some are checked. A checked route also needs source exports and destination imports to be allowed. These settings are shared with simulation mode.",
+      },
+    ],
+  },
+  incomingTrades: {
+    title: "Incoming Trades",
+    iconClass: "fa-solid fa-arrow-left-to-bracket",
+    intro:
+      "Inspect livestock movements into the selected region from other regions.",
+    sections: [
+      {
+        iconClass: "fa-solid fa-chart-simple",
+        title: "Reading routes",
+        text:
+          "The value is recorded movement volume. The bar shows distance to the source, with its color indicating the source's community. Blocked routes are excluded from network analysis.",
+      },
+      {
+        iconClass: "fa-solid fa-list-check",
+        title: "Availability",
+        text:
+          "Each checkbox controls one route for the displayed time step. The title checkbox changes all displayed incoming routes; a mixed mark means only some are checked. A checked route also needs source exports and destination imports to be allowed. These settings are shared with simulation mode.",
+      },
+    ],
+  },
   localTransmission: {
     title: "Local Transmission",
     iconClass: "fa-solid fa-repeat",
@@ -253,7 +359,7 @@ const richTips = {
         iconClass: "fa-solid fa-virus",
         title: "Within the region",
         text:
-          "Unchecking this box stops local contact transmission and recorded livestock movements that begin and end in this region. Import and export permissions do not control these local routes.",
+          "Unchecking this box stops local contact transmission and recorded livestock movements that begin and end in this region. This is the same setting as Local Trades in network mode. Import and export permissions do not control these local routes.",
       },
       {
         iconClass: "fa-solid fa-calendar-day",
@@ -279,7 +385,7 @@ const richTips = {
         iconClass: "fa-solid fa-list-check",
         title: "Availability",
         text:
-          "Each checkbox controls one route for the displayed time step. The title checkbox changes all displayed outgoing routes; a mixed mark means only some are checked. A checked route also needs source exports and destination imports to be allowed. Changes can affect later disease outcomes, while earlier states stay fixed.",
+          "Each checkbox controls one route for the displayed time step. The title checkbox changes all displayed outgoing routes; a mixed mark means only some are checked. A checked route also needs source exports and destination imports to be allowed. These settings are shared with network mode. Changes can affect later disease outcomes, while earlier states stay fixed.",
       },
     ],
   },
@@ -299,42 +405,12 @@ const richTips = {
         iconClass: "fa-solid fa-list-check",
         title: "Availability",
         text:
-          "Each checkbox controls one route for the displayed time step. The title checkbox changes all displayed incoming routes; a mixed mark means only some are checked. A checked route also needs source exports and destination imports to be allowed. Changes can affect later disease outcomes, while earlier states stay fixed.",
+          "Each checkbox controls one route for the displayed time step. The title checkbox changes all displayed incoming routes; a mixed mark means only some are checked. A checked route also needs source exports and destination imports to be allowed. These settings are shared with network mode. Changes can affect later disease outcomes, while earlier states stay fixed.",
       },
     ],
   },
-  importsExports: {
-    title: "Imports & Exports",
-    iconClass: "fa-solid fa-arrow-right-arrow-left",
-    intro:
-      "Choose whether each region can send livestock to or receive livestock from other regions.",
-    sections: [
-      {
-        iconClass: "fa-solid fa-route",
-        title: "Directions",
-        text:
-          "Exports allow movement out of a region. Imports allow movement into it. These permissions cover every partner, including routes that appear on future dates. Local transmission is controlled separately.",
-      },
-      {
-        iconClass: "fa-solid fa-calendar-days",
-        title: "Timing",
-        text:
-          "Changes start at the displayed date and stay in place until re-enabled. Earlier simulated states stay fixed. The timeline shows each region with restrictions anywhere in the schedule. Hover a segment to inspect its period and permissions, or a diamond to inspect a change. Scroll horizontally to inspect closely spaced dates. Click a diamond to jump to its date; at coarser time resolutions, this selects the first available time step on or after that date. Dates outside the replay range select the nearest endpoint.",
-      },
-      {
-        iconClass: "fa-solid fa-timeline",
-        title: "Timeline colors",
-        text:
-          "Teal allows both directions. Salmon blocks exports, purple blocks imports, and amber blocks both. The white line marks the displayed date. The timeline covers the full schedule even when the region list is filtered.",
-      },
-      {
-        iconClass: "fa-solid fa-list-check",
-        title: "Bulk controls",
-        text:
-          "All exports and All imports apply to every region, including regions outside the search results. A mixed checkbox means some regions are allowed and others are blocked. Restore all clears both link edits and these permissions across every date.",
-      },
-    ],
-  },
+  importsExports: importsExportsGuide,
+  importsExportsTrade: importsExportsGuide,
   exposureBackbone: {
     title: "Main Exposure Backbone",
     iconClass: "fa-solid fa-sitemap",
@@ -351,7 +427,7 @@ const richTips = {
         iconClass: "fa-solid fa-filter",
         title: "Filtered reading",
         text:
-          "Link checkboxes apply only to the displayed time step. The switch beside the region name opens Imports and exports controls, which apply from the selected date until re-enabled and include future partners. Both controls can change later disease outcomes; earlier states stay fixed. Restore all clears link edits and import or export restrictions across every date.",
+          "Link checkboxes apply only to the displayed time step. The switch beside the region name opens Imports & Exports controls, which apply from the selected date until re-enabled and include future partners. Both controls are shared with network mode and can change later disease outcomes; earlier states stay fixed. Restore all clears link edits and import or export restrictions across every date.",
       },
     ],
   },

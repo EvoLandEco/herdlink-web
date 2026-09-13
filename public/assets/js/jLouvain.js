@@ -81,9 +81,10 @@
 		function add_edge_to_graph(graph, edge) {
 			update_assoc_mat(graph, edge);
 
-			var edge_index = graph.edges.map(function (d) {
-				return d.source + '_' + d.target;
-			}).indexOf(edge.source + '_' + edge.target);
+			var edge_index = graph.edges.findIndex(function (d) {
+				return (d.source === edge.source && d.target === edge.target) ||
+					(d.source === edge.target && d.target === edge.source);
+			});
 
 			if (edge_index !== -1) {
 				graph.edges[edge_index].weight = edge.weight;
@@ -342,7 +343,7 @@
 				__one_level(current_graph, status);
 				new_mod = __modularity(status);
 				if (new_mod - mod < __MIN) {
-					final_modularity = new_mod;
+					final_modularity = mod;
 					break;
 				}
 

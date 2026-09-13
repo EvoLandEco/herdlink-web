@@ -109,16 +109,28 @@ export function NetworkPanel() {
         className="screenshot-button has-tip"
         type="button"
         disabled
-        data-tip="Export screenshot (S)"
+        data-tip="Export whole app screenshot (S)"
         data-tip-placement="top"
-        aria-label="Export screenshot (S)"
+        aria-label="Export whole app screenshot (S)"
       >
         <i className="fa-solid fa-camera"></i>
       </button>
-      <div id="networkTransRiskScore">
-        <i className="fa-solid fa-virus"></i> Risk Score:
-        <span className="current-sr">----</span>
-        <span className="initial-sr">(----)</span>
+      <div className="network-score-toolbar">
+        <div id="networkTransRiskScore">
+          <i className="fa-solid fa-virus"></i> Risk Score:
+          <span className="current-sr">----</span>
+          <span className="initial-sr">(----)</span>
+        </div>
+        <button
+          className="hotspotInfoButton has-tip"
+          type="button"
+          aria-label="Show hotspot details"
+          aria-haspopup="dialog"
+          data-tip="Show hotspot details"
+          data-tip-placement="right"
+        >
+          <i className="fa-solid fa-circle-info" aria-hidden="true"></i>
+        </button>
       </div>
       <svg id="mainFigureSVG"></svg>
       <div className="watermark">
@@ -131,7 +143,6 @@ export function NetworkPanel() {
       </div>
       <div className="statsContainer"></div>
       <div className="hotspotLegend"></div>
-      <div className="hotspotInfoButton"></div>
       <div id="timeControlsContainer"></div>
       <div id="currentDateWidget" className="current-date-widget">
         <span className="current-date-label"></span>

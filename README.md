@@ -1,6 +1,6 @@
 # HerdLink Web
 
-![Version](https://img.shields.io/badge/version-v0.8.1-2f6fed)
+![Version](https://img.shields.io/badge/version-v0.8.8-2f6fed)
 ![Deployment](https://img.shields.io/badge/deployment-GitHub%20Pages-121013?logo=github)
 ![Website](https://img.shields.io/website?url=https%3A%2F%2Fherdlink.nl&label=HerdLink.nl)
 ![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)
@@ -24,16 +24,19 @@ HerdLink Web is a browser-based tool for exploring livestock trade networks in t
 - Simulation mode with SEIR controls, compartment trajectory panels, regional prevalence maps, and focus node simulation insights.
 - Partition and community views that summarize trade clustering, partition exposure, and CR-region mappings.
 - Intro overlay with quick start notes, keyboard shortcuts, and guided shortcut callouts.
-- PNG export for the main network visualization.
+- PNG export of the whole app, including controls, networks, and statistics panels.
 
 Seed region selects the single region that starts infected, with CR35 selected by
 default. Initial % sets the infected share in that region before the first time
 step. Choosing a seed region recomputes the simulation from the beginning.
 
-Simulation mode has two controls for movement:
+Trade ledger and simulation modes share one network and two controls for movement:
 
 - Link availability changes an individual directed route for the displayed time
-  step. A disabled self-loop stops local transmission for that step.
+  step. Local Trades in ledger mode and Local Transmission in simulation mode
+  share the same checkbox setting. It controls recorded movements within the
+  region and local contact transmission in the simulation, including time steps
+  without recorded local trades.
 - Imports and exports controls govern all movement to or from a region,
   starting at the displayed date and lasting until re-enabled. They include
   partners that appear at later dates and do not stop local transmission. The
@@ -45,21 +48,43 @@ Simulation mode has two controls for movement:
   the replay range select the nearest endpoint. Closely spaced changes scroll
   horizontally, with region labels kept in view.
   In focus mode, the switch beside the region name selects this panel or the
-  controls for individual links. Both sets of edits remain active when switching.
+  controls for individual links. Both sets of edits remain active when switching
+  between control panels or between ledger and simulation modes.
   The All exports and All imports checkboxes apply to every region, including
   regions outside the search results. A mixed checkbox means some regions are
   allowed and others are blocked.
 
-A route can operate when its link is available, its source can export, and its
-destination can import. Both kinds of edits can change disease outcomes from the
-selected step onward. Earlier simulated states, regional holdings, and initial
-infections stay fixed. Replay shows the controls active at each date. Restore all
-clears both kinds of edits across every date and recomputes the full simulation.
+A route between regions can operate when its link is available, its source can
+export, and its destination can import. Ledger mode measures allowed routes by
+recorded movement volume, while simulation mode calculates disease pressure on
+the same routes. The ledger route list keeps recorded volumes visible for blocked
+routes, with the reason shown beside the partner name. Its bars show partner
+distance and community; simulation bars show the partner's infectious share.
+
+Trade communities use an undirected network with the allowed volumes in both
+directions added together. Modularity measures the returned partition on that
+same network. The trade matrix retains the direction of each movement.
+
+Ledger hotspot scores use allowed routes between regions and exclude local
+trades. Rings mark up to three positive eligible scores per metric at the
+displayed date. Blocking exports removes a region's Seeding and Bottleneck
+marks; incoming routes can still support Vulnerable, Sink, or Amplifier marks.
+Sink requires imports, while Amplifier considers connections in either
+direction. Simulation rings show incoming exposure, outgoing pressure,
+prevalence, infectious burden, and pressure per infectious animal. Infection can
+persist after movement stops; local transmission is separate from import and
+export pressure.
+
+Edits made in either mode can change disease outcomes from the selected step
+onward. Earlier simulated states, regional holdings, and initial infections stay
+fixed. Replay shows the controls active at each date. Restore all in either mode
+clears both kinds of edits across every date; the simulation uses this restored
+network when it runs.
 
 Dated edits survive settings and time resolution changes. Link availability edits
 apply only to matching dates in the selected resolution. Node restrictions apply
 to every step on or after their start date until a later permission change.
-Returning to ledger mode clears both schedules.
+The schedules stay active when switching between ledger and simulation modes.
 
 Trajectory panels use smooth curves within each period of unchanged links.
 Each intervention boundary connects the last state before the edit to the first
