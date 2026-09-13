@@ -1,3 +1,6 @@
+import { useEffect, useRef, useState } from "react";
+import { NetworkBasics } from "./NetworkBasics";
+
 const quickStartNotes = [
   {
     key: "resolution",
@@ -193,6 +196,14 @@ const shortcutCallouts = [
 ];
 
 export function IntroOverlay() {
+  const [showNetworks, setShowNetworks] = useState(false);
+  const contentRef = useRef(null);
+
+  useEffect(() => {
+    contentRef.current.scrollTop = 0;
+    window.dispatchEvent(new Event("herdlink:intro-page-change"));
+  }, [showNetworks]);
+
   return (
     <div
       id="introOverlay"
@@ -200,81 +211,118 @@ export function IntroOverlay() {
       role="dialog"
       aria-modal="true"
       aria-labelledby="introTitle"
+      tabIndex={-1}
     >
+      <svg width="0" height="0" aria-hidden="true" className="intro-connector-defs">
+        <defs>
+          <clipPath id="introConnectorClip" clipPathUnits="userSpaceOnUse">
+            <rect id="introConnectorClipRect" />
+          </clipPath>
+        </defs>
+      </svg>
       <div className="intro-content">
         <h2 id="introTitle" className="visually-hidden">
           How to use HerdLink
         </h2>
-        <div className="intro-grid">
-          <div className="intro-left">
-            <div className="intro-badge intro-badge-left">
-              <i className="fa-solid fa-book"></i> Quick Start
+        <div id="introPages" className="intro-pages" ref={contentRef}>
+          <div id="introGuidePage" className="intro-grid" hidden={showNetworks}>
+            <div className="intro-left">
+              <div className="intro-badge intro-badge-left">
+                <i className="fa-solid fa-book"></i> Quick Start
+              </div>
+
+              <div className="intro-note-list">
+                {quickStartNotes.map((note, index) => (
+                  <div
+                    key={note.key}
+                    className={`intro-note intro-note--${note.key}`}
+                  >
+                    <span className="intro-note-index">
+                      {String(index + 1).padStart(2, "0")}
+                    </span>
+                    <span className="intro-note-copy">{note.content}</span>
+                  </div>
+                ))}
+              </div>
             </div>
 
-            <div className="intro-note-list">
-              {quickStartNotes.map((note, index) => (
+            <div className="intro-right">
+              <div className="intro-badge intro-badge-right">
+                <i className="fa-solid fa-keyboard"></i> Shortcuts
+              </div>
+
+              <div className="kbd-annotated" id="introShortcutDiagram">
+                {shortcutCallouts.slice(0, 3).map((callout) => (
+                  <div
+                    key={callout.key}
+                    className={`kbd-callout ${callout.className}`}
+                  >
+                    <span className="kbd-dot" id={callout.dotId}></span>
+                    <div className="kbd-callout__title">{callout.label}</div>
+                    <div>{callout.description}</div>
+                  </div>
+                ))}
+
                 <div
-                  key={note.key}
-                  className={`intro-note intro-note--${note.key}`}
-                >
-                  <span className="intro-note-index">
-                    {String(index + 1).padStart(2, "0")}
-                  </span>
-                  <span className="intro-note-copy">{note.content}</span>
-                </div>
-              ))}
+                  id="introKeyboard"
+                  className="introKeyboard"
+                  aria-label="Keyboard shortcuts diagram"
+                ></div>
+
+                {shortcutCallouts.slice(3).map((callout) => (
+                  <div
+                    key={callout.key}
+                    className={`kbd-callout ${callout.className}`}
+                  >
+                    <span className="kbd-dot" id={callout.dotId}></span>
+                    <div className="kbd-callout__title">{callout.label}</div>
+                    <div>{callout.description}</div>
+                  </div>
+                ))}
+              </div>
+
+              <div className="intro-meta">
+                <i className="fa-solid fa-circle-info"></i> Highlighted keys are
+                active shortcuts.
+              </div>
             </div>
           </div>
 
-          <div className="intro-right">
-            <div className="intro-badge intro-badge-right">
-              <i className="fa-solid fa-keyboard"></i> Shortcuts
-            </div>
-
-            <div className="kbd-annotated" id="introShortcutDiagram">
-              {shortcutCallouts.slice(0, 3).map((callout) => (
-                <div
-                  key={callout.key}
-                  className={`kbd-callout ${callout.className}`}
-                >
-                  <span className="kbd-dot" id={callout.dotId}></span>
-                  <div className="kbd-callout__title">{callout.label}</div>
-                  <div>{callout.description}</div>
-                </div>
-              ))}
-
-              <div
-                id="introKeyboard"
-                className="introKeyboard"
-                aria-label="Keyboard shortcuts diagram"
-              ></div>
-
-              {shortcutCallouts.slice(3).map((callout) => (
-                <div
-                  key={callout.key}
-                  className={`kbd-callout ${callout.className}`}
-                >
-                  <span className="kbd-dot" id={callout.dotId}></span>
-                  <div className="kbd-callout__title">{callout.label}</div>
-                  <div>{callout.description}</div>
-                </div>
-              ))}
-            </div>
-
-            <div className="intro-meta">
-              <i className="fa-solid fa-circle-info"></i> Highlighted keys are
-              active shortcuts.
-            </div>
+          <div id="introNetworksPage" hidden={!showNetworks}>
+            <NetworkBasics />
           </div>
         </div>
 
         <div className="intro-actions">
-          <div className="intro-dont-show-again">
-            <label>
-              <input type="checkbox" id="dontShowAgain" />
-              Do not show again
-            </label>
-          </div>
+          <button
+            id="introPageSwitch"
+            className="intro-page-switch"
+            type="button"
+            role="switch"
+            aria-checked={showNetworks}
+            aria-label="Network basics"
+            aria-controls="introGuidePage introNetworksPage"
+            onClick={() => setShowNetworks((value) => !value)}
+          >
+            <span className="intro-page-switch__label intro-page-switch__label--guide">
+              <svg viewBox="0 0 20 20" aria-hidden="true">
+                <path d="M10 5C7 3 4 3 2 4v12c3-1 5-1 8 1 3-2 5-2 8-1V4c-2-1-5-1-8 1Zm0 0v12" />
+              </svg>
+              Quick start
+            </span>
+            <span className="intro-page-switch__track" aria-hidden="true">
+              <span className="intro-page-switch__thumb"></span>
+            </span>
+            <span className="intro-page-switch__label intro-page-switch__label--networks">
+              <svg viewBox="0 0 20 20" aria-hidden="true">
+                <path d="m5 5 10 2-5 9L5 5" />
+                <circle cx="5" cy="5" r="2" />
+                <circle cx="15" cy="7" r="2" />
+                <circle cx="10" cy="16" r="2" />
+              </svg>
+              Network basics
+            </span>
+          </button>
           <button
             id="introOkButton"
             className="btn btn-success has-tip"

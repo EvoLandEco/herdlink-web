@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import vm from "node:vm";
 
-const source = readFileSync(new URL("../public/assets/js/herdlink-runtime.js", import.meta.url), "utf8");
+const source = readFileSync(new URL("../src/runtime/herdlink-runtime.js", import.meta.url), "utf8");
 const context = vm.createContext({});
 vm.runInContext([
   "getNodeId", "buildAdjList", "getStronglyConnectedComponents", "computePerronPair", "computeEigenvectorCentrality",
@@ -72,7 +72,7 @@ test("centrality reports an exhausted iteration budget instead of an unconverged
 });
 
 test("a sparse recorded graph retains a positive dominant vector under mixed restrictions", () => {
-  const csv = readFileSync(new URL("../public/assets/data/daily_aggregation.csv", import.meta.url), "utf8");
+  const csv = readFileSync(new URL("../src/assets/data/daily_aggregation.csv", import.meta.url), "utf8");
   const records = csv.trim().split("\n").slice(1).flatMap((line) => {
     const [, date, source, target, weight] = line.replaceAll('"', "").split(",");
     if (date !== "2021-07-18" || source === "NA" || target === "NA") return [];

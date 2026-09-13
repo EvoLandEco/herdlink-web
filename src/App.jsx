@@ -6,22 +6,25 @@ import { RightPanel } from "./components/RightPanel";
 import { ScreenSizeNotice } from "./components/ScreenSizeNotice";
 import { createMapLayers } from "./mapLayers";
 import { downloadAppScreenshot } from "./screenshot";
+import { assetUrls } from "./assetUrls";
+import jLouvainUrl from "./runtime/jLouvain.js?url";
+import d3AnnotationUrl from "./runtime/d3anno.js?url";
+import herdLinkRuntimeUrl from "./runtime/herdlink-runtime.js?url";
 
 window.createHerdLinkMapLayers = createMapLayers;
 window.downloadHerdLinkScreenshot = downloadAppScreenshot;
-
-const basePath = import.meta.env.BASE_URL;
+window.HERDLINK_ASSET_URLS = assetUrls;
 
 const runtimeScripts = [
-  { src: "https://d3js.org/d3.v6.min.js" },
-  { src: `${basePath}assets/js/jLouvain.js` },
+  { src: "https://cdn.jsdelivr.net/npm/d3@6.7.0/dist/d3.min.js" },
+  { src: jLouvainUrl },
   { src: "https://cdnjs.cloudflare.com/ajax/libs/vivus/0.3.1/vivus.min.js" },
-  { src: `${basePath}assets/js/d3anno.js` },
-  { src: "https://unpkg.com/simple-keyboard@latest/build/index.js" },
+  { src: d3AnnotationUrl },
+  { src: "https://unpkg.com/simple-keyboard@3.8.187/build/index.js" },
   {
     src: "https://cdnjs.cloudflare.com/ajax/libs/leader-line/1.0.6/leader-line.min.js",
   },
-  { src: `${basePath}assets/js/herdlink-runtime.js` },
+  { src: herdLinkRuntimeUrl },
 ];
 
 const scriptLoaders = new Map();
@@ -525,26 +528,31 @@ const richTips = {
   },
 };
 
-function supportsHerdLinkLayout() {
-  return (
-    window.innerWidth >= minimumViewportWidth &&
-    Math.min(window.screen.width, window.screen.height) >= minimumScreenEdge
-  );
+function getHerdLinkLayoutRequirement() {
+  const { innerWidth, innerHeight, screen } = window;
+  if (
+    Math.min(screen.width, screen.height) < minimumScreenEdge ||
+    Math.max(innerWidth, innerHeight) < minimumViewportWidth
+  ) {
+    return "larger-screen";
+  }
+
+  return innerWidth > innerHeight ? null : "landscape";
 }
 
-function useSupportedScreenSize() {
-  const [isSupported, setIsSupported] = useState(supportsHerdLinkLayout);
+function useScreenRequirement() {
+  const [requirement, setRequirement] = useState(getHerdLinkLayoutRequirement);
 
   useEffect(() => {
     const updateScreenSize = () => {
-      setIsSupported(supportsHerdLinkLayout());
+      setRequirement(getHerdLinkLayoutRequirement());
     };
 
     window.addEventListener("resize", updateScreenSize);
     return () => window.removeEventListener("resize", updateScreenSize);
   }, []);
 
-  return isSupported;
+  return requirement;
 }
 
 function loadRuntimeScript({ src, crossOrigin }) {
@@ -732,8 +740,13 @@ function isTooltipOnScreen(position, tooltipRect) {
 }
 
 export default function App() {
-  const hasSupportedScreen = useSupportedScreenSize();
+  const screenRequirement = useScreenRequirement();
+  const hasSupportedScreen = screenRequirement === null;
   const runtimeReady = useRef(false);
+
+  useEffect(() => {
+    window.dispatchEvent(new Event("herdlink:screen-access-change"));
+  }, [hasSupportedScreen]);
 
   useEffect(() => {
     if (!hasSupportedScreen) {
@@ -858,8 +871,6 @@ export default function App() {
     let frameId = null;
     let cancelled = false;
 
-    window.HERDLINK_BASE_PATH = basePath;
-
     runtimeScripts
       .reduce((chain, script) => {
         return chain.then(() => {
@@ -898,7 +909,7 @@ export default function App() {
 
   return (
     <>
-      {!hasSupportedScreen && <ScreenSizeNotice />}
+      {!hasSupportedScreen && <ScreenSizeNotice reason={screenRequirement} />}
       <div
         className={`screen-access-content${
           hasSupportedScreen ? "" : " is-screen-blocked"

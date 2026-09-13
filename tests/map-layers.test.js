@@ -34,7 +34,7 @@ test("census data keep zero distinct from missing and use the exact year", () =>
 });
 
 test("bundled census covers the weekly spillover year and land densities", () => {
-  const census = JSON.parse(readFileSync(new URL("../public/assets/data/pig-census.json", import.meta.url)));
+  const census = JSON.parse(readFileSync(new URL("../src/assets/data/pig-census.json", import.meta.url)));
   for (const year of [2018, 2019, 2020, 2021, 2022]) {
     assert.equal(Object.keys(census.years[year]).length, 40);
     for (const [code, row] of Object.entries(census.years[year])) {

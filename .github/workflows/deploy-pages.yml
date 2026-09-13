@@ -7,13 +7,14 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
+  actions: read
   pages: write
   id-token: write
 
 concurrency:
   group: pages
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 jobs:
   deploy:
@@ -37,6 +38,14 @@ jobs:
 
       - name: Build site
         run: npm run build
+
+      - name: Test site and asset retention
+        run: node --test tests/*.test.js
+
+      - name: Retain published assets
+        run: node scripts/retain-pages-assets.js
+        env:
+          GH_TOKEN: ${{ github.token }}
 
       - name: Setup Pages
         uses: actions/configure-pages@v5

@@ -2,7 +2,7 @@
 """Build COROP pig census densities from public CBS StatLine tables.
 
 Run with Python 3. The default command downloads the source records and writes
-public/assets/data/pig-census.json. Use --check to validate the bundled file.
+src/assets/data/pig-census.json. Use --check to validate the bundled file.
 The script uses published COROP totals and preserves missing values as null.
 """
 
@@ -16,7 +16,7 @@ from urllib.request import urlopen
 
 
 ROOT = Path(__file__).resolve().parents[1]
-OUTPUT = ROOT / "public/assets/data/pig-census.json"
+OUTPUT = ROOT / "src/assets/data/pig-census.json"
 YEARS = range(2018, 2023)
 REGIONS = {f"CR{index:02}" for index in range(1, 41)}
 API = "https://opendata.cbs.nl/ODataApi/OData"

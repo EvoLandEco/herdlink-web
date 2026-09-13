@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import vm from "node:vm";
 
-const source = readFileSync(new URL("../public/assets/js/herdlink-runtime.js", import.meta.url), "utf8");
+const source = readFileSync(new URL("../src/runtime/herdlink-runtime.js", import.meta.url), "utf8");
 const helper = source.match(/^([ ]*)function computeGravityRegression\([^]*?^\1}/m);
 assert.ok(helper);
 const context = vm.createContext({});

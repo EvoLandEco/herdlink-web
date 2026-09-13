@@ -4,7 +4,7 @@ import { readFileSync } from "node:fs";
 import vm from "node:vm";
 
 const source = readFileSync(
-  new URL("../public/assets/js/herdlink-runtime.js", import.meta.url), "utf8",
+  new URL("../src/runtime/herdlink-runtime.js", import.meta.url), "utf8",
 );
 function extractFunction(name) {
   const match = source.match(new RegExp(`^([ ]*)function ${name}\\([^]*?^\\1}`, "m"));

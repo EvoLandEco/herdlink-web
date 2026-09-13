@@ -20,7 +20,7 @@ from zipfile import ZipFile
 
 SOURCE_URL = "https://service.pdok.nl/kadaster/brt-topnl/atom/downloads/top250nl-gml-nl-nohist.zip"
 SOURCE_FEED = "https://service.pdok.nl/kadaster/brt-topnl/atom/top250nl.xml"
-OUTPUT = Path(__file__).resolve().parents[1] / "public/assets/files/herdlink/layers"
+OUTPUT = Path(__file__).resolve().parents[1] / "src/assets/files/herdlink/layers"
 GML = "{http://www.opengis.net/gml/3.2}"
 ROAD_CLASSES = {"autosnelweg": "motorway", "hoofdweg": "main"}
 WATER_WIDTHS = {"12 - 50 meter", "50 - 125 meter", "> 125 m"}

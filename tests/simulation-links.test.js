@@ -4,7 +4,7 @@ import { readFileSync } from "node:fs";
 import vm from "node:vm";
 
 const source = readFileSync(
-  new URL("../public/assets/js/herdlink-runtime.js", import.meta.url),
+  new URL("../src/runtime/herdlink-runtime.js", import.meta.url),
   "utf8",
 );
 function extractFunction(name) {

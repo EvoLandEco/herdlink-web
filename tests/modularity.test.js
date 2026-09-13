@@ -3,9 +3,9 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import vm from "node:vm";
 
-const source = readFileSync(new URL("../public/assets/js/herdlink-runtime.js", import.meta.url), "utf8");
+const source = readFileSync(new URL("../src/runtime/herdlink-runtime.js", import.meta.url), "utf8");
 const context = vm.createContext({});
-vm.runInContext(readFileSync(new URL("../public/assets/js/jLouvain.js", import.meta.url), "utf8") + "\n" +
+vm.runInContext(readFileSync(new URL("../src/runtime/jLouvain.js", import.meta.url), "utf8") + "\n" +
   ["getNodeId", "computeModularity"].map((name) => {
     const match = source.match(new RegExp(`^([ ]*)function ${name}\\([^]*?^\\1}`, "m"));
     assert.ok(match, `Runtime function ${name} exists`);

@@ -1,3 +1,5 @@
+import wurLogoUrl from "../assets/files/herdlink/WUR_ZW_standard_2021.svg?url";
+
 const mapContextLayers = [
   { id: "mapRoads", label: "Major roads" },
   { id: "mapWater", label: "Water" },
@@ -7,8 +9,6 @@ const mapContextLayers = [
 ];
 
 export function NetworkPanel() {
-  const assetBase = import.meta.env.BASE_URL;
-
   return (
     <div id="col2">
       <button
@@ -136,7 +136,7 @@ export function NetworkPanel() {
       <div className="watermark">
         <span className="watermark-text"></span>
         <img
-          src={`${assetBase}assets/files/herdlink/WUR_ZW_standard_2021.svg`}
+          src={wurLogoUrl}
           className="watermark-logo"
           alt=""
         />

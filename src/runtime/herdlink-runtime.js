@@ -4106,9 +4106,9 @@
             }
 
             const assetPath = url.replace(/^\.?\//, "");
-            const basePath = window.HERDLINK_BASE_PATH || "/";
-            const baseUrl = new URL(basePath, window.location.origin);
-            return new URL(assetPath, baseUrl).toString();
+            const assetUrl = window.HERDLINK_ASSET_URLS[assetPath];
+            if (!assetUrl) throw new Error(`Unknown bundled asset: ${assetPath}`);
+            return new URL(assetUrl, window.location.href).toString();
           }
     
           // Load an asset and cache the result.
@@ -6029,6 +6029,106 @@
             }
           }
     
+          function renderGraphPositions() {
+            if (currentMode === "graph") {
+              // Define boundary margins.
+              const inactiveMarginX = Math.min(170, w / 2),
+                inactiveMarginY = Math.min(290, h / 2),
+                activeMarginX = Math.min(40, w / 2),
+                activeMarginY = Math.min(60, h / 2);
+
+              linkSelection.attr("d", function (d) {
+                // Use original positions.
+                let sX = d.source.x,
+                  sY = d.source.y;
+                let tX = d.target.x,
+                  tY = d.target.y;
+
+                // Clamp source coordinates.
+                if (!d.source.active) {
+                  sX = Math.max(
+                    inactiveMarginX,
+                    Math.min(w - inactiveMarginX, sX),
+                  );
+                  sY = Math.max(
+                    inactiveMarginY,
+                    Math.min(h - inactiveMarginY, sY),
+                  );
+                } else {
+                  sX = Math.max(activeMarginX, Math.min(w - activeMarginX, sX));
+                  sY = Math.max(activeMarginY, Math.min(h - activeMarginY, sY));
+                }
+
+                // Clamp target coordinates.
+                if (!d.target.active) {
+                  tX = Math.max(
+                    inactiveMarginX,
+                    Math.min(w - inactiveMarginX, tX),
+                  );
+                  tY = Math.max(
+                    inactiveMarginY,
+                    Math.min(h - inactiveMarginY, tY),
+                  );
+                } else {
+                  tX = Math.max(activeMarginX, Math.min(w - activeMarginX, tX));
+                  tY = Math.max(activeMarginY, Math.min(h - activeMarginY, tY));
+                }
+
+                const dx = tX - sX,
+                  dy = tY - sY,
+                  dr = Math.sqrt(dx * dx + dy * dy),
+                  // Use the clamped positions to compute the adjusted target.
+                  adj = getAdjustedTarget({
+                    source: { x: sX, y: sY, r: d.source.r },
+                    target: { x: tX, y: tY, r: d.target.r },
+                  });
+
+                return (
+                  "M" +
+                  sX +
+                  "," +
+                  sY +
+                  "A" +
+                  dr +
+                  "," +
+                  dr +
+                  " 0 0,1 " +
+                  adj.x +
+                  "," +
+                  adj.y
+                );
+              });
+
+              // Update node positions. Clamp their positions to avoid going out of bounds.
+              nodeEnter.attr("transform", (d) => {
+                if (!d.active) {
+                  d.x = Math.max(
+                    inactiveMarginX,
+                    Math.min(w - inactiveMarginX, d.x),
+                  );
+                  d.y = Math.max(
+                    inactiveMarginY,
+                    Math.min(h - inactiveMarginY, d.y),
+                  );
+                } else {
+                  d.x = Math.max(activeMarginX, Math.min(w - activeMarginX, d.x));
+                  d.y = Math.max(activeMarginY, Math.min(h - activeMarginY, d.y));
+                }
+
+                return `translate(${d.x},${d.y})`;
+              });
+              // Update text labels positions.
+              labelSelection
+                .attr("x", (d) => d.x)
+                .attr("y", (d) => d.y - (d.r + 13));
+              if (hoveredLink) {
+                updateAnnotationForLink(hoveredLink, annotationGroup);
+              } else if (hoveredNode || selectedNodeData) {
+                updateAnnotationForNode(hoveredNode || selectedNodeData, annotationGroup);
+              }
+            }
+          }
+
           // Create Network
           function initNetwork(isReplot = false) {
             // Create annotation group
@@ -6260,108 +6360,7 @@
               }
             });
     
-            forceSim.on("tick", () => {
-              if (currentMode === "graph") {
-                // Define boundary margins.
-                const inactiveMarginX = 170,
-                  inactiveMarginY = 290,
-                  activeMarginX = 40,
-                  activeMarginY = 60;
-    
-                linkSelection.attr("d", function (d) {
-                  // Use original positions.
-                  let sX = d.source.x,
-                    sY = d.source.y;
-                  let tX = d.target.x,
-                    tY = d.target.y;
-    
-                  // Clamp source coordinates.
-                  if (!d.source.active) {
-                    sX = Math.max(
-                      inactiveMarginX,
-                      Math.min(w - inactiveMarginX, sX),
-                    );
-                    sY = Math.max(
-                      inactiveMarginY,
-                      Math.min(h - inactiveMarginY, sY),
-                    );
-                  } else {
-                    sX = Math.max(activeMarginX, Math.min(w - activeMarginX, sX));
-                    sY = Math.max(activeMarginY, Math.min(h - activeMarginY, sY));
-                  }
-    
-                  // Clamp target coordinates.
-                  if (!d.target.active) {
-                    tX = Math.max(
-                      inactiveMarginX,
-                      Math.min(w - inactiveMarginX, tX),
-                    );
-                    tY = Math.max(
-                      inactiveMarginY,
-                      Math.min(h - inactiveMarginY, tY),
-                    );
-                  } else {
-                    tX = Math.max(activeMarginX, Math.min(w - activeMarginX, tX));
-                    tY = Math.max(activeMarginY, Math.min(h - activeMarginY, tY));
-                  }
-    
-                  const dx = tX - sX,
-                    dy = tY - sY,
-                    dr = Math.sqrt(dx * dx + dy * dy),
-                    // Use the clamped positions to compute the adjusted target.
-                    adj = getAdjustedTarget({
-                      source: { x: sX, y: sY, r: d.source.r },
-                      target: { x: tX, y: tY, r: d.target.r },
-                    });
-    
-                  return (
-                    "M" +
-                    sX +
-                    "," +
-                    sY +
-                    "A" +
-                    dr +
-                    "," +
-                    dr +
-                    " 0 0,1 " +
-                    adj.x +
-                    "," +
-                    adj.y
-                  );
-                });
-    
-                // Update node positions. Clamp their positions to avoid going out of bounds.
-                nodeEnter.attr("transform", (d) => {
-                  if (!d.active) {
-                    d.x = Math.max(
-                      inactiveMarginX,
-                      Math.min(w - inactiveMarginX, d.x),
-                    );
-                    d.y = Math.max(
-                      inactiveMarginY,
-                      Math.min(h - inactiveMarginY, d.y),
-                    );
-                  } else {
-                    d.x = Math.max(activeMarginX, Math.min(w - activeMarginX, d.x));
-                    d.y = Math.max(activeMarginY, Math.min(h - activeMarginY, d.y));
-                  }
-    
-                  return `translate(${d.x},${d.y})`;
-                });
-                // Update text labels positions.
-                labelSelection
-                  .attr("x", (d) => d.x)
-                  .attr("y", (d) => d.y - (d.r + 13));
-                // If a node is hovered, update its annotation.
-                if (hoveredNode) {
-                  updateAnnotationForNode(hoveredNode, annotationGroup);
-                }
-                // If a link is hovered, update its annotation.
-                if (hoveredLink) {
-                  updateAnnotationForLink(hoveredLink, annotationGroup);
-                }
-              }
-            });
+            forceSim.on("tick", renderGraphPositions);
     
             linkSelection
               .on("mouseenter", handleLinkMouseEnter)
@@ -6993,6 +6992,9 @@
           }
     
           function updateAnnotationForLink(d, annotationGroup) {
+            annotationGroup.selectAll("svg.custom-radar").remove();
+            d3.select("#radial-labels-container").selectAll(".radial-axis-label").remove();
+
             // Determine source and target coordinates:
             let sx, sy, tx, ty;
             if (
@@ -10920,6 +10922,65 @@
               .on("end", dragended);
           }
     
+          function updateMapLayout(instant = false) {
+            const projection = d3
+              .geoIdentity()
+              .reflectY(true)
+              .fitSize([w, h], nlMapData);
+            const path = d3.geoPath().projection(projection);
+
+            svg.selectAll(".map-region").attr("d", path);
+            mapLayers.mount({ projection, geometry: nlMapData, width: w, height: h });
+
+            if (!nlLabelPoints) {
+              console.error("NL label point data not loaded.");
+            } else {
+              nodeEnter.each(function (d) {
+                const labelFeature = nlLabelPoints.features.find(
+                  (f) => f.properties.statcode === d.id,
+                );
+                if (labelFeature) {
+                  const coords = projection(labelFeature.geometry.coordinates);
+                  d.x = coords[0];
+                  d.y = coords[1];
+                }
+              });
+            }
+
+            updateMapPositionsWithTransition(instant);
+            applySimulationMapPrevalence();
+            if (hoveredLink) updateAnnotationForLink(hoveredLink, annotationGroup);
+          }
+
+          function resizeNetworkPanel() {
+            const width = containerCol2.clientWidth;
+            const height = containerCol2.clientHeight;
+            if (width <= 0 || height <= 0 || (width === w && height === h)) return;
+            const scaleX = width / w;
+            const scaleY = height / h;
+            w = width;
+            h = height;
+            svg.attr("viewBox", `0 0 ${w} ${h}`);
+            svg.select("#mapOverlay").attr("width", w).attr("height", h);
+            if (!forceSim) return;
+
+            forceSim.force("center").x(w / 2).y(h / 2);
+            if (currentMode === "map") {
+              if (nlMapData && nlLabelPoints) updateMapLayout(true);
+            } else {
+              for (const node of allNodes) {
+                node.x *= scaleX;
+                node.y *= scaleY;
+                node.vx *= scaleX;
+                node.vy *= scaleY;
+                if (node.fx != null) node.fx *= scaleX;
+                if (node.fy != null) node.fy *= scaleY;
+              }
+              renderGraphPositions();
+              forceSim.alpha(1).alphaTarget(0).restart();
+            }
+          }
+
           // Functions to switch between graph and map mode
           function switchToMapMode(instant = false) {
             if (forceSim) forceSim.alphaTarget(0).stop();
@@ -10938,12 +10999,6 @@
             disableAllButtons();
             disableAllCheckboxes();
     
-            const projection = d3
-              .geoIdentity()
-              .reflectY(true)
-              .fitSize([w, h], nlMapData);
-            const path = d3.geoPath().projection(projection);
-    
             // Insert the map layer with initial opacity 0.
             svg.selectAll(".map").interrupt().remove();
             const mapLayer = svg
@@ -10957,11 +11012,9 @@
               .enter()
               .append("path")
               .attr("class", "map-region")
-              .attr("d", path)
               .attr("fill", "none")
               .attr("stroke", theme.muted);
 
-            mapLayers.mount({ projection, geometry: nlMapData, width: w, height: h });
     
             // Fade in the map layer.
             if (instant) {
@@ -10984,23 +11037,7 @@
                 .attr("opacity", 0.4);
             }
     
-            if (!nlLabelPoints) {
-              console.error("NL label point data not loaded.");
-            } else {
-              nodeEnter.each(function (d) {
-                const labelFeature = nlLabelPoints.features.find(
-                  (f) => f.properties.statcode === d.id,
-                );
-                if (labelFeature) {
-                  const coords = projection(labelFeature.geometry.coordinates);
-                  d.x = coords[0];
-                  d.y = coords[1];
-                }
-              });
-            }
-    
-            updateMapPositionsWithTransition(instant);
-            applySimulationMapPrevalence();
+            updateMapLayout(instant);
     
             if (instant) {
               enableAllButtons(isSwitchingCSV ? 550 : 0);
@@ -11017,6 +11054,9 @@
     
           function switchToGraphMode() {
             mapLayers.unmount();
+            nodeEnter.interrupt("map-position");
+            linkSelection.interrupt("map-position");
+            labelSelection.interrupt("map-position");
             disableAllButtons();
             disableAllCheckboxes();
     
@@ -11103,17 +11143,17 @@
             if (!recordOnly) {
               if (instant) {
                 nodeEnter
-                  .interrupt()
+                  .interrupt("map-position")
                   .attr("transform", (d) => `translate(${d.x},${d.y})`)
                   .each(recordNodeMapPosition);
 
                 linkSelection
-                  .interrupt()
+                  .interrupt("map-position")
                   .attr("d", getMapLinkPath)
                   .each(recordLinkMapPosition);
 
                 labelSelection
-                  .interrupt()
+                  .interrupt("map-position")
                   .attr("x", (d) => d.x)
                   .attr("y", (d) => d.y - (d.r + 13));
 
@@ -11122,7 +11162,7 @@
 
               // Transition node groups.
               nodeEnter
-                .transition()
+                .transition("map-position")
                 .duration(transitionDuration)
                 .attr("transform", (d) => `translate(${d.x},${d.y})`)
                 .on("end", function () {
@@ -11131,7 +11171,7 @@
     
               // Transition link positions.
               linkSelection
-                .transition()
+                .transition("map-position")
                 .duration(transitionDuration)
                 .attr("d", getMapLinkPath)
                 .on("end", function () {
@@ -11140,7 +11180,7 @@
     
               // Transition label positions.
               labelSelection
-                .transition()
+                .transition("map-position")
                 .duration(transitionDuration)
                 .attr("x", (d) => d.x)
                 .attr("y", (d) => d.y - (d.r + 13));
@@ -12652,8 +12692,10 @@
           }
 
           function handlesAppShortcut(event) {
-            return !screenshotInProgress && !event.defaultPrevented && !event.altKey && !event.ctrlKey && !event.metaKey &&
-              !event.target?.closest("input, select, textarea, button, [contenteditable]:not([contenteditable='false'])");
+            return !document.getElementById("mainContainer")?.closest("[inert]") &&
+              !screenshotInProgress && !window.isIntroOverlayOpen?.() && !event.defaultPrevented && !event.altKey && !event.ctrlKey && !event.metaKey &&
+              !event.target?.closest("input, select, textarea, [contenteditable]:not([contenteditable='false'])") &&
+              !(event.target?.closest("button, [role='button'], [role='switch']") && [" ", "Enter"].includes(event.key));
           }
     
           // Helper function to remove existing document-level listeners for time controls.
@@ -13152,25 +13194,34 @@
             }
           }
     
+          new ResizeObserver(resizeNetworkPanel).observe(containerCol2);
+
           // Intro overlay
     
           (() => {
-            const PREF_KEY = "hideIntro";
-    
             let kbd = null;
             let lines = [];
             let keyboardReadyObserver = null;
+            let lineAnimationFrame = null;
+            let returnFocus = null;
     
             const introOverlay = document.getElementById("introOverlay");
+            const guidePage = document.getElementById("introGuidePage");
+            const pages = document.getElementById("introPages");
+            const connectorClip = document.getElementById("introConnectorClipRect");
             const okBtn = document.getElementById("introOkButton");
-            const dontShowAgain = document.getElementById("dontShowAgain");
             const helpBtn = document.getElementById("helpOverlayButton");
     
             function overlayIsOpen() {
               if (!introOverlay) return false;
+              if (introOverlay.closest("[inert]")) return false;
               if (introOverlay.style.display === "none") return false;
               if (introOverlay.classList.contains("hide")) return false;
               return true;
+            }
+
+            function guideIsVisible() {
+              return overlayIsOpen() && !guidePage.hidden;
             }
     
             function cleanupLines() {
@@ -13182,16 +13233,19 @@
               lines = [];
             }
     
-            function positionLinesRepeated() {
-              let i = 0;
-              const t = setInterval(() => {
-                lines.forEach((l) => {
-                  try {
-                    l.position();
-                  } catch (e) {}
-                });
-                if (++i > 14) clearInterval(t);
-              }, 50);
+            function positionLines() {
+              if (!guideIsVisible()) return;
+              const bounds = pages.getBoundingClientRect();
+              connectorClip.setAttribute("x", bounds.left + window.scrollX);
+              connectorClip.setAttribute("y", bounds.top + window.scrollY);
+              connectorClip.setAttribute("width", pages.clientWidth);
+              connectorClip.setAttribute("height", pages.clientHeight);
+              lines.forEach((line) => line.position());
+            }
+
+            function positionLinesDuringAnimation() {
+              positionLines();
+              lineAnimationFrame = requestAnimationFrame(positionLinesDuringAnimation);
             }
     
             function buildKeyboard() {
@@ -13264,6 +13318,7 @@
     
             function buildLines() {
               cleanupLines();
+              if (!guideIsVisible()) return;
               if (!kbd) return;
               if (typeof LeaderLine === "undefined") return;
     
@@ -13287,14 +13342,13 @@
                 if (ln) lines.push(ln);
               });
     
-              positionLinesRepeated();
+              positionLines();
             }
     
             // Wait until simple-keyboard renders buttons, then draw connector lines.
-            function ensureLinesWhenReady(timeoutMs = 2500) {
-              if (!overlayIsOpen()) return;
+            function ensureLinesWhenReady() {
+              if (!guideIsVisible()) return;
     
-              // If buttons already exist, draw lines now.
               const qBtnMaybe = kbd?.getButtonElement("q");
               const qBtn = Array.isArray(qBtnMaybe) ? qBtnMaybe[0] : qBtnMaybe;
               if (qBtn) {
@@ -13304,41 +13358,16 @@
     
               // Watch keyboard DOM changes until buttons appear.
               const kbRoot = document.querySelector("#introKeyboard");
-              if (!kbRoot) {
-                // Fallback retry.
-                setTimeout(() => {
-                  if (overlayIsOpen()) buildLines();
-                }, 300);
-                return;
-              }
-    
-              // Clean up existing observer.
-              if (keyboardReadyObserver) {
-                try {
-                  keyboardReadyObserver.disconnect();
-                } catch (e) {}
-                keyboardReadyObserver = null;
-              }
-    
-              const start = performance.now();
+              if (!kbRoot || keyboardReadyObserver) return;
     
               keyboardReadyObserver = new MutationObserver(() => {
-                if (!overlayIsOpen()) return;
+                if (!guideIsVisible()) return;
                 const elMaybe = kbd?.getButtonElement("q");
                 const el = Array.isArray(elMaybe) ? elMaybe[0] : elMaybe;
                 if (el) {
-                  try {
-                    keyboardReadyObserver.disconnect();
-                  } catch (e) {}
+                  keyboardReadyObserver.disconnect();
                   keyboardReadyObserver = null;
-                  // Use two RAF ticks to let layout settle.
-                  requestAnimationFrame(() => requestAnimationFrame(buildLines));
-                } else if (performance.now() - start > timeoutMs) {
-                  try {
-                    keyboardReadyObserver.disconnect();
-                  } catch (e) {}
-                  keyboardReadyObserver = null;
-                  buildLines(); // last attempt
+                  buildLines();
                 }
               });
     
@@ -13346,56 +13375,67 @@
                 childList: true,
                 subtree: true,
               });
-    
-              // Final timeout fallback.
-              setTimeout(() => {
-                if (keyboardReadyObserver) {
-                  try {
-                    keyboardReadyObserver.disconnect();
-                  } catch (e) {}
-                  keyboardReadyObserver = null;
-                  if (overlayIsOpen()) buildLines();
-                }
-              }, timeoutMs);
             }
-    
-            function openIntro(force = false) {
+
+            function syncIntroPage() {
+              cleanupLines();
+              keyboardReadyObserver?.disconnect();
+              keyboardReadyObserver = null;
+              if (!guideIsVisible()) return;
+              buildKeyboard();
+              ensureLinesWhenReady();
+            }
+
+            function openIntro() {
               if (!introOverlay) return;
-    
-              if (!force && localStorage.getItem(PREF_KEY) === "true") {
-                introOverlay.style.display = "none";
-                introOverlay.classList.add("hide");
-                return;
+
+              if (!introOverlay.contains(document.activeElement)) {
+                returnFocus = document.activeElement;
               }
     
               introOverlay.style.display = "flex";
               introOverlay.style.pointerEvents = "auto";
               introOverlay.classList.remove("hide");
+              introOverlay.inert = false;
     
-              buildKeyboard();
-              ensureLinesWhenReady();
+              syncIntroPage();
+              document.getElementById("introPageSwitch").focus({ preventScroll: true });
             }
     
-            function closeIntro(persist = true) {
+            function closeIntro() {
               if (!introOverlay) return;
-    
-              if (persist && dontShowAgain?.checked) {
-                localStorage.setItem(PREF_KEY, "true");
-              }
     
               // Stop blocking clicks immediately.
               introOverlay.style.pointerEvents = "none";
     
               // Fade out overlay.
               introOverlay.classList.add("hide");
+              introOverlay.inert = true;
     
               // Remove connector lines; they live outside the overlay.
               cleanupLines();
+              keyboardReadyObserver?.disconnect();
+              keyboardReadyObserver = null;
+              cancelAnimationFrame(lineAnimationFrame);
+              lineAnimationFrame = null;
+              const focusTarget = returnFocus?.isConnected && returnFocus !== document.body
+                ? returnFocus : helpBtn;
+              focusTarget?.focus();
             }
     
             // After fade-out, remove overlay from layout to avoid blocking clicks.
             if (introOverlay) {
+              introOverlay.addEventListener("animationstart", (event) => {
+                if (event.animationName !== "contentSlideIn") return;
+                cancelAnimationFrame(lineAnimationFrame);
+                positionLinesDuringAnimation();
+              });
               introOverlay.addEventListener("animationend", (e) => {
+                if (e.animationName === "contentSlideIn") {
+                  cancelAnimationFrame(lineAnimationFrame);
+                  lineAnimationFrame = null;
+                  positionLines();
+                }
                 if (e.animationName !== "overlayFadeOut") return;
                 if (!introOverlay.classList.contains("hide")) return;
                 introOverlay.style.display = "none";
@@ -13403,37 +13443,22 @@
             }
     
             // Button bindings
-            okBtn?.addEventListener("click", () => closeIntro(true));
-            helpBtn?.addEventListener("click", () => openIntro(true));
+            okBtn?.addEventListener("click", closeIntro);
+            helpBtn?.addEventListener("click", openIntro);
     
             // Reposition lines when the window resizes.
-            window.addEventListener("resize", () => {
-              if (!overlayIsOpen()) return;
-              lines.forEach((l) => {
-                try {
-                  l.position();
-                } catch (e) {}
-              });
-            });
+            window.addEventListener("resize", positionLines);
+            window.addEventListener("herdlink:intro-page-change", syncIntroPage);
+            window.addEventListener("herdlink:screen-access-change", syncIntroPage);
+            introOverlay.addEventListener("scroll", positionLines, true);
+            new ResizeObserver(positionLines).observe(guidePage);
     
-            openIntro(false);
+            openIntro();
     
             // Expose a minimal API for hotkeys and UI controls.
-            window.isIntroOverlayOpen = function () {
-              const overlay = document.getElementById("introOverlay");
-              if (!overlay) return false;
-              if (overlay.style.display === "none") return false;
-              if (overlay.classList.contains("hide")) return false;
-              return true;
-            };
-    
-            window.openIntroOverlay = function (force = false) {
-              openIntro(force);
-            };
-    
-            window.closeIntroOverlay = function (persist = true) {
-              closeIntro(persist);
-            };
+            window.isIntroOverlayOpen = overlayIsOpen;
+            window.openIntroOverlay = openIntro;
+            window.closeIntroOverlay = closeIntro;
           })();
     
           // Animated network logo
@@ -13741,47 +13766,50 @@
           });
     
           // Shortcut: press "h" to toggle the intro overlay.
+          function isIntroToggleShortcut(event) {
+            return !document.getElementById("mainContainer")?.closest("[inert]") &&
+              (event.key === "h" || event.key === "H") &&
+              !event.altKey && !event.ctrlKey && !event.metaKey && !event.repeat &&
+              !event.target?.closest("textarea, input:not([type='range']), [contenteditable]:not([contenteditable='false'])");
+          }
+
           document.addEventListener("keydown", function (event) {
-            if (!handlesAppShortcut(event)) return;
-            if (event.key === "h" || event.key === "H") {
-              event.preventDefault();
-    
-              if (window.isIntroOverlayOpen && window.isIntroOverlayOpen()) {
-                // Close without persisting "don't show again".
-                window.closeIntroOverlay?.(false);
-              } else {
-                // Open even if "don't show again" is set.
-                window.openIntroOverlay?.(true);
-              }
-            }
+            if (screenshotInProgress || event.defaultPrevented || !isIntroToggleShortcut(event)) return;
+            event.preventDefault();
+            window.openIntroOverlay?.();
           });
-          // While intro overlay is open, block shortcuts except Tab and Escape.
-          document.addEventListener(
-            "keydown",
-            function (event) {
-              if (!window.isIntroOverlayOpen || !window.isIntroOverlayOpen())
-                return;
-    
-              if (event.key === "Tab") return;
-    
-              if (event.key === "Escape") {
+
+          function handleIntroKeydown(event) {
+            if (!window.isIntroOverlayOpen?.()) return;
+
+            if (event.key === "Tab") {
+              const overlay = document.getElementById("introOverlay");
+              const controls = Array.from(overlay.querySelectorAll(
+                "button, a[href], input, select, textarea, [tabindex]",
+              )).filter((element) => !element.disabled && element.tabIndex >= 0 && element.getClientRects().length);
+              const first = controls[0];
+              const last = controls[controls.length - 1];
+              const active = document.activeElement;
+              if (!controls.length) {
                 event.preventDefault();
-                event.stopImmediatePropagation();
-                window.closeIntroOverlay?.(false);
-                return;
-              }
-    
-              // Allow "h" to close while overlay is open.
-              if (event.key === "h" || event.key === "H") {
+                overlay.focus();
+              } else if (!controls.includes(active) || (event.shiftKey ? active === first : active === last)) {
                 event.preventDefault();
-                event.stopImmediatePropagation();
-                window.closeIntroOverlay?.(false);
-                return;
+                (event.shiftKey ? last : first).focus();
               }
-    
+              return;
+            }
+
+            if (event.key === "Escape" || isIntroToggleShortcut(event)) {
               event.preventDefault();
               event.stopImmediatePropagation();
-            },
+              window.closeIntroOverlay?.();
+            }
+          }
+
+          document.addEventListener(
+            "keydown",
+            handleIntroKeydown,
             true,
           );
 

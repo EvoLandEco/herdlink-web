@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import vm from "node:vm";
 
-const source = readFileSync(new URL("../public/assets/js/herdlink-runtime.js", import.meta.url), "utf8");
+const source = readFileSync(new URL("../src/runtime/herdlink-runtime.js", import.meta.url), "utf8");
 function extractFunction(name) {
   const match = source.match(new RegExp(`^([ ]*)function ${name}\\([^]*?^\\1}`, "m"));
   assert.ok(match, `Runtime function ${name} exists`);
@@ -49,7 +49,7 @@ test("betweenness distinguishes longer paths when movement volumes are rescaled"
 });
 
 test("blocked CR35 exports do not count within-region trades as seeding", () => {
-  const csv = readFileSync(new URL("../public/assets/data/weekly_aggregation.csv", import.meta.url), "utf8");
+  const csv = readFileSync(new URL("../src/assets/data/weekly_aggregation.csv", import.meta.url), "utf8");
   const links = csv.trim().split("\n").slice(1).flatMap((line) => {
     const [, date, source, target, weight] = line.replaceAll('"', "").split(",");
     if (date !== "2019-01-20" || source === "NA" || target === "NA") return [];

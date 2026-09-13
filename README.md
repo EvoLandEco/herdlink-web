@@ -1,6 +1,6 @@
 # HerdLink Web
 
-![Version](https://img.shields.io/badge/version-v0.8.9-2f6fed)
+![Version](https://img.shields.io/badge/version-v0.9.0-2f6fed)
 ![Deployment](https://img.shields.io/badge/deployment-GitHub%20Pages-121013?logo=github)
 ![Website](https://img.shields.io/website?url=https%3A%2F%2Fherdlink.nl&label=HerdLink.nl)
 ![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)
@@ -23,7 +23,7 @@ HerdLink Web is a browser-based tool for exploring livestock trade networks in t
 - Focus mode for inspecting one region's incoming and outgoing trade structure.
 - Simulation mode with SEIR controls, compartment trajectory panels, regional prevalence maps, and focus node simulation insights.
 - Partition and community views that summarize trade clustering, partition exposure, and CR-region mappings.
-- Intro overlay with quick start notes, keyboard shortcuts, and guided shortcut callouts.
+- Help overlay with quick start notes, keyboard shortcuts, and interactive illustrations of regions, trade volume, and network paths.
 - PNG export of the whole app, including controls, networks, and statistics panels.
 
 Seed region selects the single region that starts infected, with CR35 selected by
@@ -113,13 +113,15 @@ state under it without smoothing across the boundary.
 ├── index.html                    # Vite entry document
 ├── src/
 │   ├── App.jsx                   # React shell and mount bridge
+│   ├── assets/
+│   │   ├── data/                 # Aggregated trade datasets
+│   │   └── files/herdlink/       # GeoJSON and SVG assets
 │   ├── components/               # Static layout components
+│   ├── runtime/                  # Classic D3 helpers and HerdLink runtime
 │   └── styles/herdlink.css       # Application styles
 ├── public/
 │   ├── assets/
-│   │   ├── data/                 # Aggregated trade datasets
-│   │   ├── files/herdlink/       # GeoJSON and SVG assets
-│   │   ├── js/                   # D3 helpers and HerdLink runtime
+│   │   ├── js/                   # Graph and SVG helper assets
 │   │   └── screenshots/          # README images
 │   ├── CNAME
 │   └── favicon.ico
@@ -148,11 +150,11 @@ change the disease model or identify the vehicle routes behind regional flows.
   distinguishes woodland, settlements, and sand; it does not classify agriculture.
   Place labels use the source's population threshold of 50,000. Source dates,
   licence, selections, and archive checksum are recorded in
-  [geography-sources.json](public/assets/files/herdlink/layers/geography-sources.json).
+  [geography-sources.json](src/assets/files/herdlink/layers/geography-sources.json).
 - [CBS agricultural census](https://www.cbs.nl/nl-nl/cijfers/detail/80781ned)
   supplies published COROP pig and holdings totals. Densities divide these totals
   by the same year's published land area, excluding water. The
-  [census metadata](public/assets/data/pig-census.json) records source tables,
+  [census metadata](src/assets/data/pig-census.json) records source tables,
   reference dates, and land-area survey vintages.
 - PDOK serves [BRT background tiles](https://www.pdok.nl/ogc-webservices/-/article/basisregistratie-topografie-achtergrondkaarten-brt-a-)
   and [aerial imagery](https://www.pdok.nl/ogc-webservices/-/article/pdok-luchtfoto-rgb-open-)
@@ -210,6 +212,54 @@ Preview the build locally:
 
 ```bash
 npm run preview
+```
+
+## Deployment and caching
+
+Vite gives the app, classic runtime scripts, styles, datasets, geography, and
+logos filenames based on their contents. Each app build refers to its own asset
+URLs. The runtime loads its classic scripts in dependency order and resolves
+bundled data through `src/assetUrls.js`. Asset contents determine the URLs;
+release dates and version labels do not.
+
+SimpleKeyboard JavaScript and CSS use release 3.8.187. D3 uses 6.7.0.
+Bootstrap, Vivus, and LeaderLine also use exact release URLs. The FontAwesome
+kit keeps its licensed icon selection; its release version is controlled in
+the [kit settings](https://docs.fontawesome.com/web/setup/use-kit#additional-settings).
+
+The Pages workflow stores published assets on `codex/pages-assets` and includes
+them in each deployment. This lets open tabs load their runtime, data, and
+screenshot code after another release. The archive is written before Pages
+publishes the site. A generated filename with different contents stops the
+deployment. Files declared in `public/assets` keep their fixed paths and may
+be replaced.
+
+Initial archive creation requires the `github-pages` artifact from the latest
+successful deployment. If that artifact is unavailable, deployment stops with
+the run ID. Seed the archive from a trusted copy of the published assets before
+deploying. Once the archive exists, retention uses Git storage rather than
+expiring Actions artifacts. Keep the archive branch and its asset files intact.
+Its files count toward GitHub Pages' published site size limit.
+
+GitHub Pages controls its HTTP response headers and has no setting for per-file
+cache policies. Content hashing prevents mixed asset contents, but Pages can
+still cache the entry HTML. A CDN or host with response-header controls is
+required for these policies:
+
+| Resource | Cache-Control |
+| --- | --- |
+| HTML | `no-cache` |
+| Assets with content hashes | `public, max-age=31536000, immutable` |
+
+`no-cache` requires validation before a cached response is reused. See the
+[HTTP caching guide](https://developer.mozilla.org/en-US/docs/Web/HTTP/Guides/Caching)
+and [GitHub's response about custom Pages headers](https://github.com/orgs/community/discussions/54257).
+
+Check the build and deployment asset rules with:
+
+```bash
+node --test tests/*.test.js
+npm run build
 ```
 
 ## License

@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import vm from "node:vm";
 
-const source = readFileSync(new URL("../public/assets/js/herdlink-runtime.js", import.meta.url), "utf8");
+const source = readFileSync(new URL("../src/runtime/herdlink-runtime.js", import.meta.url), "utf8");
 
 function extractFunction(name) {
   const match = source.match(new RegExp(`^([ ]*)function ${name}\\([^]*?^\\1}`, "m"));
@@ -26,7 +26,7 @@ function runtime() {
     forceSim, forceState, currentMode: "map", window: { isPlaying: false },
     selectedNodeData: null, hoveredNode: null, hoveredLink: null,
     allNodes: [], allLinks: [], nonZeroLinks: [], nlMapData: {}, nlLabelPoints: null,
-    linkGroup: selection, nodeGroup: selection, svg: selection,
+    linkGroup: selection, linkSelection: selection, nodeGroup: selection, svg: selection,
     nodeEnter: selection, labelSelection: selection,
     nodeSize: { domain() {} }, nodeColor: { domain() {} },
     hotspotLabelDy: 0, w: 800, h: 600, theme: {}, isSwitchingCSV: false,
@@ -49,7 +49,7 @@ function runtime() {
     "clearHoveredLinkState", "handleLinkMouseEnter", "handleLinkMouseMove",
     "handleLinkMouseLeave", "debouncedOnClickNode", "updateMapPositionsWithTransition",
     "disableAllButtons", "disableAllCheckboxes", "enableAllButtons", "enableAllCheckboxes",
-    "applySimulationMapPrevalence",
+    "applySimulationMapPrevalence", "updateMapLayout",
   ]) context[name] = () => {};
   context.isSimulationModeActive = () => false;
   vm.runInContext([
