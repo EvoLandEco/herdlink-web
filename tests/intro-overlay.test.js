@@ -64,7 +64,7 @@ function runtime({ blocked = false } = {}) {
   overlay.querySelectorAll = () => controls;
   document.activeElement = opener;
   element("introKeyboard");
-  for (const suffix of ["S", "E", "M", "Q", "H", "R", "F", "Space", "Arrows"]) {
+  for (const suffix of ["S", "E", "M", "Q", "H", "C", "R", "F", "Space", "Arrows"]) {
     element(`introDot${suffix}`);
   }
   const context = vm.createContext({
@@ -115,7 +115,7 @@ function key(value, target, extra = {}) {
 
 test("guide connectors follow page visibility and reuse the keyboard", () => {
   const app = runtime();
-  assert.equal(app.liveLines().length, 12);
+  assert.equal(app.liveLines().length, 13);
   const initialPositions = app.liveLines()[0].positions;
   app.resize();
   assert.equal(app.liveLines()[0].positions, initialPositions + 1);
@@ -129,7 +129,7 @@ test("guide connectors follow page visibility and reuse the keyboard", () => {
 
   app.guide.hidden = false;
   app.changePage();
-  assert.equal(app.liveLines().length, 12);
+  assert.equal(app.liveLines().length, 13);
   assert.equal(app.keyboardBuilds(), 1);
   app.context.window.closeIntroOverlay();
   app.changePage();
@@ -169,7 +169,7 @@ test("screen access initializes a visible guide and preserves dismissed help", (
   app.main.inert = false;
   screenAccessChanged();
   assert.equal(app.keyboardBuilds(), 1);
-  assert.equal(app.liveLines().length, 12);
+  assert.equal(app.liveLines().length, 13);
 
   app.main.inert = true;
   screenAccessChanged();
@@ -177,7 +177,7 @@ test("screen access initializes a visible guide and preserves dismissed help", (
   app.main.inert = false;
   screenAccessChanged();
   assert.equal(app.keyboardBuilds(), 1);
-  assert.equal(app.liveLines().length, 12);
+  assert.equal(app.liveLines().length, 13);
 
   app.context.window.closeIntroOverlay();
   app.main.inert = true;

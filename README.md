@@ -1,6 +1,6 @@
 # HerdLink Web
 
-![Version](https://img.shields.io/badge/version-v0.9.0-2f6fed)
+![Version](https://img.shields.io/badge/version-v0.9.1-2f6fed)
 ![Deployment](https://img.shields.io/badge/deployment-GitHub%20Pages-121013?logo=github)
 ![Website](https://img.shields.io/website?url=https%3A%2F%2Fherdlink.nl&label=HerdLink.nl)
 ![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)
@@ -24,6 +24,7 @@ HerdLink Web is a browser-based tool for exploring livestock trade networks in t
 - Simulation mode with SEIR controls, compartment trajectory panels, regional prevalence maps, and focus node simulation insights.
 - Partition and community views that summarize trade clustering, partition exposure, and CR-region mappings.
 - Help overlay with quick start notes, keyboard shortcuts, and interactive illustrations of regions, trade volume, and network paths.
+- Comparison overlay with paired global and regional metrics, trajectories, and intervention effects in both modes.
 - PNG export of the whole app, including controls, networks, and statistics panels.
 
 Seed region selects the single region that starts infected, with CR35 selected by
@@ -93,6 +94,12 @@ state under it without smoothing across the boundary.
 
 ## Shortcuts
 
+Press `C` to compare the original ledger with the current movement restrictions.
+In simulation mode, both scenarios use the same model, seed, settings, and
+estimated populations; the original scenario has no movement restrictions.
+Choose a region and a trajectory metric to inspect their differences over time.
+The overlay's mode switch and `E` change the active application mode.
+
 | Key | Action |
 | --- | --- |
 | `E` | Switch between trade ledger and simulation modes |
@@ -101,6 +108,7 @@ state under it without smoothing across the boundary.
 | `R` | Restore all links and node movement permissions |
 | `Q` | Exit focus mode |
 | `H` | Open or close the help overlay |
+| `C` | Open or close the intervention comparison |
 | `Space` | Play or pause the time slider |
 | `F` | Jump to the first time step |
 | `←` / `→` | Step through time |

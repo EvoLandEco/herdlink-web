@@ -8,7 +8,7 @@ const mapContextLayers = [
   { id: "mapLandCover", label: "Land cover" },
 ];
 
-export function NetworkPanel() {
+export function NetworkPanel({ onOpenComparison }) {
   return (
     <div id="col2">
       <button
@@ -33,6 +33,18 @@ export function NetworkPanel() {
         aria-label="Open help (H)"
       >
         <i className="fa-solid fa-question"></i>
+      </button>
+      <button
+        id="comparisonOverlayButton"
+        className="comparison-overlay-button has-tip"
+        type="button"
+        onClick={onOpenComparison}
+        data-tip="Compare interventions (C)"
+        data-tip-placement="left"
+        aria-label="Compare interventions (C)"
+        aria-haspopup="dialog"
+      >
+        <i className="fa-solid fa-code-compare" aria-hidden="true"></i>
       </button>
       <div
         id="mapLayerMenu"

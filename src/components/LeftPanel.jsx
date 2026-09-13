@@ -85,7 +85,7 @@ export function LeftPanel() {
             <div className="header-row header-row-1">
               <div className="logo-container">
                 <h4 className="app-title">HerdLink</h4>
-                <div className="app-version">v0.9.0</div>
+                <div className="app-version">v0.9.1</div>
                 <div className="app-credit">
                   <a
                     className="app-credit-link"

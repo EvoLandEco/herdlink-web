@@ -42,6 +42,7 @@ function runtime(edges = [["CR01", "CR02", 1000], ["CR02", "CR01", 100], ["CR02"
     Date, Map, Set, uniqueDates, loadedCSVData,
     simulationRegionIdsByDataset: new WeakMap(),
     tradeRecordsByDataset: new WeakMap(),
+    originalLedgerStatsByDataset: new WeakMap(),
     appDataMode: "simulation", allNodes: [], allLinks: [], nlLabelPoints: null,
     simulationState: {}, simulationLinkInterventions: new Map(),
     simulationNodeInterventions: new Map(),

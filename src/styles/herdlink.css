@@ -1035,6 +1035,7 @@ body.focus-mode-active .panel-info-button:focus-visible,
 }
 
 .help-overlay-button,
+.comparison-overlay-button,
 .map-layer-button,
 .screenshot-button,
 .restore-button,
@@ -1060,6 +1061,7 @@ body.focus-mode-active .panel-info-button:focus-visible,
 }
 
 .help-overlay-button:hover,
+.comparison-overlay-button:hover,
 .map-layer-button:hover:not(:disabled),
 .screenshot-button:hover:not(:disabled),
 .restore-button:hover:not(:disabled),
@@ -1069,6 +1071,7 @@ body.focus-mode-active .panel-info-button:focus-visible,
 }
 
 .help-overlay-button:active,
+.comparison-overlay-button:active,
 .map-layer-button:active:not(:disabled),
 .screenshot-button:active:not(:disabled),
 .restore-button:active:not(:disabled),
@@ -1091,6 +1094,13 @@ body.focus-mode-active .panel-info-button:focus-visible,
 .help-overlay-button {
   position: absolute;
   top: var(--space-6);
+  right: var(--space-6);
+  z-index: 100;
+}
+
+.comparison-overlay-button {
+  position: absolute;
+  top: calc(var(--space-6) + var(--control-size) + var(--space-2));
   right: var(--space-6);
   z-index: 100;
 }
@@ -4437,7 +4447,7 @@ body.focus-mode-active .hotspot-metric-method {
   grid-column: 1;
   grid-row: 2;
   justify-self: start;
-  align-self: center;
+  align-self: start;
 }
 .kbd-callout--h {
   grid-column: 3;
@@ -4464,6 +4474,12 @@ body.focus-mode-active .hotspot-metric-method {
   justify-self: end;
   align-self: end;
 }
+.kbd-callout--c {
+  grid-column: 1;
+  grid-row: 2;
+  justify-self: start;
+  align-self: end;
+}
 .kbd-callout--arrows {
   grid-column: 2;
   grid-row: 3;
@@ -4479,7 +4495,9 @@ body.focus-mode-active .hotspot-metric-method {
   background: #fff;
   box-shadow: 0 0 0 3px rgba(114, 228, 212, 0.35);
 }
-.kbd-callout--s .kbd-dot {
+.kbd-callout--s .kbd-dot,
+.kbd-callout--q .kbd-dot,
+.kbd-callout--c .kbd-dot {
   right: -6px;
   top: 50%;
   transform: translateY(-50%);
@@ -4500,7 +4518,6 @@ body.focus-mode-active .hotspot-metric-method {
 }
 
 .kbd-callout--space .kbd-dot,
-.kbd-callout--q .kbd-dot,
 .kbd-callout--arrows .kbd-dot {
   top: -6px;
   left: 50%;
@@ -4679,6 +4696,7 @@ select:focus-visible,
   .kbd-callout--r,
   .kbd-callout--space,
   .kbd-callout--f,
+  .kbd-callout--c,
   .kbd-callout--arrows {
     grid-column: 1;
     grid-row: auto;

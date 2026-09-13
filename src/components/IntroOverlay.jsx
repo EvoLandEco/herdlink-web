@@ -77,6 +77,7 @@ const quickStartNotes = [
       <>
         In focus mode, links can be turned off in the right panel. Press{" "}
         <kbd>R</kbd> to restore links and <kbd>S</kbd> to export a screenshot.
+        {" "}Press <kbd>C</kbd> to compare intervention effects.
       </>
     ),
   },
@@ -179,6 +180,17 @@ const shortcutCallouts = [
       </>
     ),
     description: "Jump back to the first time step.",
+  },
+  {
+    key: "c",
+    className: "kbd-callout--c",
+    dotId: "introDotC",
+    label: (
+      <>
+        <kbd>C</kbd> Compare
+      </>
+    ),
+    description: "Original vs edited data.",
   },
   {
     key: "arrows",

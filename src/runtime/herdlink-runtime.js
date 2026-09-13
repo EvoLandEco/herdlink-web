@@ -12,6 +12,7 @@
           let loadedCSVData = null;
           const simulationRegionIdsByDataset = new WeakMap();
           const tradeRecordsByDataset = new WeakMap();
+          const originalLedgerStatsByDataset = new WeakMap();
           let uniqueDates = [];
           let temporalUpdateTimeout;
           window.allTemporalStats = {};
@@ -195,6 +196,8 @@
             currentDateKey: null,
             metricMax: null,
           };
+          const comparisonDataCache = new Map();
+          let comparisonDataError = null;
 
           function isSimulationModeActive() {
             return appDataMode === "simulation";
@@ -239,8 +242,8 @@
             }
           }
 
-          function getSimulationLinkAvailability(date) {
-            return new Set(date ? simulationLinkInterventions.get(date.getTime())?.keys() : []);
+          function getSimulationLinkAvailability(date, interventions = simulationLinkInterventions) {
+            return new Set(date ? interventions.get(date.getTime())?.keys() : []);
           }
 
           function setSimulationNodeIntervention(id, direction, allowed, date) {
@@ -335,8 +338,8 @@
             return { start, end, rows };
           }
 
-          function getDisabledLinkKeys(date, ids, permissions = getSimulationNodePermissions(date)) {
-            const disabledKeys = getSimulationLinkAvailability(date);
+          function getDisabledLinkKeys(date, ids, permissions = getSimulationNodePermissions(date), linkInterventions = simulationLinkInterventions) {
+            const disabledKeys = getSimulationLinkAvailability(date, linkInterventions);
             if (!permissions.size) return disabledKeys;
             ids = ids || collectSimulationRegionIds(loadedCSVData || []);
             for (const [id, permission] of permissions) {
@@ -1169,9 +1172,9 @@
             return sortedIds;
           }
 
-          function buildSimulationLedger(data, ids) {
+          function buildSimulationLedger(data, ids, dates = uniqueDates) {
             const ledgerByDate = new Map(
-              uniqueDates.map((date) => [date.getTime(), []]),
+              dates.map((date) => [date.getTime(), []]),
             );
             const totals = new Map(ids.map((id) => [id, 0]));
 
@@ -1219,7 +1222,7 @@
           }
 
           function getSimulationFrameSummary(nodeStates) {
-            const summary = { S: 0, E: 0, I: 0, R: 0, N: 0, newInfections: 0 };
+            const summary = { S: 0, E: 0, I: 0, R: 0, N: 0, newInfections: 0, cumulativeInfections: 0 };
             Object.values(nodeStates).forEach((state) => {
               summary.S += state.S;
               summary.E += state.E;
@@ -1227,19 +1230,27 @@
               summary.R += state.R;
               summary.N += state.N;
               summary.newInfections += state.newInfections || 0;
+              summary.cumulativeInfections += state.cumulativeInfections || 0;
             });
             summary.prevalence = summary.N ? summary.I / summary.N : 0;
             summary.exposedShare = summary.N ? summary.E / summary.N : 0;
             return summary;
           }
 
-          function buildSimulationTrajectory(settings) {
-            if (!loadedCSVData || !uniqueDates.length) return null;
+          function buildSimulationTrajectory(settings, inputs = {}) {
+            const {
+              data = loadedCSVData,
+              dates = uniqueDates,
+              nodeInterventions = simulationNodeInterventions,
+              linkInterventions = simulationLinkInterventions,
+            } = inputs;
+            if (!data || !dates.length) return null;
 
-            const ids = collectSimulationRegionIds(loadedCSVData);
+            const ids = collectSimulationRegionIds(data);
             const { ledgerByDate, totals } = buildSimulationLedger(
-              loadedCSVData,
+              data,
               ids,
+              dates,
             );
             const holdings = estimateSimulationHoldings(ids, totals);
             const seedIds = [settings.seedRegion];
@@ -1261,22 +1272,23 @@
             const frameByKey = {};
             const frames = [];
             const boundaryIndices = [];
-            const nodeInterventions = Array.from(simulationNodeInterventions).sort(([a], [b]) => a - b);
+            const cumulativeInfections = new Map(ids.map((id) => [id, 0]));
+            const nodeEvents = Array.from(nodeInterventions).sort(([a], [b]) => a - b);
             const permissions = new Map();
             let interventionIndex = 0;
             let previousAvailability;
             let previousDisabledKeys = new Set();
 
-            uniqueDates.forEach((date, frameIndex) => {
+            dates.forEach((date, frameIndex) => {
               let permissionsChanged = false;
-              while (interventionIndex < nodeInterventions.length && nodeInterventions[interventionIndex][0] <= date.getTime()) {
-                const [time, changes] = nodeInterventions[interventionIndex++];
+              while (interventionIndex < nodeEvents.length && nodeEvents[interventionIndex][0] <= date.getTime()) {
+                const [time, changes] = nodeEvents[interventionIndex++];
                 applySimulationNodePermissions(permissions, changes, time);
                 permissionsChanged = true;
               }
-              const availability = simulationLinkInterventions.get(date.getTime());
+              const availability = linkInterventions.get(date.getTime());
               if (permissionsChanged || availability !== previousAvailability) {
-                const disabledKeys = getDisabledLinkKeys(date, ids, permissions);
+                const disabledKeys = getDisabledLinkKeys(date, ids, permissions, linkInterventions);
                 if (frameIndex > 0 && (disabledKeys.size !== previousDisabledKeys.size ||
                   Array.from(disabledKeys).some((key) => !previousDisabledKeys.has(key)))) {
                   boundaryIndices.push(frameIndex);
@@ -1403,6 +1415,7 @@
                 const exposedShare = state.N ? state.E / state.N : 0;
                 const recoveredShare = state.N ? state.R / state.N : 0;
                 const newInfections = newInfectionByNode.get(id) || 0;
+                cumulativeInfections.set(id, cumulativeInfections.get(id) + newInfections);
                 nodeStates[id] = {
                   ...state,
                   prevalence,
@@ -1411,6 +1424,7 @@
                   incomingExposure: incoming,
                   outgoingPressure: outgoing,
                   newInfections: Math.max(0, newInfections),
+                  cumulativeInfections: cumulativeInfections.get(id),
                   rtProxy: outgoing / Math.max(1, state.I),
                 };
                 nodeMetrics[id] = {
@@ -1453,6 +1467,194 @@
               frameByKey,
               metricMax,
               boundaryIndices,
+            };
+          }
+
+          function getComparisonInterventionEvents(dates, ids, mode, nodeInterventions = simulationNodeInterventions, linkInterventions = simulationLinkInterventions) {
+            const groups = new Map();
+            const regionLabel = (id) => {
+              const name = getStatnaam(id);
+              return name === id ? id : `${name} (${id})`;
+            };
+            const addEvent = (sampleDate, time, description) => {
+              const date = sampleDate.toISOString();
+              if (!groups.has(date)) groups.set(date, { date, events: [] });
+              groups.get(date).events.push({ date: new Date(time).toISOString(), description });
+            };
+            const timeline = getSimulationRestrictionTimeline(ids, dates, nodeInterventions);
+            for (const row of timeline.rows) {
+              for (const point of row.points) {
+                const sampleDate = dates.find((date) => date.getTime() >= point.time);
+                if (!sampleDate) continue;
+                for (const [direction, allowed] of Object.entries(point.changes)) {
+                  const scope = direction === "exports" ? "Exports" : "Imports";
+                  addEvent(sampleDate, point.time,
+                    `${scope} ${allowed ? "allowed" : "blocked"} for ${regionLabel(row.id)} from this date onward.`);
+                }
+              }
+            }
+            for (const date of dates) {
+              for (const key of linkInterventions.get(date.getTime())?.keys() || []) {
+                const [source, target] = key.split("-");
+                const description = source === target
+                  ? `${mode === "simulation" ? "Local transmission and movements" : "Movements"} blocked within ${regionLabel(source)} for this step.`
+                  : `Movements blocked from ${regionLabel(source)} to ${regionLabel(target)} for this step.`;
+                addEvent(date, date.getTime(), description);
+              }
+            }
+            return Array.from(groups.values()).sort((a, b) => a.date.localeCompare(b.date))
+              .map((group) => ({ ...group, events: group.events.sort((a, b) =>
+                a.date.localeCompare(b.date) || a.description.localeCompare(b.description)) }));
+          }
+
+          function getComparisonMetricDefinitions(mode) {
+            const metric = (key, label, format, description) => ({ key, label, format, description });
+            if (mode === "simulation") {
+              const compartments = [
+                metric("S", "Susceptible", "decimal", "Animals susceptible at the end of the recorded step."),
+                metric("E", "Exposed", "decimal", "Animals exposed but not infectious at the end of the recorded step."),
+                metric("I", "Infectious", "decimal", "Infectious animals at the end of the recorded step."),
+                metric("R", "Recovered", "decimal", "Recovered animals at the end of the recorded step."),
+                metric("N", "Holding", "count", "Estimated animal population, identical in both scenarios."),
+                metric("prevalence", "Prevalence", "percent", "Infectious animals divided by the holding at the end of the recorded step."),
+                metric("newInfections", "New infections", "decimal", "Animals newly infected during the recorded step, including those entering the exposed compartment."),
+                metric("cumulativeInfections", "Cumulative infections", "decimal", "New infection events summed across recorded steps, excluding the initial seed. Reinfections count again in SIS and SEIRS."),
+              ];
+              return {
+                globalMetrics: compartments,
+                nodeMetrics: compartments.concat([
+                  metric("incomingExposure", "Incoming exposure", "decimal", "Incoming movements from other regions weighted by source prevalence at the start of the step and the movement transmission rate."),
+                  metric("outgoingPressure", "Outgoing pressure", "decimal", "Outgoing movements to other regions weighted by this region's prevalence at the start of the step and the movement transmission rate."),
+                ]),
+              };
+            }
+            return {
+              globalMetrics: [
+                metric("totalTradeVolume", "Animal movements", "count", "Total animal movements on enabled ledger records, including movements within a region."),
+                metric("totalNodes", "Trading regions", "count", "Regions with at least one enabled positive ledger record."),
+                metric("totalEdges", "Trade records", "count", "Enabled positive ledger records, including records within a region."),
+                metric("avgTradeEdge", "Movements per record", "decimal", "Total animal movements divided by enabled positive ledger records."),
+                metric("avgTradeNode", "Movements per region", "decimal", "Total animal movements divided by regions with enabled positive records."),
+                metric("numComponents", "Connected components", "count", "Components with direction ignored, including isolated regions present in this date's ledger."),
+                metric("numPartitions", "Communities", "count", "Number of communities in the weighted undirected trade network."),
+                metric("modularity", "Modularity", "decimal", "Louvain modularity on the weighted undirected network, combining reciprocal records."),
+                metric("spectralRadius", "Spectral radius", "decimal", "Spectral radius of the directed movement adjacency for this date. This network measure is not a reproduction number."),
+              ],
+              nodeMetrics: [
+                metric("inDegree", "Incoming movements", "count", "Animal movements arriving from other regions on enabled records."),
+                metric("outDegree", "Outgoing movements", "count", "Animal movements sent to other regions on enabled records."),
+                metric("betweenness", "Betweenness", "decimal", "Directed weighted shortest path betweenness, using inverse movement volume as distance."),
+                metric("pageRank", "PageRank", "decimal", "Weighted directed PageRank on movements between regions."),
+                metric("eigenvector", "Eigenvector centrality", "decimal", "Unit length centrality of the symmetric movement adjacency between regions."),
+              ],
+            };
+          }
+
+          function buildComparisonSeries(dates, ids, definitions, globalAtDate, nodesAtDate) {
+            const project = (values, metrics) => Object.fromEntries(metrics.map(({ key }) =>
+              [key, Number.isFinite(values?.[key]) ? values[key] : null]));
+            const series = { global: [], nodes: Object.fromEntries(ids.map((id) => [id, []])) };
+            for (const date of dates) {
+              const key = date.toISOString();
+              series.global.push({ date: key, ...project(globalAtDate(key), definitions.globalMetrics) });
+              const nodes = nodesAtDate(key);
+              for (const id of ids) {
+                series.nodes[id].push({ date: key, ...project(nodes?.[id], definitions.nodeMetrics) });
+              }
+            }
+            return series;
+          }
+
+          function getComparisonData() {
+            const mode = appDataMode;
+            const definitions = getComparisonMetricDefinitions(mode);
+            const dates = uniqueDates.map((date) => date.toISOString());
+            const snapshot = {
+              mode, dates, date: window.currentDate?.toISOString() || dates[0] || null,
+              selectedRegionId: selectedNodeData?.id || null,
+              settings: mode === "simulation" ? simulationState.settings : null,
+              interventionEvents: [],
+              ...definitions,
+            };
+            if (comparisonDataError) {
+              return { ...snapshot, status: "error", message: comparisonDataError, regions: [], original: null, intervention: null };
+            }
+            if (window.isSwitchingCSV || (mode === "simulation" &&
+              (simulationRecomputeTimer !== null || simulationState.status !== "ready"))) {
+              return { ...snapshot, status: "loading", regions: [], original: null, intervention: null };
+            }
+            if (!loadedCSVData || !dates.length) {
+              return { ...snapshot, status: "empty", regions: [], original: null, intervention: null };
+            }
+            const ids = collectSimulationRegionIds(loadedCSVData);
+            const regions = ids.map((id) => ({ id, name: getStatnaam(id) }));
+            const datesKey = dates.join(",");
+            const settings = mode === "simulation" ? simulationState.trajectory?.settings : null;
+            const settingsKey = JSON.stringify(settings);
+            let cache = comparisonDataCache.get(mode);
+            if (!cache || cache.data !== loadedCSVData || cache.datesKey !== datesKey || cache.settingsKey !== settingsKey) {
+              cache = { data: loadedCSVData, datesKey, settingsKey };
+              comparisonDataCache.set(mode, cache);
+            }
+            const interventionsKey = JSON.stringify([simulationNodeInterventions, simulationLinkInterventions],
+              (_, value) => value instanceof Map ? Array.from(value) : value);
+            if (cache.eventsKey !== interventionsKey) {
+              cache.interventionEvents = getComparisonInterventionEvents(uniqueDates, ids, mode);
+              cache.eventsKey = interventionsKey;
+            }
+            if (mode === "simulation") {
+              const trajectory = simulationState.trajectory;
+              if (!trajectory) return { ...snapshot, status: "loading", regions, original: null, intervention: null };
+              const project = (value) => buildComparisonSeries(uniqueDates, ids, definitions,
+                (key) => value.frameByKey[key]?.summary,
+                (key) => value.frameByKey[key]?.nodeStates);
+              if (!cache.original) {
+                const original = !simulationNodeInterventions.size && !simulationLinkInterventions.size
+                  ? trajectory
+                  : buildSimulationTrajectory(settings, {
+                    data: loadedCSVData, dates: uniqueDates,
+                    nodeInterventions: new Map(), linkInterventions: new Map(),
+                  });
+                cache.original = project(original);
+              }
+              if (cache.trajectory !== trajectory) {
+                cache.intervention = project(trajectory);
+                cache.trajectory = trajectory;
+              }
+            } else {
+              if (cache.interventionsKey !== interventionsKey) {
+                const statsReady = !networkStatsDirtyDates.size && networkStatsDirtyFrom === null &&
+                  dates.every((key) => window.allTemporalStats?.[key] && window.allTemporalNodeStats?.[key]);
+                const current = statsReady
+                  ? { global: window.allTemporalStats, node: window.allTemporalNodeStats }
+                  : computeTemporalNetworkStats(uniqueDates, { store: false });
+                const project = (value) => buildComparisonSeries(uniqueDates, ids, definitions,
+                  (key) => value.global[key], (key) => value.node[key]);
+                cache.intervention = project(current);
+                if (!cache.original) {
+                  if (!simulationNodeInterventions.size && !simulationLinkInterventions.size) {
+                    cache.original = cache.intervention;
+                  } else {
+                    const original = originalLedgerStatsByDataset.get(loadedCSVData) || { global: {}, node: {} };
+                    const missingDates = uniqueDates.filter((date) => !original.global[date.toISOString()]);
+                    if (missingDates.length) {
+                      const missing = computeTemporalNetworkStats(missingDates, {
+                        data: loadedCSVData, nodeInterventions: new Map(), linkInterventions: new Map(), store: false,
+                      });
+                      Object.assign(original.global, missing.global);
+                      Object.assign(original.node, missing.node);
+                    }
+                    originalLedgerStatsByDataset.set(loadedCSVData, original);
+                    cache.original = project(original);
+                  }
+                }
+                cache.interventionsKey = interventionsKey;
+              }
+            }
+            return {
+              ...snapshot, status: "ready", settings, regions,
+              original: cache.original, intervention: cache.intervention,
+              interventionEvents: cache.interventionEvents,
             };
           }
 
@@ -3848,6 +4050,7 @@
               enableAllButtons(0);
               enableAllCheckboxes(0);
             }
+            window.herdlinkComparison?.refresh();
           }
 
           function beginAppModeSwitchBounce() {
@@ -3934,6 +4137,7 @@
             if (window.isPlaying) setTimeReplayState(false);
             const runId = ++simulationRunId;
             simulationState.status = "running";
+            window.herdlinkComparison?.refresh();
             setSimulationInputsDisabled(true);
             disableAllButtons();
             disableAllCheckboxes();
@@ -3974,6 +4178,7 @@
             setSimulationInputsDisabled(false);
             enableAllButtons(0);
             enableAllCheckboxes(0);
+            window.herdlinkComparison?.refresh();
           }
 
           function scheduleSimulationRecompute(reason = "Settings changed") {
@@ -3984,6 +4189,7 @@
               if (!isSimulationModeActive() || window.isSwitchingCSV) return;
               recomputeSimulationTrajectory(reason);
             }, 180);
+            window.herdlinkComparison?.refresh();
           }
 
           function refreshNetworkControlStats() {
@@ -4021,6 +4227,7 @@
               if (selectedNodeData) updateNodeTradeDistribution();
               else updateTradeDistribution();
             }
+            window.herdlinkComparison?.refresh();
           }
 
           function setAppDataMode(mode) {
@@ -4067,6 +4274,7 @@
               enableAllButtons(0);
               enableAllCheckboxes(0);
             }
+            window.herdlinkComparison?.refresh();
             return true;
           }
 
@@ -5329,27 +5537,38 @@
            * then computes basic stats, connectivity (number of connected components), modularity, and spectral radius.
            * The results are stored globally in window.allTemporalStats, keyed by ISO date string.
            */
-          function computeTemporalNetworkStats(dates = uniqueDates) {
-            if (dates === uniqueDates) {
+          function computeTemporalNetworkStats(dates = uniqueDates, inputs = {}) {
+            const {
+              data = loadedCSVData,
+              nodeInterventions = simulationNodeInterventions,
+              linkInterventions = simulationLinkInterventions,
+              store = true,
+            } = inputs;
+            if (store && dates === uniqueDates) {
               window.allTemporalStats = {};
               window.allTemporalNodeStats = {};
               networkStatsDirtyDates.clear();
               networkStatsDirtyFrom = null;
               ledgerBaselineSpectralRadius = 0;
             }
-            const ids = collectSimulationRegionIds(loadedCSVData);
-            const rowsByDate = getTradeRecordsByDate(loadedCSVData);
-            const nodeInterventions = Array.from(simulationNodeInterventions).sort(([a], [b]) => a - b);
+            const result = { global: {}, node: {} };
+            const original = store
+              ? originalLedgerStatsByDataset.get(data) || { global: {}, node: {} }
+              : null;
+            if (store) originalLedgerStatsByDataset.set(data, original);
+            const ids = collectSimulationRegionIds(data);
+            const rowsByDate = getTradeRecordsByDate(data);
+            const nodeEvents = Array.from(nodeInterventions).sort(([a], [b]) => a - b);
             const permissions = new Map();
             let interventionIndex = 0;
     
             // Loop over each unique date.
             dates.forEach((date) => {
-              while (interventionIndex < nodeInterventions.length && nodeInterventions[interventionIndex][0] <= date.getTime()) {
-                const [time, changes] = nodeInterventions[interventionIndex++];
+              while (interventionIndex < nodeEvents.length && nodeEvents[interventionIndex][0] <= date.getTime()) {
+                const [time, changes] = nodeEvents[interventionIndex++];
                 applySimulationNodePermissions(permissions, changes, time);
               }
-              const disabledKeys = getDisabledLinkKeys(date, ids, permissions);
+              const disabledKeys = getDisabledLinkKeys(date, ids, permissions, linkInterventions);
               const filteredData = rowsByDate.get(date.getTime()) || [];
     
               // Build nodes and links from the filtered data.
@@ -5438,7 +5657,7 @@
                 activeNodes,
                 enabledLinks,
               );
-              if (dates === uniqueDates) {
+              if (store && dates === uniqueDates) {
                 const baselineRadius = disabledKeys.size
                   ? computeSpectralRadius(activeNodes, links.filter((link) => link.weight > 0))
                   : spectralRadius;
@@ -5461,10 +5680,19 @@
                 spectralRadius: spectralRadius,
               };
     
-              // Store the stats keyed by the ISO string of the date.
-              window.allTemporalStats[date.toISOString()] = stats;
-              window.allTemporalNodeStats[date.toISOString()] = nodeStats;
+              const key = date.toISOString();
+              result.global[key] = stats;
+              result.node[key] = nodeStats;
+              if (store) {
+                window.allTemporalStats[key] = stats;
+                window.allTemporalNodeStats[key] = nodeStats;
+                if (!links.some((link) => link.weight > 0 && link.disabled)) {
+                  original.global[key] = stats;
+                  original.node[key] = nodeStats;
+                }
+              }
             });
+            return result;
           }
     
           /**
@@ -5566,9 +5794,9 @@
             const totalEdges = enabledLinks.length;
             const totalTradeVolume = d3.sum(enabledLinks, (d) => d.weight);
             const avgTradeEdge =
-              totalEdges > 0 ? (totalTradeVolume / totalEdges).toFixed(2) : 0;
+              totalEdges > 0 ? totalTradeVolume / totalEdges : 0;
             const avgTradeNode =
-              totalNodes > 0 ? (totalTradeVolume / totalNodes).toFixed(2) : 0;
+              totalNodes > 0 ? totalTradeVolume / totalNodes : 0;
             return {
               totalNodes,
               totalEdges,
@@ -7444,6 +7672,7 @@
             }
             clearSelection(wasSelected && !wasSameNode, window.isDoingTemporalUpdate);
             selectedNodeData = d;
+            window.herdlinkComparison?.refresh();
             document.body.classList.add("focus-mode-active");
 
 
@@ -7660,6 +7889,7 @@
           function clearSelection(flag, keepFocusPanels = false) {
             clearHoveredLinkState();
             selectedNodeData = null;
+            window.herdlinkComparison?.refresh();
             if (!keepFocusPanels) document.body.classList.remove("focus-mode-active");
             if (!flag && !window.isDoingTemporalUpdate) {
               renderSimulationNodeControls();
@@ -10590,6 +10820,7 @@
           }
     
           function updateCurrentDateDisplay(dateObj) {
+            window.herdlinkComparison?.refresh();
             // Display the current date widget
             const currendDateWidget = document.querySelector(
               ".current-date-widget",
@@ -12693,6 +12924,7 @@
 
           function handlesAppShortcut(event) {
             return !document.getElementById("mainContainer")?.closest("[inert]") &&
+              !window.isComparisonOverlayOpen?.() &&
               !screenshotInProgress && !window.isIntroOverlayOpen?.() && !event.defaultPrevented && !event.altKey && !event.ctrlKey && !event.metaKey &&
               !event.target?.closest("input, select, textarea, [contenteditable]:not([contenteditable='false'])") &&
               !(event.target?.closest("button, [role='button'], [role='switch']") && [" ", "Enter"].includes(event.key));
@@ -12715,6 +12947,7 @@
           }
     
           function initHerdLink(csvUrl) {
+            comparisonDataError = null;
             cancelSimulationRecompute();
             if (forceSim) forceSim.stop();
             mapLayers.unmount();
@@ -12724,6 +12957,7 @@
             }
     
             window.isSwitchingCSV = true;
+            window.herdlinkComparison?.refresh();
             setTimeReplayState(false);
             disableAllButtons();
             disableAllCheckboxes();
@@ -13131,6 +13365,7 @@
     
                 window.isSwitchingCSV = false;
                 setTimeReplayState(false);
+                window.herdlinkComparison?.refresh();
 
                 if (isSimulationModeActive()) {
                   recomputeSimulationTrajectory("Preparing simulation trajectory");
@@ -13138,6 +13373,8 @@
               })
               .catch(function (error) {
                 console.error("Error loading trade data:", error);
+                comparisonDataError = "The trade dataset could not be loaded. Reload the page to try again.";
+                window.herdlinkComparison?.refresh();
               });
 
             if (!persistentUiHandlersBound) {
@@ -13278,7 +13515,7 @@
                   {
                     class: "intro-key--hot",
                     buttons:
-                      "s e m h q r f {space} {arrowleft} {arrowup} {arrowdown} {arrowright}",
+                      "s e m h c q r f {space} {arrowleft} {arrowup} {arrowdown} {arrowright}",
                   },
                 ],
                 onChange: () => {},
@@ -13326,11 +13563,12 @@
                 ["s", "introDotS"],
                 ["e", "introDotE", { start: "top", end: "right" }],
                 ["m", "introDotM"],
-                ["q", "introDotQ"],
+                ["q", "introDotQ", { start: "left", end: "right" }],
                 ["h", "introDotH"],
                 ["r", "introDotR"],
                 ["f", "introDotF"],
-                ["{space}", "introDotSpace"],
+                ["c", "introDotC", { start: "left", end: "right" }],
+                ["{space}", "introDotSpace", { start: "bottom", end: "right" }],
                 ["{arrowleft}", "introDotArrows"],
                 ["{arrowright}", "introDotArrows"],
                 ["{arrowup}", "introDotArrows"],
@@ -13519,6 +13757,7 @@
                 d3.select("#screenshotButton").attr("disabled", null);
                 d3.select("#restoreButton").attr("disabled", null);
                 d3.selectAll(".simulation-restriction-point").property("disabled", false);
+                window.herdlinkComparison?.refresh();
               }, timeoutVal);
             }
           }
@@ -13768,6 +14007,7 @@
           // Shortcut: press "h" to toggle the intro overlay.
           function isIntroToggleShortcut(event) {
             return !document.getElementById("mainContainer")?.closest("[inert]") &&
+              !window.isComparisonOverlayOpen?.() &&
               (event.key === "h" || event.key === "H") &&
               !event.altKey && !event.ctrlKey && !event.metaKey && !event.repeat &&
               !event.target?.closest("textarea, input:not([type='range']), [contenteditable]:not([contenteditable='false'])");
@@ -13812,6 +14052,26 @@
             handleIntroKeydown,
             true,
           );
+
+          window.herdlinkComparison = {
+            canOpen: () => !screenshotInProgress,
+            read: () => ({
+              ...getComparisonData(),
+              datasetLabel: currentTimeSpan ? `${currentTimeSpan[0].toUpperCase()}${currentTimeSpan.slice(1)} trade` : "Animal trade network",
+              modeSwitchDisabled: !canSwitchAppDataMode(),
+            }),
+            getMode: () => appDataMode,
+            setMode: setAppDataMode,
+            prepare: () => {
+              if (window.isPlaying) setTimeReplayState(false);
+            },
+            refresh: () => {
+              if (window.isComparisonOverlayOpen?.()) {
+                window.dispatchEvent(new Event("herdlink:comparison-change"));
+              }
+            },
+          };
+          window.herdlinkComparison.refresh();
 
           Promise.all([mapDataReady, labelPointsReady])
             .then(bootstrapHerdLink)

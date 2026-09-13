@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { IntroOverlay } from "./components/IntroOverlay";
+import { ComparisonOverlay } from "./components/ComparisonOverlay";
+import { useComparison } from "./useComparison";
 import { LeftPanel } from "./components/LeftPanel";
 import { NetworkPanel } from "./components/NetworkPanel";
 import { RightPanel } from "./components/RightPanel";
@@ -606,6 +608,7 @@ function getTipTarget(event) {
   if (!(event.target instanceof Element)) {
     return null;
   }
+  if (event.target.closest(".comparison-overlay")) return null;
 
   return event.target.closest(".has-tip[data-tip], .has-tip[data-tip-key]");
 }
@@ -743,6 +746,7 @@ export default function App() {
   const screenRequirement = useScreenRequirement();
   const hasSupportedScreen = screenRequirement === null;
   const runtimeReady = useRef(false);
+  const comparison = useComparison(hasSupportedScreen);
 
   useEffect(() => {
     window.dispatchEvent(new Event("herdlink:screen-access-change"));
@@ -918,6 +922,12 @@ export default function App() {
         inert={hasSupportedScreen ? undefined : ""}
       >
         <IntroOverlay />
+        <ComparisonOverlay
+          open={comparison.open}
+          data={comparison.data}
+          onClose={comparison.close}
+          onModeChange={comparison.changeMode}
+        />
         <div
           id="herdlinkTooltip"
           className="herdlink-tooltip"
@@ -927,7 +937,7 @@ export default function App() {
         <div id="radial-labels-container"></div>
         <div id="mainContainer">
           <LeftPanel />
-          <NetworkPanel />
+          <NetworkPanel onOpenComparison={comparison.toggle} />
           <RightPanel />
         </div>
       </div>
