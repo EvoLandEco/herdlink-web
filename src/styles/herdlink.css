@@ -2115,8 +2115,6 @@ body.focus-mode-active .simulation-progress-item.is-done {
   border-radius: var(--radius-lg);
   background: var(--color-panel-dark);
   box-shadow: var(--shadow-soft);
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
 }
 
 .trade-info-header {
@@ -3211,9 +3209,6 @@ body.simulation-mode-active
 /* D3-specific styles. */
 .node {
   cursor: var(--cursor-pointer);
-  stroke-width: 4.5px;
-  stroke-dasharray: 5 5;
-  animation: dash 2s linear infinite;
 }
 
 .nodeOver {
@@ -3247,6 +3242,9 @@ g.node:hover {
 .hotspot-rings {
   transform-box: fill-box;
   transform-origin: center;
+}
+
+.hotspot-rings:not(:empty) {
   animation: breathing 2.8s ease-in-out infinite;
 }
 
@@ -3415,6 +3413,7 @@ g.node:hover {
 
 .linkOver {
   fill: none;
+  filter: url(#edgeGlow);
   stroke: var(--color-accent);
   stroke-width: 4px;
   opacity: 1;
@@ -3424,6 +3423,7 @@ g.node:hover {
 
 .linkSelectOut {
   fill: none;
+  filter: none;
   opacity: 1;
   stroke: var(--color-chart-outgoing);
   stroke-width: 1.5px;
@@ -3433,6 +3433,7 @@ g.node:hover {
 
 .linkSelectOutOver {
   fill: none;
+  filter: url(#edgeGlow);
   opacity: 1;
   stroke: #c4b5fd;
   stroke-width: 2.5px;
@@ -3442,6 +3443,7 @@ g.node:hover {
 
 .linkSelectIn {
   fill: none;
+  filter: none;
   opacity: 1;
   stroke: var(--color-chart-incoming);
   stroke-width: 1.5px;
@@ -3451,6 +3453,7 @@ g.node:hover {
 
 .linkSelectInOver {
   fill: none;
+  filter: url(#edgeGlow);
   opacity: 1;
   stroke: #c4b5fd;
   stroke-width: 2.5px;

@@ -7513,8 +7513,7 @@
                 if (linkData.weight > 0 && srcId === d.id && !linkData.disabled) {
                   d3.select(this)
                     .attr("class", "linkSelectOut")
-                    .attr("stroke-width", 2)
-                    .attr("filter", "url(#edgeGlow)");
+                    .attr("stroke-width", 2);
                   return "block";
                 } else if (
                   linkData.weight > 0 &&
@@ -7523,8 +7522,7 @@
                 ) {
                   d3.select(this)
                     .attr("class", "linkSelectIn")
-                    .attr("stroke-width", 2)
-                    .attr("filter", "url(#edgeGlow)");
+                    .attr("stroke-width", 2);
                   return "block";
                 } else {
                   return "none";
@@ -9368,7 +9366,6 @@
                       .attr("opacity", null)
                       .attr("class", isOutgoing ? "linkSelectOut" : "linkSelectIn")
                       .attr("stroke-width", 2)
-                      .attr("filter", "url(#edgeGlow)")
                       .attr("marker-end", isSelf ? "url(#loop)" : "url(#arrow)");
                   } else {
                     d3.select(this)
@@ -9385,7 +9382,6 @@
                             isOutgoing ? "linkSelectOut" : "linkSelectIn",
                           )
                           .attr("stroke-width", 2)
-                          .attr("filter", "url(#edgeGlow)")
                           .attr(
                             "marker-end",
                             isSelf ? "url(#loop)" : "url(#arrow)",
