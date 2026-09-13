@@ -892,9 +892,9 @@
                   const cell = row.append("td");
                   cell.append("input")
                     .attr("type", "checkbox")
+                    .attr("role", "switch")
                     .attr("class", "simulation-node-permission")
                     .attr("data-direction", direction);
-                  cell.append("small").attr("class", "simulation-node-permission-since");
                 }
                 return row;
               })
@@ -909,9 +909,6 @@
                 input.checked = permission[direction];
                 input.disabled = areNetworkControlsLocked();
                 input.setAttribute("aria-label", `Allow ${direction} ${direction === "exports" ? "from" : "to"} ${getStatnaam(id)} (${id}) from ${dateLabel(date)}`);
-                const since = permission[`${direction}Since`];
-                input.nextElementSibling.textContent = !permission[direction] && since != null
-                  ? `Blocked since ${dateLabel(new Date(since))}` : "";
               }
             });
             if (selectionChanged && selectedId && panel.isConnected) {

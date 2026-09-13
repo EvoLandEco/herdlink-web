@@ -64,7 +64,7 @@ const importsExportsGuide = {
       iconClass: "fa-solid fa-list-check",
       title: "Bulk controls",
       text:
-        "All exports and All imports apply to every region, including regions outside the search results. A mixed checkbox means some regions are allowed and others are blocked. Restore all in either mode clears link edits and import or export permissions across every date.",
+        "All exports and All imports apply to every region, including regions outside the search results. A teal thumb on the right allows movement; a coral thumb on the left blocks it. A centered amber thumb means some regions are allowed and others are blocked. Selecting a mixed control allows every region. Restore all in either mode clears link edits and import or export permissions across every date.",
     },
     {
       iconClass: "fa-solid fa-flask",

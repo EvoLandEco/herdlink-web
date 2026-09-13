@@ -1,6 +1,6 @@
 # HerdLink Web
 
-![Version](https://img.shields.io/badge/version-v0.8.8-2f6fed)
+![Version](https://img.shields.io/badge/version-v0.8.9-2f6fed)
 ![Deployment](https://img.shields.io/badge/deployment-GitHub%20Pages-121013?logo=github)
 ![Website](https://img.shields.io/website?url=https%3A%2F%2Fherdlink.nl&label=HerdLink.nl)
 ![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)
@@ -50,9 +50,10 @@ Trade ledger and simulation modes share one network and two controls for movemen
   In focus mode, the switch beside the region name selects this panel or the
   controls for individual links. Both sets of edits remain active when switching
   between control panels or between ledger and simulation modes.
-  The All exports and All imports checkboxes apply to every region, including
-  regions outside the search results. A mixed checkbox means some regions are
-  allowed and others are blocked.
+  The All exports and All imports switches apply to every region, including
+  regions outside the search results. A teal thumb on the right allows movement;
+  a coral thumb on the left blocks it. A centered amber thumb means some regions
+  are allowed and others are blocked. Selecting a mixed control allows every region.
 
 A route between regions can operate when its link is available, its source can
 export, and its destination can import. Ledger mode measures allowed routes by
