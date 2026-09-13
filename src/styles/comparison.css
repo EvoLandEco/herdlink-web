@@ -188,6 +188,142 @@
   transform: scale(0.94);
 }
 
+.comparison-scenarios-toggle {
+  display: flex;
+  min-height: 38px;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 12px;
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius-pill);
+  color: var(--color-text-muted);
+  background: var(--color-surface);
+  font: 11px var(--font-body);
+  cursor: pointer;
+}
+
+.comparison-scenarios-toggle svg { width: 13px; height: 13px; }
+.comparison-scenarios-toggle > span { color: var(--color-accent); font: 16px/1 var(--font-data); }
+.comparison-scenarios-toggle:hover,
+.comparison-scenarios-toggle[aria-expanded="true"] {
+  color: var(--color-accent-strong);
+  border-color: var(--color-accent);
+  background: var(--color-accent-soft);
+  box-shadow: inset 0 0 12px rgba(114, 228, 212, 0.05);
+}
+
+.scenario-library {
+  margin-bottom: 18px;
+  padding: 16px;
+  border: 1px solid rgba(114, 228, 212, 0.24);
+  border-radius: var(--radius-lg);
+  background: radial-gradient(ellipse at 0 0, rgba(114, 228, 212, 0.07), transparent 65%), var(--color-canvas);
+}
+
+.scenario-library[hidden] { display: none; }
+.scenario-library__heading,
+.scenario-library__saved-heading,
+.scenario-slot__heading,
+.scenario-slot__footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.scenario-library h3 { margin: 0; font-size: 15px; font-weight: 600; }
+.scenario-library__heading p { margin: 4px 0 0; color: var(--color-text-muted); font-size: 10px; }
+.scenario-library .comparison-info__tip { top: calc(100% + 10px); bottom: auto; }
+
+.scenario-library__context {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 18px;
+  margin: 12px 0;
+  color: var(--color-text-muted);
+  font: 9px var(--font-data);
+}
+
+.scenario-library__context > span:first-child { color: var(--color-accent); }
+.scenario-library__context > span:last-child { margin-left: auto; }
+.scenario-preset-grid,
+.scenario-slot-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 9px; }
+.scenario-preset { position: relative; border: 1px solid var(--color-border); border-radius: var(--radius-md); background: var(--color-surface); }
+.scenario-preset > .comparison-info { position: absolute; top: 8px; right: 8px; }
+.scenario-preset > button {
+  display: grid;
+  grid-template-columns: 28px minmax(0, 1fr);
+  width: 100%;
+  height: 100%;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 34px 12px 12px;
+  border: 0;
+  border-radius: inherit;
+  color: var(--color-text);
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+}
+
+.scenario-preset > button:hover:not(:disabled) { background: var(--color-accent-soft); }
+.scenario-preset__icon {
+  display: grid;
+  width: 28px;
+  height: 28px;
+  place-items: center;
+  border: 1px solid rgba(114, 228, 212, 0.2);
+  border-radius: 8px;
+  color: var(--color-accent);
+  background: rgba(114, 228, 212, 0.06);
+}
+
+.scenario-preset__icon svg { width: 13px; height: 13px; }
+.scenario-preset__copy { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.scenario-preset__copy strong { font: 500 11px var(--font-body); }
+.scenario-preset__copy > span { color: var(--color-text-muted); font: 9px/1.45 var(--font-body); }
+.scenario-library__saved-heading { margin: 16px 0 8px; }
+.scenario-library__saved-heading h4 { margin: 0; color: var(--color-text-muted); font-size: 10px; font-weight: 500; }
+.scenario-library__saved-heading > span { color: var(--color-text-subtle); font: 9px var(--font-data); }
+.scenario-slot { min-width: 0; padding: 11px; border: 1px dashed var(--color-border-strong); border-radius: var(--radius-md); }
+.scenario-slot.is-saved { border-style: solid; background: rgba(114, 228, 212, 0.025); }
+.scenario-slot__heading label { color: var(--color-text-muted); font-size: 9px; }
+.scenario-slot__heading label > span { margin-right: 5px; color: var(--color-accent); font-family: var(--font-data); }
+.scenario-slot__heading time { color: var(--color-text-subtle); font: 8px var(--font-data); }
+.scenario-slot input {
+  width: 100%;
+  min-width: 0;
+  height: 30px;
+  margin: 8px 0;
+  padding: 5px 8px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  color: var(--color-text);
+  background: var(--color-surface);
+  font: 11px var(--font-body);
+}
+
+.scenario-slot input::placeholder { color: var(--color-text-subtle); }
+.scenario-slot__footer { gap: 8px; }
+.scenario-slot__footer p { flex: 1; min-width: 0; margin: 0; color: var(--color-text-subtle); font: 9px/1.4 var(--font-body); }
+.scenario-slot__actions { display: flex; flex: 0 0 auto; gap: 5px; }
+.scenario-slot__actions button {
+  min-height: 27px;
+  padding: 4px 8px;
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius-sm);
+  color: var(--color-accent-strong);
+  background: var(--color-accent-soft);
+  font: 9px var(--font-body);
+  cursor: pointer;
+}
+
+.scenario-slot__actions button:last-child { color: var(--color-text-muted); background: transparent; }
+.scenario-library button:disabled,
+.scenario-library input:disabled { opacity: 0.45; cursor: not-allowed; }
+.scenario-library__message { margin: 12px 0 0; color: var(--color-accent-strong); font: 11px/1.5 var(--font-body); }
+.scenario-library__message.is-error { color: var(--color-chart-incoming); }
+
 .comparison-body {
   min-height: 0;
   flex: 1 1 auto;
@@ -963,7 +1099,11 @@
   line-height: 1.6;
 }
 
+.comparison-body > .comparison-state { min-height: 100%; }
+
 @media (max-width: 1150px) {
+  .scenario-slot__footer { align-items: flex-start; flex-direction: column; }
+
   .comparison-layout {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
@@ -989,7 +1129,15 @@
 
   .comparison-header__actions {
     gap: 8px;
+    flex-wrap: wrap;
+    justify-content: flex-end;
   }
+
+  .comparison-header__title { min-width: 0; }
+  .comparison-scenarios-toggle { min-height: 32px; padding: 6px 9px; }
+  .scenario-preset-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .scenario-slot-grid { grid-template-columns: 1fr; }
+  .scenario-slot__footer { align-items: center; flex-direction: row; }
 
   .comparison-mode button {
     padding: 6px 9px;

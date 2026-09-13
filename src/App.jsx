@@ -927,6 +927,12 @@ export default function App() {
           data={comparison.data}
           onClose={comparison.close}
           onModeChange={comparison.changeMode}
+          scenarioSlots={comparison.scenarioSlots}
+          scenarioError={comparison.scenarioError}
+          scenarioNotice={comparison.scenarioNotice}
+          onLoadPreset={comparison.loadPreset}
+          onSaveScenario={comparison.saveScenario}
+          onLoadScenario={comparison.loadScenario}
         />
         <div
           id="herdlinkTooltip"

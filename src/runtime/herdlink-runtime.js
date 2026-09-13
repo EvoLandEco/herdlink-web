@@ -924,7 +924,7 @@
             const regionSelect = document.getElementById("simulationSeedRegion");
             const seedRegion = regionSelect.value;
             d3.select(regionSelect).selectAll("option")
-              .data(collectSimulationRegionIds(loadedCSVData)).join("option")
+              .data(collectSimulationRegionIds(loadedCSVData || [])).join("option")
               .attr("value", (id) => id)
               .text((id) => `${id} · ${getStatnaam(id)}`);
             regionSelect.value = seedRegion;
@@ -1565,6 +1565,241 @@
             return series;
           }
 
+          function getOriginalSimulationSeries(settings, originalTrajectory = null) {
+            const datesKey = uniqueDates.map((date) => date.toISOString()).join(",");
+            const settingsKey = JSON.stringify(settings);
+            let cache = comparisonDataCache.get("simulation");
+            if (!cache || cache.data !== loadedCSVData || cache.datesKey !== datesKey || cache.settingsKey !== settingsKey) {
+              cache = { data: loadedCSVData, datesKey, settingsKey };
+              comparisonDataCache.set("simulation", cache);
+            }
+            if (!cache.original) {
+              const trajectory = originalTrajectory || buildSimulationTrajectory(settings, {
+                  data: loadedCSVData, dates: uniqueDates,
+                  nodeInterventions: new Map(), linkInterventions: new Map(),
+                });
+              cache.original = buildComparisonSeries(uniqueDates, trajectory.ids, getComparisonMetricDefinitions("simulation"),
+                (key) => trajectory.frameByKey[key]?.summary, (key) => trajectory.frameByKey[key]?.nodeStates);
+            }
+            return cache.original;
+          }
+
+          function areScenarioControlsDisabled() {
+            return !loadedCSVData || !uniqueDates.length || !currentTimeSpan ||
+              areNetworkControlsLocked() || window.isDoingTemporalUpdate || window.isSwitchingAppMode ||
+              simulationRecomputeTimer !== null || screenshotInProgress ||
+              !!document.getElementById("mainContainer")?.closest("[inert]");
+          }
+
+          function getScenarioContext() {
+            const settings = readSimulationSettings();
+            const seedLabel = `${getStatnaam(settings.seedRegion)} (${settings.seedRegion})`;
+            const contactNote = "Local contact continues. With zero movement transmission, movement controls may leave disease outcomes unchanged.";
+            const timingNote = "Response delays are scenario assumptions in calendar days. Measures begin at the first recorded date on or after the deadline; if none remains, trade stays open.";
+            return {
+              datasetKey: currentTimeSpan,
+              datasetLabel: currentTimeSpan ? `${currentTimeSpan[0].toUpperCase()}${currentTimeSpan.slice(1)} trade` : "Animal trade network",
+              settings, seedLabel, disabled: areScenarioControlsDisabled(),
+              note: "Broader closures can block more trade without further reducing infection when seed exports are already contained.",
+              presets: [
+                { id: "open-trade", label: "Open trade", delayDays: 0, summary: "All routes available",
+                  description: "Clear every route edit and regional import/export restriction. Model settings stay the same.",
+                  detail: "All recorded routes and regional trade permissions are open." },
+                { id: "seed-containment", label: "Seed containment", delayDays: 3, summary: "Seed exports · 3-day response",
+                  description: `Allow 3 days from the start for detection and a targeted response, then block exports from ${seedLabel}. ${contactNote}`,
+                  detail: timingNote },
+                { id: "delayed-response", label: "Delayed response", delayDays: 14, summary: "5% prevalence + 14-day response",
+                  description: `Use the original simulation's seed prevalence entering each step. Once it reaches 5%, allow 14 more days before closing seed exports. ${contactNote}`,
+                  detail: `The threshold uses the initial seed state, then each preceding step's result. If it is never reached, trade stays open. ${timingNote}` },
+                { id: "partner-ring", label: "Partner ring", delayDays: 7, summary: "Seed and partners · 7-day response",
+                  description: `Allow 7 days from the start for tracing and coordination, then close exports from the seed and its direct incoming and outgoing partners in the first recorded step. ${contactNote}`,
+                  detail: `Targets use positive movements in that step; later partners are not added. ${timingNote}` },
+                { id: "hub-controls", label: "Hub controls", delayDays: 7, summary: "Top exporters · 7-day response",
+                  description: `Allow 7 days from the start to coordinate hub controls. Rank regions by total cross-region outgoing animal movements across the dataset; break ties by region ID. Close the top three exporters. ${contactNote}`,
+                  detail: `Targets use the full recorded dataset and stay fixed. ${timingNote}` },
+                { id: "temporary-standstill", label: "Temporary standstill", delayDays: 7, summary: "National pause · 7-day response",
+                  description: `Allow 7 days from the start to coordinate a national pause. From its actual start, close all exports for ceil(1/recovery + 1/latency) recorded steps in SEIR/SEIRS, or ceil(1/recovery) in SIR/SIS. A required zero rate means no reopening. ${contactNote}`,
+                  detail: `The closure duration counts recorded steps. Reopening requires a later step in the dataset. ${timingNote}` },
+              ],
+            };
+          }
+
+          function validateScenario(snapshot) {
+            const object = (value) => value !== null && typeof value === "object" && !Array.isArray(value);
+            const keysAre = (value, keys) => object(value) && Object.keys(value).every((key) => keys.includes(key));
+            const fail = (message) => { throw new Error(message); };
+            if (!keysAre(snapshot, ["schemaVersion", "datasetKey", "dates", "settings", "nodeInterventions", "linkInterventions"]) || Object.keys(snapshot).length !== 6 ||
+              snapshot.schemaVersion !== 1) fail("This scenario format is not supported.");
+            if (snapshot.datasetKey !== currentTimeSpan || !Array.isArray(snapshot.dates) ||
+              snapshot.dates.length !== uniqueDates.length || uniqueDates.some((date, index) => snapshot.dates[index] !== date.toISOString())) {
+              fail("This scenario belongs to a different trade dataset or recorded date range.");
+            }
+            const ids = collectSimulationRegionIds(loadedCSVData);
+            const settings = snapshot.settings;
+            const ranges = { initialPct: [0.05, 20], beta: [0, 2], movementBeta: [0, 2], sigma: [0, 1], gamma: [0, 1] };
+            if (!keysAre(settings, ["model", "seedRegion", ...Object.keys(ranges)]) || Object.keys(settings).length !== 7 ||
+              !["SIR", "SIS", "SEIR", "SEIRS"].includes(settings.model) || !ids.includes(settings.seedRegion)) {
+              fail("The scenario model or seed region is invalid.");
+            }
+            for (const [key, [min, max]] of Object.entries(ranges)) {
+              if (!Number.isFinite(settings[key]) || settings[key] < min || settings[key] > max) {
+                fail(`The scenario setting ${key} must be between ${min} and ${max}.`);
+              }
+            }
+            const linkKeys = new Set(ids.flatMap((source) => ids.map((target) => getLinkKey(source, target))));
+            const schedules = {};
+            for (const kind of ["nodeInterventions", "linkInterventions"]) {
+              if (!Array.isArray(snapshot[kind])) fail("Scenario restrictions must be dated lists.");
+              const schedule = new Map();
+              for (const entry of snapshot[kind]) {
+                if (!Array.isArray(entry) || entry.length !== 2) fail("A scenario restriction entry is invalid.");
+                const [time, entries] = entry;
+                if (!Number.isSafeInteger(time) || Math.abs(time) > 8640000000000000 || schedule.has(time) ||
+                  !Array.isArray(entries) || !entries.length) fail("A scenario restriction date is invalid or duplicated.");
+                const changes = new Map();
+                for (const change of entries) {
+                  if (!Array.isArray(change) || change.length !== 2) fail("A scenario restriction is invalid.");
+                  const [id, value] = change;
+                  if (changes.has(id)) fail("A scenario restriction contains duplicate regions or routes.");
+                  if (kind === "nodeInterventions") {
+                    if (!ids.includes(id) || !keysAre(value, ["exports", "imports"]) || !Object.keys(value).length ||
+                      !Object.values(value).every((allowed) => typeof allowed === "boolean")) {
+                      fail("A scenario regional permission is invalid.");
+                    }
+                    changes.set(id, { ...value });
+                  } else {
+                    if (!linkKeys.has(id) || value !== true) fail("A scenario route restriction is invalid.");
+                    changes.set(id, true);
+                  }
+                }
+                schedule.set(time, changes);
+              }
+              schedules[kind] = schedule;
+            }
+            return { settings: { ...settings }, ...schedules };
+          }
+
+          function captureScenario() {
+            if (areScenarioControlsDisabled()) throw new Error("Wait for the current network operation to finish before saving a scenario.");
+            const snapshot = {
+              schemaVersion: 1, datasetKey: currentTimeSpan,
+              dates: uniqueDates.map((date) => date.toISOString()), settings: readSimulationSettings(),
+              nodeInterventions: Array.from(simulationNodeInterventions, ([time, changes]) =>
+                [time, Array.from(changes, ([id, directions]) => [id, { ...directions }])]),
+              linkInterventions: Array.from(simulationLinkInterventions, ([time, changes]) => [time, Array.from(changes)]),
+            };
+            validateScenario(snapshot);
+            return snapshot;
+          }
+
+          function applyScenario(nodeInterventions, linkInterventions, settings, label) {
+            if (settings) {
+              readSimulationSettings();
+              const controls = { model: "Model", seedRegion: "SeedRegion", initialPct: "InitialPct", beta: "Beta", movementBeta: "MovementBeta", sigma: "Sigma", gamma: "Gamma" };
+              for (const [key, suffix] of Object.entries(controls)) {
+                document.getElementById(`simulation${suffix}`).value = settings[key];
+              }
+            }
+            simulationNodeInterventions.clear();
+            simulationLinkInterventions.clear();
+            for (const [time, changes] of nodeInterventions) simulationNodeInterventions.set(time, changes);
+            for (const [time, changes] of linkInterventions) simulationLinkInterventions.set(time, changes);
+            networkStatsDirtyDates.clear();
+            networkStatsDirtyFrom = uniqueDates[0].getTime();
+            comparisonDataError = null;
+            try {
+              applyNetworkControlChanges(`Applying ${label}`);
+            } catch (error) {
+              comparisonDataError = `The scenario could not be calculated: ${error.message || error}`;
+              window.herdlinkComparison?.refresh();
+              throw error;
+            }
+          }
+
+          function loadScenario(snapshot) {
+            if (areScenarioControlsDisabled()) throw new Error("Wait for the current network operation to finish before loading a scenario.");
+            const scenario = validateScenario(snapshot);
+            applyScenario(scenario.nodeInterventions, scenario.linkInterventions, scenario.settings, "saved scenario");
+            return { label: "Saved scenario", detail: "Model settings and all dated trade restrictions restored." };
+          }
+
+          function loadPreset(id) {
+            if (areScenarioControlsDisabled()) throw new Error("Wait for the current network operation to finish before loading a preset.");
+            const context = getScenarioContext();
+            const preset = context.presets.find((item) => item.id === id);
+            if (!preset) throw new Error("This scenario preset does not exist.");
+            const { settings } = context;
+            const ids = collectSimulationRegionIds(loadedCSVData);
+            const nodes = new Map();
+            const exportsAt = (date, targets, allowed) => nodes.set(date.getTime(),
+              new Map(targets.map((region) => [region, { exports: allowed }])));
+            let detail = preset.detail;
+            let triggerStep = 0;
+            if (id === "delayed-response") {
+              const original = getOriginalSimulationSeries(settings).nodes[settings.seedRegion];
+              const holding = original[0].N;
+              const initialPrevalence = Math.min(holding, Math.max(1, (settings.initialPct / 100) * holding)) / holding;
+              triggerStep = uniqueDates.findIndex((date, index) => (index ? original[index - 1].prevalence : initialPrevalence) >= 0.05);
+            }
+            const responseTime = triggerStep < 0 ? Infinity : uniqueDates[triggerStep].getTime() + preset.delayDays * 86400000;
+            const startStep = uniqueDates.findIndex((date) => date.getTime() >= responseTime);
+            const startDate = uniqueDates[startStep];
+            const startLabel = startDate?.toISOString().slice(0, 10);
+            if (startDate && id === "seed-containment") {
+              exportsAt(startDate, [settings.seedRegion], false);
+              detail = `Exports from ${context.seedLabel} close on ${startLabel}, the first recorded date after the 3-day response delay.`;
+            }
+            if (startDate && id === "delayed-response") {
+              exportsAt(startDate, [settings.seedRegion], false);
+              detail = `The 5% trigger is reached entering ${uniqueDates[triggerStep].toISOString().slice(0, 10)}. Seed exports close on ${startLabel}, after the additional 14-day response delay.`;
+            }
+            if (startDate && id === "partner-ring") {
+              const targets = new Set([settings.seedRegion]);
+              for (const row of getTradeRecordsByDate(loadedCSVData).get(uniqueDates[0].getTime()) || []) {
+                if (!(+row.AANTAL > 0) || row.COROP_LEV === row.COROP_AFN) continue;
+                if (row.COROP_LEV === settings.seedRegion && ids.includes(row.COROP_AFN)) targets.add(row.COROP_AFN);
+                if (row.COROP_AFN === settings.seedRegion && ids.includes(row.COROP_LEV)) targets.add(row.COROP_LEV);
+              }
+              exportsAt(startDate, Array.from(targets), false);
+              detail = `Exports close on ${startLabel} after the 7-day response delay, covering the seed and its ${targets.size - 1} trading partners from the first step. Timeline markers list every target.`;
+            }
+            if (startDate && id === "hub-controls") {
+              const totals = new Map(ids.map((region) => [region, 0]));
+              for (const row of loadedCSVData) {
+                if (+row.AANTAL > 0 && row.COROP_LEV !== row.COROP_AFN && totals.has(row.COROP_LEV) && totals.has(row.COROP_AFN)) {
+                  totals.set(row.COROP_LEV, totals.get(row.COROP_LEV) + +row.AANTAL);
+                }
+              }
+              const targets = Array.from(totals).filter(([, volume]) => volume > 0)
+                .sort(([a, av], [b, bv]) => bv - av || (a < b ? -1 : a > b ? 1 : 0)).slice(0, 3).map(([region]) => region);
+              if (targets.length) exportsAt(startDate, targets, false);
+              detail = targets.length
+                ? `Exports close on ${startLabel} after the 7-day response delay for ${targets.join(", ")}, the ${targets.length} largest cross-region exporters across the full dataset.`
+                : "This dataset has no positive cross-region exports. No restrictions are applied.";
+            }
+            if (startDate && id === "temporary-standstill") {
+              const latent = settings.model === "SEIR" || settings.model === "SEIRS";
+              const steps = Math.ceil(1 / settings.gamma + (latent ? 1 / settings.sigma : 0));
+              const reopeningStep = startStep + steps;
+              exportsAt(startDate, ids, false);
+              if (reopeningStep < uniqueDates.length) {
+                exportsAt(uniqueDates[reopeningStep], ids, true);
+                detail = `All regional exports close on ${startLabel} after the 7-day response delay, remain closed for ${steps} recorded steps, and reopen on ${uniqueDates[reopeningStep].toISOString().slice(0, 10)}. Local contact continues.`;
+              } else {
+                detail = Number.isFinite(steps)
+                  ? `All regional exports close on ${startLabel} after the 7-day response delay. Reopening ${steps} recorded steps later falls outside this dataset. Local contact continues.`
+                  : `All regional exports close on ${startLabel} after the 7-day response delay and stay closed because a required recovery or latency rate is zero. Local contact continues.`;
+              }
+            }
+            if (id !== "open-trade" && !startDate) {
+              detail = triggerStep < 0
+                ? "Original seed prevalence never reaches 5% entering a recorded step. No restrictions are applied; trade stays open."
+                : `The ${preset.delayDays}-day response delay ends beyond the recorded dates. No restrictions are applied; trade stays open.`;
+            }
+            applyScenario(nodes, new Map(), null, preset.label);
+            return { label: preset.label, detail };
+          }
+
           function getComparisonData() {
             const mode = appDataMode;
             const definitions = getComparisonMetricDefinitions(mode);
@@ -1609,13 +1844,8 @@
                 (key) => value.frameByKey[key]?.summary,
                 (key) => value.frameByKey[key]?.nodeStates);
               if (!cache.original) {
-                const original = !simulationNodeInterventions.size && !simulationLinkInterventions.size
-                  ? trajectory
-                  : buildSimulationTrajectory(settings, {
-                    data: loadedCSVData, dates: uniqueDates,
-                    nodeInterventions: new Map(), linkInterventions: new Map(),
-                  });
-                cache.original = project(original);
+                cache.original = getOriginalSimulationSeries(settings,
+                  !simulationNodeInterventions.size && !simulationLinkInterventions.size ? trajectory : null);
               }
               if (cache.trajectory !== trajectory) {
                 cache.intervention = project(trajectory);
@@ -4136,6 +4366,7 @@
             }
             if (window.isPlaying) setTimeReplayState(false);
             const runId = ++simulationRunId;
+            comparisonDataError = null;
             simulationState.status = "running";
             window.herdlinkComparison?.refresh();
             setSimulationInputsDisabled(true);
@@ -4150,12 +4381,25 @@
             };
 
             if (!(await stage(6, "ledger", reason))) return;
-            refreshNetworkControlStats();
-            const settings = readSimulationSettings();
-            if (!(await stage(18, "holdings", "Estimating regional holdings"))) return;
-            if (!(await stage(34, "contacts", "Building movement contacts"))) return;
-            if (!(await stage(48, "states", "Integrating compartment states"))) return;
-            const trajectory = buildSimulationTrajectory(settings);
+            let settings, trajectory;
+            try {
+              refreshNetworkControlStats();
+              settings = readSimulationSettings();
+              if (!(await stage(18, "holdings", "Estimating regional holdings"))) return;
+              if (!(await stage(34, "contacts", "Building movement contacts"))) return;
+              if (!(await stage(48, "states", "Integrating compartment states"))) return;
+              trajectory = buildSimulationTrajectory(settings);
+            } catch (error) {
+              simulationState.status = "error";
+              comparisonDataError = `The simulation could not be calculated: ${error.message || error}`;
+              finishModePanelsRendering();
+              hideSimulationOverlay();
+              setSimulationInputsDisabled(false);
+              enableAllButtons(0);
+              enableAllCheckboxes(0);
+              window.herdlinkComparison?.refresh();
+              return;
+            }
             if (!(await stage(78, "frames", "Building replay ledger"))) return;
 
             simulationState = {
@@ -14057,9 +14301,12 @@
             canOpen: () => !screenshotInProgress,
             read: () => ({
               ...getComparisonData(),
+              datasetKey: currentTimeSpan,
               datasetLabel: currentTimeSpan ? `${currentTimeSpan[0].toUpperCase()}${currentTimeSpan.slice(1)} trade` : "Animal trade network",
               modeSwitchDisabled: !canSwitchAppDataMode(),
+              scenarioContext: getScenarioContext(),
             }),
+            loadPreset, captureScenario, loadScenario,
             getMode: () => appDataMode,
             setMode: setAppDataMode,
             prepare: () => {

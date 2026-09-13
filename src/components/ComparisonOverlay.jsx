@@ -1,6 +1,7 @@
 import { memo, useEffect, useId, useMemo, useRef, useState } from "react";
-import { faBook, faFlask } from "@fortawesome/free-solid-svg-icons";
+import { faBook, faFlask, faLayerGroup } from "@fortawesome/free-solid-svg-icons";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
+import { ScenarioLibrary } from "./ScenarioLibrary";
 import {
   buildComparisonChart,
   comparisonEventMarkerWidth,
@@ -198,32 +199,46 @@ const InterventionMarker = memo(function InterventionMarker({ cluster, onInspect
   );
 });
 
-function ReadyComparison({ data }) {
-  const [regionId, setRegionId] = useState(data.selectedRegionId || data.regions[0]?.id || "");
-  const [globalMetricKey, setGlobalMetricKey] = useState(data.mode === "simulation" ? "prevalence" : "totalTradeVolume");
-  const [nodeMetricKey, setNodeMetricKey] = useState(data.mode === "simulation" ? "prevalence" : "eigenvector");
+function ComparisonContent({ data, library, scenariosOpen }) {
+  const ready = data?.status === "ready" && data.dates?.length > 0;
+  const dates = data?.dates || [];
+  const regions = data?.regions || [];
+  const nodeMetrics = data?.nodeMetrics || [];
+  const [regionId, setRegionId] = useState(data?.selectedRegionId || regions[0]?.id || "");
+  const [globalMetricKey, setGlobalMetricKey] = useState(data?.mode === "simulation" ? "prevalence" : "totalTradeVolume");
+  const [nodeMetricKey, setNodeMetricKey] = useState(data?.mode === "simulation" ? "prevalence" : "eigenvector");
   const [inspectedDate, setInspectedDate] = useState(null);
   const [eventTrackWidth, setEventTrackWidth] = useState(0);
   const eventTrackRef = useRef(null);
+  const bodyRef = useRef(null);
   const rangeId = useId();
   const regionSelectId = useId();
   useEffect(() => {
+    if (!ready) return;
     const observer = new ResizeObserver(([entry]) => setEventTrackWidth(entry.contentRect.width));
     observer.observe(eventTrackRef.current);
     return () => observer.disconnect();
-  }, []);
+  }, [ready]);
   useEffect(() => {
-    if (data.selectedRegionId) setRegionId(data.selectedRegionId);
-  }, [data.selectedRegionId]);
-  const selectedRegion = data.regions.find((region) => region.id === regionId) || data.regions[0];
-  const selectedMetric = data.nodeMetrics.find((metric) => metric.key === nodeMetricKey) || data.nodeMetrics[0];
-  const dateIndex = Math.max(0, data.dates.indexOf(inspectedDate || data.date));
-  const date = data.dates[dateIndex];
-  const timelineProgress = data.dates.length > 1 ? dateIndex / (data.dates.length - 1) : 0;
-  const interventionEvents = data.interventionEvents || [];
-  const eventClusters = useMemo(() => groupComparisonEvents(interventionEvents, data.dates, eventTrackWidth),
-    [interventionEvents, data.dates, eventTrackWidth]);
-  const changes = selectedMetric ? data.regions.map((region) => {
+    if (scenariosOpen) bodyRef.current.scrollTo({ top: 0 });
+  }, [scenariosOpen]);
+  useEffect(() => {
+    setGlobalMetricKey(data?.mode === "simulation" ? "prevalence" : "totalTradeVolume");
+    setNodeMetricKey(data?.mode === "simulation" ? "prevalence" : "eigenvector");
+    setInspectedDate(null);
+  }, [data?.mode, data?.scenarioContext?.datasetKey]);
+  useEffect(() => {
+    if (data?.selectedRegionId) setRegionId(data.selectedRegionId);
+  }, [data?.selectedRegionId]);
+  const selectedRegion = regions.find((region) => region.id === regionId) || regions[0];
+  const selectedMetric = nodeMetrics.find((metric) => metric.key === nodeMetricKey) || nodeMetrics[0];
+  const dateIndex = Math.max(0, dates.indexOf(inspectedDate || data?.date));
+  const date = dates[dateIndex];
+  const timelineProgress = dates.length > 1 ? dateIndex / (dates.length - 1) : 0;
+  const interventionEvents = data?.interventionEvents || [];
+  const eventClusters = useMemo(() => groupComparisonEvents(interventionEvents, dates, eventTrackWidth),
+    [interventionEvents, dates, eventTrackWidth]);
+  const changes = ready && selectedMetric ? regions.map((region) => {
     const original = data.original.nodes[region.id]?.[dateIndex]?.[selectedMetric.key];
     const intervention = data.intervention.nodes[region.id]?.[dateIndex]?.[selectedMetric.key];
     return { ...region, original, intervention, delta: intervention - original };
@@ -234,8 +249,9 @@ function ReadyComparison({ data }) {
 
   return (
     <>
-      <div className="comparison-body">
-        <div className="comparison-layout">
+      <div ref={bodyRef} className="comparison-body">
+        {library}
+        {ready ? <div className="comparison-layout">
           <ComparisonScope
             title="Network"
             description="Original includes all routes and regional trade permissions. Intervention applies your link edits and restriction schedule. Simulation scenarios share model settings and seed. Both lines share a scale; gaps and dashes mark missing results."
@@ -288,9 +304,15 @@ function ReadyComparison({ data }) {
             ) : <p className="comparison-changes__empty">{changes.length ? "No regional change at this date." : "No paired regional results at this date."}</p>}
             <p className="comparison-changes__hint">Select a region to inspect its trajectory.</p>
           </aside>
-        </div>
+        </div> : (
+          <div className="comparison-state" role="status" aria-live="polite">
+            <span className={`comparison-state__symbol${data?.status === "error" ? " is-error" : ""}`} aria-hidden="true">{data?.status === "error" ? "!" : "↔"}</span>
+            <h3>{data?.status === "error" ? "Comparison unavailable" : ["ready", "empty"].includes(data?.status) ? "No comparable dates" : "Preparing both scenarios"}</h3>
+            <p>{data?.error || data?.message || (data?.status === "error" ? "The paired results could not be computed." : ["ready", "empty"].includes(data?.status) ? "This dataset has no paired results to inspect." : "Results appear together when both scenarios are ready.")}</p>
+          </div>
+        )}
       </div>
-      <footer className="comparison-timeline">
+      {ready && <footer className="comparison-timeline">
         <div className="comparison-timeline__heading">
           <label htmlFor={rangeId}>Inspect date <time dateTime={date}>{dateLabel(date)}</time></label>
           <span className="comparison-timeline__actions">
@@ -312,15 +334,17 @@ function ReadyComparison({ data }) {
           </div>
         </div>
         <div className="comparison-timeline__ends"><span>{dateLabel(data.dates[0])}</span><span>{dateLabel(data.dates.at(-1))}</span></div>
-      </footer>
+      </footer>}
     </>
   );
 }
 
-export function ComparisonOverlay({ open, data, onClose, onModeChange }) {
+export function ComparisonOverlay({ open, data, onClose, onModeChange, scenarioSlots = [null, null, null], scenarioError, scenarioNotice, onLoadPreset, onSaveScenario, onLoadScenario }) {
   const dialogRef = useRef(null);
   const closeRef = useRef(null);
   const titleId = useId();
+  const libraryId = useId();
+  const [scenariosOpen, setScenariosOpen] = useState(false);
   useEffect(() => {
     const dialog = dialogRef.current;
     if (open && !dialog.open) {
@@ -331,7 +355,6 @@ export function ComparisonOverlay({ open, data, onClose, onModeChange }) {
     }
     return () => { if (dialog.open) dialog.close(); };
   }, [open]);
-  const ready = data?.status === "ready" && data.dates?.length > 0;
 
   return (
     <dialog
@@ -345,9 +368,14 @@ export function ComparisonOverlay({ open, data, onClose, onModeChange }) {
         <div className="comparison-header__title">
           <span className="comparison-eyebrow">Scenario comparison</span>
           <h2 id={titleId}>Original <span>/</span> Intervention</h2>
-          <p>{data?.datasetLabel || "Animal trade network"}{data?.settings?.model ? ` · ${data.settings.model}` : ""}</p>
+          <p>{data?.datasetLabel || "Animal trade network"}{data?.mode === "simulation" && data?.scenarioContext?.settings?.model ? ` · ${data.scenarioContext.settings.model}` : ""}</p>
         </div>
         <div className="comparison-header__actions">
+          <button type="button" className="comparison-scenarios-toggle" aria-expanded={scenariosOpen} aria-controls={libraryId} onClick={() => setScenariosOpen((value) => !value)}>
+            <FontAwesomeIcon icon={faLayerGroup} aria-hidden="true" />
+            Scenarios
+            <span aria-hidden="true">{scenariosOpen ? "−" : "+"}</span>
+          </button>
           <div className="comparison-mode" data-mode={data?.mode} role="group" aria-label="Comparison mode">
             <button type="button" aria-pressed={data?.mode === "trade"} disabled={!data || data.modeSwitchDisabled} onClick={() => { if (data.mode !== "trade") onModeChange("trade"); }}>
               <FontAwesomeIcon icon={faBook} aria-hidden="true" />
@@ -365,13 +393,11 @@ export function ComparisonOverlay({ open, data, onClose, onModeChange }) {
           </button>
         </div>
       </header>
-      {ready ? <ReadyComparison key={`${data.datasetKey || ""}:${data.mode}`} data={data} /> : (
-        <div className="comparison-state" role="status" aria-live="polite">
-          <span className={`comparison-state__symbol${data?.status === "error" ? " is-error" : ""}`} aria-hidden="true">{data?.status === "error" ? "!" : "↔"}</span>
-          <h3>{data?.status === "error" ? "Comparison unavailable" : ["ready", "empty"].includes(data?.status) ? "No comparable dates" : "Preparing both scenarios"}</h3>
-          <p>{data?.error || data?.message || (data?.status === "error" ? "The paired results could not be computed." : ["ready", "empty"].includes(data?.status) ? "This dataset has no paired results to inspect." : "Results appear together when both scenarios are ready.")}</p>
-        </div>
-      )}
+      <ComparisonContent data={data} scenariosOpen={scenariosOpen} library={
+        <ScenarioLibrary id={libraryId} open={scenariosOpen} context={data?.scenarioContext} slots={scenarioSlots}
+          error={scenarioError} notice={scenarioNotice} onLoadPreset={onLoadPreset} onSaveScenario={onSaveScenario}
+          onLoadScenario={onLoadScenario} Info={ComparisonInfo} />
+      } />
     </dialog>
   );
 }

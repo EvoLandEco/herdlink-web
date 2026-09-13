@@ -14,7 +14,7 @@ const functions = [
   "computeSimpleStats", "computeNumberOfConnectedComponents", "computeModularity",
   "computeHotSpotMetrics", "computeEigenvectorCentrality", "buildAdjList",
   "getStronglyConnectedComponents", "computePerronPair", "computePerronRoot", "computeSpectralRadius",
-  "getComparisonMetricDefinitions", "buildComparisonSeries", "getComparisonData", "initHerdLink",
+  "getComparisonMetricDefinitions", "buildComparisonSeries", "getOriginalSimulationSeries", "getComparisonData", "initHerdLink",
 ].map((name) => {
   const match = source.match(new RegExp(`^([ ]*)function ${name}\\([^]*?^\\1}`, "m"));
   assert.ok(match, `Runtime function ${name} exists`);
