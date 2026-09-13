@@ -7990,7 +7990,7 @@
               <div class="simulation-controls-toolbar">
                 <button id="simulationControlSwitch" class="simulation-control-switch has-tip" type="button" data-mode="${simulationControlView}" aria-label="${showNodeControls ? "Current mode: Imports and exports. Switch to links on this date." : "Current mode: Links on this date. Switch to imports and exports."}" aria-controls="simulationDateLinkControls simulationNodeControls" data-tip="${showNodeControls ? "Switch to links on this date" : "Switch to imports and exports"}" data-tip-placement="left">
                   <span class="simulation-control-switch-thumb" aria-hidden="true">
-                    <span class="simulation-control-switch-icon"><i class="fa-solid fa-right-long"></i></span>
+                    <span class="simulation-control-switch-icon"><i class="fa-solid fa-shuffle"></i></span>
                   </span>
                 </button>
                 <div class="trade-info-header">
