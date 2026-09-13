@@ -1,0 +1,1460 @@
+{
+  "metadata": {
+    "title": "Pig census by COROP region, 2018–2022",
+    "publisher": "Statistics Netherlands (CBS)",
+    "license": "CC BY 4.0",
+    "licenseUrl": "https://www.cbs.nl/en-gb/about-us/website/copyright",
+    "retrievedAt": "2026-09-11",
+    "referenceDate": "1 April of each census year",
+    "method": "Published COROP pig and pig-holding totals divided by the same year's published COROP land area in square kilometres. Water is excluded. Densities are rounded to six decimal places.",
+    "missingValues": "Null means CBS has no published numeric value. A density is null when its count or land area is null. Published zero is retained as zero; no values are estimated.",
+    "geography": "Census records use the COROP classification of their reference year. The map displays 2024 COROP boundaries; these values are not recalculated to 2024 geography.",
+    "landAreaSurveyYears": {
+      "2018": 2015,
+      "2019": 2015,
+      "2020": 2015,
+      "2021": 2015,
+      "2022": 2017
+    },
+    "caveats": [
+      "Agricultural activities are assigned to the business's main establishment address, which can differ from where animals are kept. Holdings are businesses with pigs, not a count of separate farm sites.",
+      "From 2018, CBS adjusts fattening-pig counts for temporary empty housing using the prior year's declaration. Agricultural census totals can therefore differ from livestock population tables.",
+      "Land areas use the CBS land-use survey listed for each year. Changes in densities can reflect land-area measurement and regional boundary changes as well as animal and holding counts.",
+      "These are annual census observations, not the number of animals or holdings involved in the displayed trade network, and they do not alter the disease model."
+    ],
+    "sources": [
+      {
+        "table": "80781ned",
+        "title": "Landbouw; gewassen, dieren en grondgebruik naar gemeente",
+        "url": "https://www.cbs.nl/nl-nl/cijfers/detail/80781ned",
+        "api": "https://opendata.cbs.nl/ODataApi/OData/80781ned",
+        "fields": {
+          "pigs": "VarkensTotaal_121",
+          "holdings": "VarkensTotaal_136"
+        }
+      },
+      {
+        "table": "70072ned",
+        "title": "Regionale kerncijfers Nederland",
+        "url": "https://www.cbs.nl/nl-nl/cijfers/detail/70072ned",
+        "api": "https://opendata.cbs.nl/ODataApi/OData/70072ned",
+        "fields": {
+          "landAreaKm2": "Land_219",
+          "pigTotalCrossCheck": "Varkens_151"
+        }
+      }
+    ]
+  },
+  "years": {
+    "2018": {
+      "CR01": {
+        "pigs": 94535,
+        "holdings": 28,
+        "landAreaKm2": 745.01,
+        "pigsPerKm2": 126.890914,
+        "holdingsPerKm2": 0.037583
+      },
+      "CR02": {
+        "pigs": 5789,
+        "holdings": 6,
+        "landAreaKm2": 267.89,
+        "pigsPerKm2": 21.609616,
+        "holdingsPerKm2": 0.022397
+      },
+      "CR03": {
+        "pigs": 78224,
+        "holdings": 31,
+        "landAreaKm2": 1311.03,
+        "pigsPerKm2": 59.666064,
+        "holdingsPerKm2": 0.023646
+      },
+      "CR04": {
+        "pigs": 29132,
+        "holdings": 14,
+        "landAreaKm2": 1486.55,
+        "pigsPerKm2": 19.597054,
+        "holdingsPerKm2": 0.009418
+      },
+      "CR05": {
+        "pigs": 39537,
+        "holdings": 14,
+        "landAreaKm2": 873.55,
+        "pigsPerKm2": 45.260145,
+        "holdingsPerKm2": 0.016027
+      },
+      "CR06": {
+        "pigs": 43440,
+        "holdings": 21,
+        "landAreaKm2": 975.52,
+        "pigsPerKm2": 44.530097,
+        "holdingsPerKm2": 0.021527
+      },
+      "CR07": {
+        "pigs": 42638,
+        "holdings": 19,
+        "landAreaKm2": 1040.9,
+        "pigsPerKm2": 40.962628,
+        "holdingsPerKm2": 0.018253
+      },
+      "CR08": {
+        "pigs": 112899,
+        "holdings": 33,
+        "landAreaKm2": 905.78,
+        "pigsPerKm2": 124.642849,
+        "holdingsPerKm2": 0.036433
+      },
+      "CR09": {
+        "pigs": 78876,
+        "holdings": 44,
+        "landAreaKm2": 685.97,
+        "pigsPerKm2": 114.98462,
+        "holdingsPerKm2": 0.064143
+      },
+      "CR10": {
+        "pigs": 437301,
+        "holdings": 169,
+        "landAreaKm2": 1415.29,
+        "pigsPerKm2": 308.983318,
+        "holdingsPerKm2": 0.11941
+      },
+      "CR11": {
+        "pigs": 296723,
+        "holdings": 126,
+        "landAreaKm2": 415.52,
+        "pigsPerKm2": 714.100404,
+        "holdingsPerKm2": 0.303235
+      },
+      "CR12": {
+        "pigs": 833108,
+        "holdings": 378,
+        "landAreaKm2": 1488.19,
+        "pigsPerKm2": 559.812927,
+        "holdingsPerKm2": 0.254
+      },
+      "CR13": {
+        "pigs": 598588,
+        "holdings": 405,
+        "landAreaKm2": 1828.33,
+        "pigsPerKm2": 327.396039,
+        "holdingsPerKm2": 0.221514
+      },
+      "CR14": {
+        "pigs": 893945,
+        "holdings": 407,
+        "landAreaKm2": 1544.7,
+        "pigsPerKm2": 578.71755,
+        "holdingsPerKm2": 0.263482
+      },
+      "CR15": {
+        "pigs": 220212,
+        "holdings": 96,
+        "landAreaKm2": 896.28,
+        "pigsPerKm2": 245.695542,
+        "holdingsPerKm2": 0.107109
+      },
+      "CR16": {
+        "pigs": 179098,
+        "holdings": 66,
+        "landAreaKm2": 694.39,
+        "pigsPerKm2": 257.921341,
+        "holdingsPerKm2": 0.095047
+      },
+      "CR17": {
+        "pigs": 269284,
+        "holdings": 192,
+        "landAreaKm2": 1378.25,
+        "pigsPerKm2": 195.381099,
+        "holdingsPerKm2": 0.139307
+      },
+      "CR18": {
+        "pigs": 14904,
+        "holdings": 18,
+        "landAreaKm2": 1082.52,
+        "pigsPerKm2": 13.767875,
+        "holdingsPerKm2": 0.016628
+      },
+      "CR19": {
+        "pigs": 2300,
+        "holdings": 3,
+        "landAreaKm2": 290.22,
+        "pigsPerKm2": 7.925022,
+        "holdingsPerKm2": 0.010337
+      },
+      "CR20": {
+        "pigs": 10,
+        "holdings": 3,
+        "landAreaKm2": 159.79,
+        "pigsPerKm2": 0.062582,
+        "holdingsPerKm2": 0.018775
+      },
+      "CR21": {
+        "pigs": 0,
+        "holdings": 0,
+        "landAreaKm2": 129.46,
+        "pigsPerKm2": 0.0,
+        "holdingsPerKm2": 0.0
+      },
+      "CR22": {
+        "pigs": 0,
+        "holdings": 0,
+        "landAreaKm2": 112.45,
+        "pigsPerKm2": 0.0,
+        "holdingsPerKm2": 0.0
+      },
+      "CR23": {
+        "pigs": 4869,
+        "holdings": 9,
+        "landAreaKm2": 693.46,
+        "pigsPerKm2": 7.021313,
+        "holdingsPerKm2": 0.012978
+      },
+      "CR24": {
+        "pigs": 0,
+        "holdings": 0,
+        "landAreaKm2": 196.93,
+        "pigsPerKm2": 0.0,
+        "holdingsPerKm2": 0.0
+      },
+      "CR25": {
+        "pigs": 10983,
+        "holdings": 7,
+        "landAreaKm2": 276.43,
+        "pigsPerKm2": 39.731578,
+        "holdingsPerKm2": 0.025323
+      },
+      "CR26": {
+        "pigs": 2,
+        "holdings": 1,
+        "landAreaKm2": 251.6,
+        "pigsPerKm2": 0.007949,
+        "holdingsPerKm2": 0.003975
+      },
+      "CR27": {
+        "pigs": 32,
+        "holdings": 1,
+        "landAreaKm2": 151.12,
+        "pigsPerKm2": 0.211752,
+        "holdingsPerKm2": 0.006617
+      },
+      "CR28": {
+        "pigs": 46605,
+        "holdings": 44,
+        "landAreaKm2": 472.34,
+        "pigsPerKm2": 98.668332,
+        "holdingsPerKm2": 0.093153
+      },
+      "CR29": {
+        "pigs": 20947,
+        "holdings": 15,
+        "landAreaKm2": 1190.66,
+        "pigsPerKm2": 17.592764,
+        "holdingsPerKm2": 0.012598
+      },
+      "CR30": {
+        "pigs": 48333,
+        "holdings": 27,
+        "landAreaKm2": 465.15,
+        "pigsPerKm2": 103.908417,
+        "holdingsPerKm2": 0.058046
+      },
+      "CR31": {
+        "pigs": 15632,
+        "holdings": 14,
+        "landAreaKm2": 731.44,
+        "pigsPerKm2": 21.371541,
+        "holdingsPerKm2": 0.01914
+      },
+      "CR32": {
+        "pigs": 34851,
+        "holdings": 21,
+        "landAreaKm2": 1050.67,
+        "pigsPerKm2": 33.170263,
+        "holdingsPerKm2": 0.019987
+      },
+      "CR33": {
+        "pigs": 343921,
+        "holdings": 120,
+        "landAreaKm2": 1217.55,
+        "pigsPerKm2": 282.469714,
+        "holdingsPerKm2": 0.098559
+      },
+      "CR34": {
+        "pigs": 598523,
+        "holdings": 164,
+        "landAreaKm2": 896.8,
+        "pigsPerKm2": 667.398528,
+        "holdingsPerKm2": 0.182872
+      },
+      "CR35": {
+        "pigs": 2606848,
+        "holdings": 656,
+        "landAreaKm2": 1352.56,
+        "pigsPerKm2": 1927.343704,
+        "holdingsPerKm2": 0.485006
+      },
+      "CR36": {
+        "pigs": 2403404,
+        "holdings": 581,
+        "landAreaKm2": 1438.55,
+        "pigsPerKm2": 1670.712871,
+        "holdingsPerKm2": 0.403879
+      },
+      "CR37": {
+        "pigs": 1310242,
+        "holdings": 256,
+        "landAreaKm2": 831.86,
+        "pigsPerKm2": 1575.075133,
+        "holdingsPerKm2": 0.307744
+      },
+      "CR38": {
+        "pigs": 647768,
+        "holdings": 147,
+        "landAreaKm2": 664.83,
+        "pigsPerKm2": 974.336296,
+        "holdingsPerKm2": 0.221109
+      },
+      "CR39": {
+        "pigs": 17111,
+        "holdings": 21,
+        "landAreaKm2": 650.11,
+        "pigsPerKm2": 26.320161,
+        "holdingsPerKm2": 0.032302
+      },
+      "CR40": {
+        "pigs": 49515,
+        "holdings": 28,
+        "landAreaKm2": 1411.63,
+        "pigsPerKm2": 35.076472,
+        "holdingsPerKm2": 0.019835
+      }
+    },
+    "2019": {
+      "CR01": {
+        "pigs": 96634,
+        "holdings": 31,
+        "landAreaKm2": 745.01,
+        "pigsPerKm2": 129.708326,
+        "holdingsPerKm2": 0.04161
+      },
+      "CR02": {
+        "pigs": 6134,
+        "holdings": 5,
+        "landAreaKm2": 267.89,
+        "pigsPerKm2": 22.897458,
+        "holdingsPerKm2": 0.018664
+      },
+      "CR03": {
+        "pigs": 84122,
+        "holdings": 38,
+        "landAreaKm2": 1311.03,
+        "pigsPerKm2": 64.164817,
+        "holdingsPerKm2": 0.028985
+      },
+      "CR04": {
+        "pigs": 34566,
+        "holdings": 26,
+        "landAreaKm2": 1485.8,
+        "pigsPerKm2": 23.264235,
+        "holdingsPerKm2": 0.017499
+      },
+      "CR05": {
+        "pigs": 28525,
+        "holdings": 16,
+        "landAreaKm2": 874.3,
+        "pigsPerKm2": 32.626101,
+        "holdingsPerKm2": 0.0183
+      },
+      "CR06": {
+        "pigs": 47137,
+        "holdings": 27,
+        "landAreaKm2": 975.52,
+        "pigsPerKm2": 48.31987,
+        "holdingsPerKm2": 0.027678
+      },
+      "CR07": {
+        "pigs": 50215,
+        "holdings": 22,
+        "landAreaKm2": 1040.9,
+        "pigsPerKm2": 48.241906,
+        "holdingsPerKm2": 0.021136
+      },
+      "CR08": {
+        "pigs": 92356,
+        "holdings": 36,
+        "landAreaKm2": 905.78,
+        "pigsPerKm2": 101.962949,
+        "holdingsPerKm2": 0.039745
+      },
+      "CR09": {
+        "pigs": 77047,
+        "holdings": 44,
+        "landAreaKm2": 685.97,
+        "pigsPerKm2": 112.318323,
+        "holdingsPerKm2": 0.064143
+      },
+      "CR10": {
+        "pigs": 450141,
+        "holdings": 174,
+        "landAreaKm2": 1415.29,
+        "pigsPerKm2": 318.055664,
+        "holdingsPerKm2": 0.122943
+      },
+      "CR11": {
+        "pigs": 296323,
+        "holdings": 124,
+        "landAreaKm2": 415.52,
+        "pigsPerKm2": 713.137755,
+        "holdingsPerKm2": 0.298421
+      },
+      "CR12": {
+        "pigs": 830611,
+        "holdings": 355,
+        "landAreaKm2": 1488.19,
+        "pigsPerKm2": 558.13505,
+        "holdingsPerKm2": 0.238545
+      },
+      "CR13": {
+        "pigs": 566566,
+        "holdings": 390,
+        "landAreaKm2": 1828.33,
+        "pigsPerKm2": 309.881695,
+        "holdingsPerKm2": 0.213309
+      },
+      "CR14": {
+        "pigs": 862945,
+        "holdings": 396,
+        "landAreaKm2": 1544.7,
+        "pigsPerKm2": 558.648929,
+        "holdingsPerKm2": 0.25636
+      },
+      "CR15": {
+        "pigs": 242150,
+        "holdings": 94,
+        "landAreaKm2": 896.28,
+        "pigsPerKm2": 270.172268,
+        "holdingsPerKm2": 0.104878
+      },
+      "CR16": {
+        "pigs": 183456,
+        "holdings": 68,
+        "landAreaKm2": 694.39,
+        "pigsPerKm2": 264.197353,
+        "holdingsPerKm2": 0.097928
+      },
+      "CR17": {
+        "pigs": 265134,
+        "holdings": 192,
+        "landAreaKm2": 1485.46,
+        "pigsPerKm2": 178.486126,
+        "holdingsPerKm2": 0.129253
+      },
+      "CR18": {
+        "pigs": 16130,
+        "holdings": 27,
+        "landAreaKm2": 1082.52,
+        "pigsPerKm2": 14.900418,
+        "holdingsPerKm2": 0.024942
+      },
+      "CR19": {
+        "pigs": 2058,
+        "holdings": 6,
+        "landAreaKm2": 290.22,
+        "pigsPerKm2": 7.091172,
+        "holdingsPerKm2": 0.020674
+      },
+      "CR20": {
+        "pigs": 57,
+        "holdings": 4,
+        "landAreaKm2": 159.79,
+        "pigsPerKm2": 0.356718,
+        "holdingsPerKm2": 0.025033
+      },
+      "CR21": {
+        "pigs": 0,
+        "holdings": 0,
+        "landAreaKm2": 110.25,
+        "pigsPerKm2": 0.0,
+        "holdingsPerKm2": 0.0
+      },
+      "CR22": {
+        "pigs": 0,
+        "holdings": 0,
+        "landAreaKm2": 112.45,
+        "pigsPerKm2": 0.0,
+        "holdingsPerKm2": 0.0
+      },
+      "CR23": {
+        "pigs": 4370,
+        "holdings": 14,
+        "landAreaKm2": 712.67,
+        "pigsPerKm2": 6.13187,
+        "holdingsPerKm2": 0.019644
+      },
+      "CR24": {
+        "pigs": 5,
+        "holdings": 2,
+        "landAreaKm2": 196.93,
+        "pigsPerKm2": 0.02539,
+        "holdingsPerKm2": 0.010156
+      },
+      "CR25": {
+        "pigs": 10667,
+        "holdings": 9,
+        "landAreaKm2": 276.43,
+        "pigsPerKm2": 38.588431,
+        "holdingsPerKm2": 0.032558
+      },
+      "CR26": {
+        "pigs": 4,
+        "holdings": 1,
+        "landAreaKm2": 251.6,
+        "pigsPerKm2": 0.015898,
+        "holdingsPerKm2": 0.003975
+      },
+      "CR27": {
+        "pigs": 29,
+        "holdings": 2,
+        "landAreaKm2": 151.12,
+        "pigsPerKm2": 0.1919,
+        "holdingsPerKm2": 0.013235
+      },
+      "CR28": {
+        "pigs": 48779,
+        "holdings": 41,
+        "landAreaKm2": 472.34,
+        "pigsPerKm2": 103.270949,
+        "holdingsPerKm2": 0.086802
+      },
+      "CR29": {
+        "pigs": 14903,
+        "holdings": 20,
+        "landAreaKm2": 1190.66,
+        "pigsPerKm2": 12.516587,
+        "holdingsPerKm2": 0.016797
+      },
+      "CR30": {
+        "pigs": 38465,
+        "holdings": 23,
+        "landAreaKm2": 357.94,
+        "pigsPerKm2": 107.462144,
+        "holdingsPerKm2": 0.064257
+      },
+      "CR31": {
+        "pigs": 14638,
+        "holdings": 14,
+        "landAreaKm2": 731.44,
+        "pigsPerKm2": 20.012578,
+        "holdingsPerKm2": 0.01914
+      },
+      "CR32": {
+        "pigs": 42861,
+        "holdings": 26,
+        "landAreaKm2": 1050.67,
+        "pigsPerKm2": 40.79397,
+        "holdingsPerKm2": 0.024746
+      },
+      "CR33": {
+        "pigs": 331223,
+        "holdings": 110,
+        "landAreaKm2": 1217.55,
+        "pigsPerKm2": 272.040573,
+        "holdingsPerKm2": 0.090345
+      },
+      "CR34": {
+        "pigs": 625066,
+        "holdings": 158,
+        "landAreaKm2": 896.8,
+        "pigsPerKm2": 696.995986,
+        "holdingsPerKm2": 0.176182
+      },
+      "CR35": {
+        "pigs": 2575573,
+        "holdings": 613,
+        "landAreaKm2": 1352.56,
+        "pigsPerKm2": 1904.220885,
+        "holdingsPerKm2": 0.453215
+      },
+      "CR36": {
+        "pigs": 2333094,
+        "holdings": 540,
+        "landAreaKm2": 1438.55,
+        "pigsPerKm2": 1621.837267,
+        "holdingsPerKm2": 0.375378
+      },
+      "CR37": {
+        "pigs": 1284849,
+        "holdings": 253,
+        "landAreaKm2": 831.86,
+        "pigsPerKm2": 1544.549564,
+        "holdingsPerKm2": 0.304138
+      },
+      "CR38": {
+        "pigs": 647292,
+        "holdings": 139,
+        "landAreaKm2": 664.83,
+        "pigsPerKm2": 973.620324,
+        "holdingsPerKm2": 0.209076
+      },
+      "CR39": {
+        "pigs": 18420,
+        "holdings": 19,
+        "landAreaKm2": 649.92,
+        "pigsPerKm2": 28.34195,
+        "holdingsPerKm2": 0.029234
+      },
+      "CR40": {
+        "pigs": 46609,
+        "holdings": 28,
+        "landAreaKm2": 1411.63,
+        "pigsPerKm2": 33.017859,
+        "holdingsPerKm2": 0.019835
+      }
+    },
+    "2020": {
+      "CR01": {
+        "pigs": 125256,
+        "holdings": 29,
+        "landAreaKm2": 745.01,
+        "pigsPerKm2": 168.126602,
+        "holdingsPerKm2": 0.038926
+      },
+      "CR02": {
+        "pigs": 17332,
+        "holdings": 5,
+        "landAreaKm2": 267.89,
+        "pigsPerKm2": 64.698197,
+        "holdingsPerKm2": 0.018664
+      },
+      "CR03": {
+        "pigs": 66829,
+        "holdings": 36,
+        "landAreaKm2": 1311.03,
+        "pigsPerKm2": 50.974425,
+        "holdingsPerKm2": 0.027459
+      },
+      "CR04": {
+        "pigs": 33798,
+        "holdings": 27,
+        "landAreaKm2": 1485.8,
+        "pigsPerKm2": 22.747341,
+        "holdingsPerKm2": 0.018172
+      },
+      "CR05": {
+        "pigs": 26173,
+        "holdings": 15,
+        "landAreaKm2": 874.3,
+        "pigsPerKm2": 29.935949,
+        "holdingsPerKm2": 0.017157
+      },
+      "CR06": {
+        "pigs": 51794,
+        "holdings": 24,
+        "landAreaKm2": 975.52,
+        "pigsPerKm2": 53.093735,
+        "holdingsPerKm2": 0.024602
+      },
+      "CR07": {
+        "pigs": 46867,
+        "holdings": 29,
+        "landAreaKm2": 1040.9,
+        "pigsPerKm2": 45.025459,
+        "holdingsPerKm2": 0.027861
+      },
+      "CR08": {
+        "pigs": 113341,
+        "holdings": 33,
+        "landAreaKm2": 905.78,
+        "pigsPerKm2": 125.130826,
+        "holdingsPerKm2": 0.036433
+      },
+      "CR09": {
+        "pigs": 58612,
+        "holdings": 38,
+        "landAreaKm2": 685.97,
+        "pigsPerKm2": 85.44397,
+        "holdingsPerKm2": 0.055396
+      },
+      "CR10": {
+        "pigs": 428414,
+        "holdings": 141,
+        "landAreaKm2": 1415.29,
+        "pigsPerKm2": 302.704039,
+        "holdingsPerKm2": 0.099626
+      },
+      "CR11": {
+        "pigs": 294448,
+        "holdings": 108,
+        "landAreaKm2": 415.52,
+        "pigsPerKm2": 708.625337,
+        "holdingsPerKm2": 0.259915
+      },
+      "CR12": {
+        "pigs": 806791,
+        "holdings": 301,
+        "landAreaKm2": 1488.19,
+        "pigsPerKm2": 542.129029,
+        "holdingsPerKm2": 0.202259
+      },
+      "CR13": {
+        "pigs": 532741,
+        "holdings": 325,
+        "landAreaKm2": 1828.33,
+        "pigsPerKm2": 291.381206,
+        "holdingsPerKm2": 0.177758
+      },
+      "CR14": {
+        "pigs": 844131,
+        "holdings": 338,
+        "landAreaKm2": 1544.7,
+        "pigsPerKm2": 546.469217,
+        "holdingsPerKm2": 0.218813
+      },
+      "CR15": {
+        "pigs": 234613,
+        "holdings": 81,
+        "landAreaKm2": 896.28,
+        "pigsPerKm2": 261.763065,
+        "holdingsPerKm2": 0.090374
+      },
+      "CR16": {
+        "pigs": 188461,
+        "holdings": 57,
+        "landAreaKm2": 694.39,
+        "pigsPerKm2": 271.405118,
+        "holdingsPerKm2": 0.082086
+      },
+      "CR17": {
+        "pigs": 243959,
+        "holdings": 157,
+        "landAreaKm2": 1485.46,
+        "pigsPerKm2": 164.231282,
+        "holdingsPerKm2": 0.105691
+      },
+      "CR18": {
+        "pigs": 15750,
+        "holdings": 25,
+        "landAreaKm2": 1082.52,
+        "pigsPerKm2": 14.549385,
+        "holdingsPerKm2": 0.023094
+      },
+      "CR19": {
+        "pigs": 2065,
+        "holdings": 6,
+        "landAreaKm2": 290.22,
+        "pigsPerKm2": 7.115292,
+        "holdingsPerKm2": 0.020674
+      },
+      "CR20": {
+        "pigs": 20,
+        "holdings": 4,
+        "landAreaKm2": 159.79,
+        "pigsPerKm2": 0.125164,
+        "holdingsPerKm2": 0.025033
+      },
+      "CR21": {
+        "pigs": 0,
+        "holdings": 0,
+        "landAreaKm2": 110.25,
+        "pigsPerKm2": 0.0,
+        "holdingsPerKm2": 0.0
+      },
+      "CR22": {
+        "pigs": 6,
+        "holdings": 2,
+        "landAreaKm2": 112.45,
+        "pigsPerKm2": 0.053357,
+        "holdingsPerKm2": 0.017786
+      },
+      "CR23": {
+        "pigs": 4918,
+        "holdings": 11,
+        "landAreaKm2": 712.67,
+        "pigsPerKm2": 6.90081,
+        "holdingsPerKm2": 0.015435
+      },
+      "CR24": {
+        "pigs": 6,
+        "holdings": 2,
+        "landAreaKm2": 196.93,
+        "pigsPerKm2": 0.030468,
+        "holdingsPerKm2": 0.010156
+      },
+      "CR25": {
+        "pigs": 9709,
+        "holdings": 7,
+        "landAreaKm2": 276.43,
+        "pigsPerKm2": 35.122816,
+        "holdingsPerKm2": 0.025323
+      },
+      "CR26": {
+        "pigs": 2,
+        "holdings": 1,
+        "landAreaKm2": 251.6,
+        "pigsPerKm2": 0.007949,
+        "holdingsPerKm2": 0.003975
+      },
+      "CR27": {
+        "pigs": 42,
+        "holdings": 4,
+        "landAreaKm2": 151.12,
+        "pigsPerKm2": 0.277925,
+        "holdingsPerKm2": 0.026469
+      },
+      "CR28": {
+        "pigs": 53712,
+        "holdings": 31,
+        "landAreaKm2": 472.34,
+        "pigsPerKm2": 113.714697,
+        "holdingsPerKm2": 0.065631
+      },
+      "CR29": {
+        "pigs": 4844,
+        "holdings": 23,
+        "landAreaKm2": 1190.66,
+        "pigsPerKm2": 4.068332,
+        "holdingsPerKm2": 0.019317
+      },
+      "CR30": {
+        "pigs": 26891,
+        "holdings": 19,
+        "landAreaKm2": 357.94,
+        "pigsPerKm2": 75.127116,
+        "holdingsPerKm2": 0.053082
+      },
+      "CR31": {
+        "pigs": 18365,
+        "holdings": 13,
+        "landAreaKm2": 731.44,
+        "pigsPerKm2": 25.108006,
+        "holdingsPerKm2": 0.017773
+      },
+      "CR32": {
+        "pigs": 36937,
+        "holdings": 27,
+        "landAreaKm2": 1050.67,
+        "pigsPerKm2": 35.155663,
+        "holdingsPerKm2": 0.025698
+      },
+      "CR33": {
+        "pigs": 345239,
+        "holdings": 100,
+        "landAreaKm2": 1217.55,
+        "pigsPerKm2": 283.552216,
+        "holdingsPerKm2": 0.082132
+      },
+      "CR34": {
+        "pigs": 599558,
+        "holdings": 122,
+        "landAreaKm2": 896.8,
+        "pigsPerKm2": 668.552632,
+        "holdingsPerKm2": 0.136039
+      },
+      "CR35": {
+        "pigs": 2555633,
+        "holdings": 539,
+        "landAreaKm2": 1352.56,
+        "pigsPerKm2": 1889.47847,
+        "holdingsPerKm2": 0.398504
+      },
+      "CR36": {
+        "pigs": 2237595,
+        "holdings": 482,
+        "landAreaKm2": 1438.55,
+        "pigsPerKm2": 1555.45167,
+        "holdingsPerKm2": 0.33506
+      },
+      "CR37": {
+        "pigs": 1266472,
+        "holdings": 227,
+        "landAreaKm2": 831.86,
+        "pigsPerKm2": 1522.458106,
+        "holdingsPerKm2": 0.272882
+      },
+      "CR38": {
+        "pigs": 591141,
+        "holdings": 125,
+        "landAreaKm2": 664.83,
+        "pigsPerKm2": 889.161139,
+        "holdingsPerKm2": 0.188018
+      },
+      "CR39": {
+        "pigs": 20127,
+        "holdings": 18,
+        "landAreaKm2": 649.92,
+        "pigsPerKm2": 30.968427,
+        "holdingsPerKm2": 0.027696
+      },
+      "CR40": {
+        "pigs": 47646,
+        "holdings": 25,
+        "landAreaKm2": 1411.63,
+        "pigsPerKm2": 33.752471,
+        "holdingsPerKm2": 0.01771
+      }
+    },
+    "2021": {
+      "CR01": {
+        "pigs": 119121,
+        "holdings": 31,
+        "landAreaKm2": 745.01,
+        "pigsPerKm2": 159.891814,
+        "holdingsPerKm2": 0.04161
+      },
+      "CR02": {
+        "pigs": 4707,
+        "holdings": 4,
+        "landAreaKm2": 267.89,
+        "pigsPerKm2": 17.570645,
+        "holdingsPerKm2": 0.014932
+      },
+      "CR03": {
+        "pigs": 71185,
+        "holdings": 38,
+        "landAreaKm2": 1310.78,
+        "pigsPerKm2": 54.307359,
+        "holdingsPerKm2": 0.02899
+      },
+      "CR04": {
+        "pigs": 33756,
+        "holdings": 28,
+        "landAreaKm2": 1486.05,
+        "pigsPerKm2": 22.715252,
+        "holdingsPerKm2": 0.018842
+      },
+      "CR05": {
+        "pigs": 26159,
+        "holdings": 18,
+        "landAreaKm2": 874.3,
+        "pigsPerKm2": 29.919936,
+        "holdingsPerKm2": 0.020588
+      },
+      "CR06": {
+        "pigs": 49012,
+        "holdings": 27,
+        "landAreaKm2": 975.52,
+        "pigsPerKm2": 50.241922,
+        "holdingsPerKm2": 0.027678
+      },
+      "CR07": {
+        "pigs": 46015,
+        "holdings": 27,
+        "landAreaKm2": 1040.9,
+        "pigsPerKm2": 44.206936,
+        "holdingsPerKm2": 0.025939
+      },
+      "CR08": {
+        "pigs": 112701,
+        "holdings": 33,
+        "landAreaKm2": 905.78,
+        "pigsPerKm2": 124.424253,
+        "holdingsPerKm2": 0.036433
+      },
+      "CR09": {
+        "pigs": 56337,
+        "holdings": 42,
+        "landAreaKm2": 685.97,
+        "pigsPerKm2": 82.127498,
+        "holdingsPerKm2": 0.061227
+      },
+      "CR10": {
+        "pigs": 435702,
+        "holdings": 141,
+        "landAreaKm2": 1415.29,
+        "pigsPerKm2": 307.853514,
+        "holdingsPerKm2": 0.099626
+      },
+      "CR11": {
+        "pigs": 278368,
+        "holdings": 106,
+        "landAreaKm2": 415.52,
+        "pigsPerKm2": 669.926839,
+        "holdingsPerKm2": 0.255102
+      },
+      "CR12": {
+        "pigs": 785964,
+        "holdings": 285,
+        "landAreaKm2": 1488.19,
+        "pigsPerKm2": 528.134176,
+        "holdingsPerKm2": 0.191508
+      },
+      "CR13": {
+        "pigs": 490120,
+        "holdings": 306,
+        "landAreaKm2": 1828.33,
+        "pigsPerKm2": 268.069769,
+        "holdingsPerKm2": 0.167366
+      },
+      "CR14": {
+        "pigs": 856029,
+        "holdings": 331,
+        "landAreaKm2": 1544.7,
+        "pigsPerKm2": 554.171684,
+        "holdingsPerKm2": 0.214281
+      },
+      "CR15": {
+        "pigs": 233713,
+        "holdings": 80,
+        "landAreaKm2": 896.28,
+        "pigsPerKm2": 260.758915,
+        "holdingsPerKm2": 0.089258
+      },
+      "CR16": {
+        "pigs": 189919,
+        "holdings": 56,
+        "landAreaKm2": 694.39,
+        "pigsPerKm2": 273.504803,
+        "holdingsPerKm2": 0.080646
+      },
+      "CR17": {
+        "pigs": 247187,
+        "holdings": 158,
+        "landAreaKm2": 1485.46,
+        "pigsPerKm2": 166.404346,
+        "holdingsPerKm2": 0.106364
+      },
+      "CR18": {
+        "pigs": 15491,
+        "holdings": 28,
+        "landAreaKm2": 1082.52,
+        "pigsPerKm2": 14.310128,
+        "holdingsPerKm2": 0.025866
+      },
+      "CR19": {
+        "pigs": 2072,
+        "holdings": 9,
+        "landAreaKm2": 290.22,
+        "pigsPerKm2": 7.139411,
+        "holdingsPerKm2": 0.031011
+      },
+      "CR20": {
+        "pigs": 13,
+        "holdings": 4,
+        "landAreaKm2": 159.79,
+        "pigsPerKm2": 0.081357,
+        "holdingsPerKm2": 0.025033
+      },
+      "CR21": {
+        "pigs": 0,
+        "holdings": 0,
+        "landAreaKm2": 110.25,
+        "pigsPerKm2": 0.0,
+        "holdingsPerKm2": 0.0
+      },
+      "CR22": {
+        "pigs": 10,
+        "holdings": 3,
+        "landAreaKm2": 112.45,
+        "pigsPerKm2": 0.088928,
+        "holdingsPerKm2": 0.026679
+      },
+      "CR23": {
+        "pigs": 5222,
+        "holdings": 14,
+        "landAreaKm2": 712.67,
+        "pigsPerKm2": 7.327375,
+        "holdingsPerKm2": 0.019644
+      },
+      "CR24": {
+        "pigs": 7,
+        "holdings": 1,
+        "landAreaKm2": 196.93,
+        "pigsPerKm2": 0.035546,
+        "holdingsPerKm2": 0.005078
+      },
+      "CR25": {
+        "pigs": 10274,
+        "holdings": 9,
+        "landAreaKm2": 276.43,
+        "pigsPerKm2": 37.166733,
+        "holdingsPerKm2": 0.032558
+      },
+      "CR26": {
+        "pigs": 2,
+        "holdings": 1,
+        "landAreaKm2": 251.6,
+        "pigsPerKm2": 0.007949,
+        "holdingsPerKm2": 0.003975
+      },
+      "CR27": {
+        "pigs": 28,
+        "holdings": 3,
+        "landAreaKm2": 151.12,
+        "pigsPerKm2": 0.185283,
+        "holdingsPerKm2": 0.019852
+      },
+      "CR28": {
+        "pigs": 52826,
+        "holdings": 34,
+        "landAreaKm2": 472.34,
+        "pigsPerKm2": 111.83893,
+        "holdingsPerKm2": 0.071982
+      },
+      "CR29": {
+        "pigs": 3806,
+        "holdings": 24,
+        "landAreaKm2": 1190.66,
+        "pigsPerKm2": 3.196546,
+        "holdingsPerKm2": 0.020157
+      },
+      "CR30": {
+        "pigs": 31988,
+        "holdings": 26,
+        "landAreaKm2": 357.94,
+        "pigsPerKm2": 89.366933,
+        "holdingsPerKm2": 0.072638
+      },
+      "CR31": {
+        "pigs": 17643,
+        "holdings": 14,
+        "landAreaKm2": 731.44,
+        "pigsPerKm2": 24.120912,
+        "holdingsPerKm2": 0.01914
+      },
+      "CR32": {
+        "pigs": 44472,
+        "holdings": 27,
+        "landAreaKm2": 1050.67,
+        "pigsPerKm2": 42.327277,
+        "holdingsPerKm2": 0.025698
+      },
+      "CR33": {
+        "pigs": 360434,
+        "holdings": 97,
+        "landAreaKm2": 1217.55,
+        "pigsPerKm2": 296.032196,
+        "holdingsPerKm2": 0.079668
+      },
+      "CR34": {
+        "pigs": 594850,
+        "holdings": 121,
+        "landAreaKm2": 922.85,
+        "pigsPerKm2": 644.579292,
+        "holdingsPerKm2": 0.131116
+      },
+      "CR35": {
+        "pigs": 2351183,
+        "holdings": 480,
+        "landAreaKm2": 1326.51,
+        "pigsPerKm2": 1772.457803,
+        "holdingsPerKm2": 0.361852
+      },
+      "CR36": {
+        "pigs": 2093078,
+        "holdings": 435,
+        "landAreaKm2": 1438.55,
+        "pigsPerKm2": 1454.991484,
+        "holdingsPerKm2": 0.302388
+      },
+      "CR37": {
+        "pigs": 1098933,
+        "holdings": 198,
+        "landAreaKm2": 831.86,
+        "pigsPerKm2": 1321.055226,
+        "holdingsPerKm2": 0.238021
+      },
+      "CR38": {
+        "pigs": 636911,
+        "holdings": 117,
+        "landAreaKm2": 664.83,
+        "pigsPerKm2": 958.005806,
+        "holdingsPerKm2": 0.175985
+      },
+      "CR39": {
+        "pigs": 20115,
+        "holdings": 21,
+        "landAreaKm2": 649.92,
+        "pigsPerKm2": 30.949963,
+        "holdingsPerKm2": 0.032312
+      },
+      "CR40": {
+        "pigs": 81478,
+        "holdings": 28,
+        "landAreaKm2": 1411.63,
+        "pigsPerKm2": 57.719091,
+        "holdingsPerKm2": 0.019835
+      }
+    },
+    "2022": {
+      "CR01": {
+        "pigs": 122467,
+        "holdings": 33,
+        "landAreaKm2": 744.94,
+        "pigsPerKm2": 164.398475,
+        "holdingsPerKm2": 0.044299
+      },
+      "CR02": {
+        "pigs": 4927,
+        "holdings": 5,
+        "landAreaKm2": 268.07,
+        "pigsPerKm2": 18.379528,
+        "holdingsPerKm2": 0.018652
+      },
+      "CR03": {
+        "pigs": 39405,
+        "holdings": 36,
+        "landAreaKm2": 1302.85,
+        "pigsPerKm2": 30.245232,
+        "holdingsPerKm2": 0.027632
+      },
+      "CR04": {
+        "pigs": 37171,
+        "holdings": 32,
+        "landAreaKm2": 1491.16,
+        "pigsPerKm2": 24.927573,
+        "holdingsPerKm2": 0.02146
+      },
+      "CR05": {
+        "pigs": 25291,
+        "holdings": 15,
+        "landAreaKm2": 873.91,
+        "pigsPerKm2": 28.940051,
+        "holdingsPerKm2": 0.017164
+      },
+      "CR06": {
+        "pigs": 71567,
+        "holdings": 29,
+        "landAreaKm2": 975.04,
+        "pigsPerKm2": 73.39904,
+        "holdingsPerKm2": 0.029742
+      },
+      "CR07": {
+        "pigs": 41783,
+        "holdings": 28,
+        "landAreaKm2": 1040.45,
+        "pigsPerKm2": 40.158585,
+        "holdingsPerKm2": 0.026911
+      },
+      "CR08": {
+        "pigs": 110036,
+        "holdings": 29,
+        "landAreaKm2": 906.13,
+        "pigsPerKm2": 121.435114,
+        "holdingsPerKm2": 0.032004
+      },
+      "CR09": {
+        "pigs": 55556,
+        "holdings": 43,
+        "landAreaKm2": 686.08,
+        "pigsPerKm2": 80.975979,
+        "holdingsPerKm2": 0.062675
+      },
+      "CR10": {
+        "pigs": 425755,
+        "holdings": 141,
+        "landAreaKm2": 1413.54,
+        "pigsPerKm2": 301.197702,
+        "holdingsPerKm2": 0.09975
+      },
+      "CR11": {
+        "pigs": 279370,
+        "holdings": 102,
+        "landAreaKm2": 415.2,
+        "pigsPerKm2": 672.856455,
+        "holdingsPerKm2": 0.245665
+      },
+      "CR12": {
+        "pigs": 797402,
+        "holdings": 284,
+        "landAreaKm2": 1487.78,
+        "pigsPerKm2": 535.967683,
+        "holdingsPerKm2": 0.190888
+      },
+      "CR13": {
+        "pigs": 477594,
+        "holdings": 292,
+        "landAreaKm2": 1828.01,
+        "pigsPerKm2": 261.264435,
+        "holdingsPerKm2": 0.159737
+      },
+      "CR14": {
+        "pigs": 854294,
+        "holdings": 324,
+        "landAreaKm2": 1544.63,
+        "pigsPerKm2": 553.073552,
+        "holdingsPerKm2": 0.209759
+      },
+      "CR15": {
+        "pigs": 248170,
+        "holdings": 81,
+        "landAreaKm2": 895.52,
+        "pigsPerKm2": 277.123906,
+        "holdingsPerKm2": 0.09045
+      },
+      "CR16": {
+        "pigs": 188538,
+        "holdings": 59,
+        "landAreaKm2": 692.3,
+        "pigsPerKm2": 272.335693,
+        "holdingsPerKm2": 0.085223
+      },
+      "CR17": {
+        "pigs": 255127,
+        "holdings": 154,
+        "landAreaKm2": 1484.47,
+        "pigsPerKm2": 171.864032,
+        "holdingsPerKm2": 0.103741
+      },
+      "CR18": {
+        "pigs": 12919,
+        "holdings": 30,
+        "landAreaKm2": 1082.35,
+        "pigsPerKm2": 11.936065,
+        "holdingsPerKm2": 0.027717
+      },
+      "CR19": {
+        "pigs": 2035,
+        "holdings": 10,
+        "landAreaKm2": 289.92,
+        "pigsPerKm2": 7.019178,
+        "holdingsPerKm2": 0.034492
+      },
+      "CR20": {
+        "pigs": 7,
+        "holdings": 2,
+        "landAreaKm2": 159.45,
+        "pigsPerKm2": 0.043901,
+        "holdingsPerKm2": 0.012543
+      },
+      "CR21": {
+        "pigs": 0,
+        "holdings": 0,
+        "landAreaKm2": 110.23,
+        "pigsPerKm2": 0.0,
+        "holdingsPerKm2": 0.0
+      },
+      "CR22": {
+        "pigs": 13,
+        "holdings": 3,
+        "landAreaKm2": 112.25,
+        "pigsPerKm2": 0.115813,
+        "holdingsPerKm2": 0.026726
+      },
+      "CR23": {
+        "pigs": 5201,
+        "holdings": 15,
+        "landAreaKm2": 711.77,
+        "pigsPerKm2": 7.307136,
+        "holdingsPerKm2": 0.021074
+      },
+      "CR24": {
+        "pigs": 1,
+        "holdings": 1,
+        "landAreaKm2": 196.6,
+        "pigsPerKm2": 0.005086,
+        "holdingsPerKm2": 0.005086
+      },
+      "CR25": {
+        "pigs": 12080,
+        "holdings": 10,
+        "landAreaKm2": 276.06,
+        "pigsPerKm2": 43.758603,
+        "holdingsPerKm2": 0.036224
+      },
+      "CR26": {
+        "pigs": 16,
+        "holdings": 3,
+        "landAreaKm2": 251.51,
+        "pigsPerKm2": 0.063616,
+        "holdingsPerKm2": 0.011928
+      },
+      "CR27": {
+        "pigs": 44,
+        "holdings": 4,
+        "landAreaKm2": 150.61,
+        "pigsPerKm2": 0.292145,
+        "holdingsPerKm2": 0.026559
+      },
+      "CR28": {
+        "pigs": 64573,
+        "holdings": 32,
+        "landAreaKm2": 472.37,
+        "pigsPerKm2": 136.700044,
+        "holdingsPerKm2": 0.067744
+      },
+      "CR29": {
+        "pigs": 3436,
+        "holdings": 21,
+        "landAreaKm2": 1191.62,
+        "pigsPerKm2": 2.88347,
+        "holdingsPerKm2": 0.017623
+      },
+      "CR30": {
+        "pigs": 35179,
+        "holdings": 23,
+        "landAreaKm2": 356.23,
+        "pigsPerKm2": 98.753614,
+        "holdingsPerKm2": 0.064565
+      },
+      "CR31": {
+        "pigs": 15329,
+        "holdings": 16,
+        "landAreaKm2": 729.99,
+        "pigsPerKm2": 20.998918,
+        "holdingsPerKm2": 0.021918
+      },
+      "CR32": {
+        "pigs": 46611,
+        "holdings": 28,
+        "landAreaKm2": 1049.9,
+        "pigsPerKm2": 44.395657,
+        "holdingsPerKm2": 0.026669
+      },
+      "CR33": {
+        "pigs": 348390,
+        "holdings": 95,
+        "landAreaKm2": 1217.27,
+        "pigsPerKm2": 286.206018,
+        "holdingsPerKm2": 0.078043
+      },
+      "CR34": {
+        "pigs": 545628,
+        "holdings": 113,
+        "landAreaKm2": 921.75,
+        "pigsPerKm2": 591.947925,
+        "holdingsPerKm2": 0.122593
+      },
+      "CR35": {
+        "pigs": 2301234,
+        "holdings": 431,
+        "landAreaKm2": 1324.54,
+        "pigsPerKm2": 1737.383544,
+        "holdingsPerKm2": 0.325396
+      },
+      "CR36": {
+        "pigs": 2050857,
+        "holdings": 408,
+        "landAreaKm2": 1437.98,
+        "pigsPerKm2": 1426.206901,
+        "holdingsPerKm2": 0.283731
+      },
+      "CR37": {
+        "pigs": 1069931,
+        "holdings": 183,
+        "landAreaKm2": 831.46,
+        "pigsPerKm2": 1286.809949,
+        "holdingsPerKm2": 0.220095
+      },
+      "CR38": {
+        "pigs": 630339,
+        "holdings": 108,
+        "landAreaKm2": 664.22,
+        "pigsPerKm2": 948.991298,
+        "holdingsPerKm2": 0.162597
+      },
+      "CR39": {
+        "pigs": 18059,
+        "holdings": 23,
+        "landAreaKm2": 648.95,
+        "pigsPerKm2": 27.82803,
+        "holdingsPerKm2": 0.035442
+      },
+      "CR40": {
+        "pigs": 82523,
+        "holdings": 27,
+        "landAreaKm2": 1410.12,
+        "pigsPerKm2": 58.52197,
+        "holdingsPerKm2": 0.019147
+      }
+    }
+  }
+}

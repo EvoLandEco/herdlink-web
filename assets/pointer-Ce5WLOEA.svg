@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64">
+  <defs>
+    <filter id="glow" x="0" y="0" width="64" height="64" filterUnits="userSpaceOnUse" color-interpolation-filters="sRGB">
+      <feDropShadow dx="0" dy="0" stdDeviation="5.5" flood-color="#f56aa6" flood-opacity=".6"/>
+      <feDropShadow dx="0" dy="0" stdDeviation="2" flood-color="#ffac70" flood-opacity=".9"/>
+    </filter>
+  </defs>
+  <g filter="url(#glow)">
+    <g transform="translate(8 8)">
+      <path d="M20 10C18.3 10 17.3 11.3 17.3 13V22.8L16.3 21.8C13.3 18.8 10.2 22.2 13.2 25.2L17.5 29.7Q18.6 30.9 19.1 32.8Q19.8 35.8 23 35.8H27.8Q30.8 35.8 31.7 32.8L33 28.1Q33.6 26.2 33.6 24.2V22.8C33.6 19.8 29.4 19.6 29.4 22.5V20.7C29.4 17.5 25.2 17.3 25.2 20.6V19C25.2 16.1 22.7 16 22.7 18.8V13C22.7 11.3 21.7 10 20 10Z" fill="#101114" stroke="#fff" stroke-width="2.5" stroke-linejoin="round" stroke-linecap="round"/>
+    </g>
+  </g>
+</svg>
