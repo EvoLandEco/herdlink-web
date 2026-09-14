@@ -233,11 +233,34 @@
 }
 
 .scenario-library {
-  margin-bottom: 18px;
+  position: absolute;
+  top: 8px;
+  right: 18px;
+  z-index: 3;
+  width: min(920px, calc(100% - 36px));
+  max-height: calc(100% - 26px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+  scrollbar-color: var(--color-border-strong) transparent;
   padding: 16px;
   border: 1px solid rgba(114, 228, 212, 0.24);
   border-radius: var(--radius-lg);
   background: radial-gradient(ellipse at 0 0, rgba(114, 228, 212, 0.07), transparent 65%), var(--color-canvas);
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.45), inset 0 1px rgba(114, 228, 212, 0.08);
+}
+
+.comparison-custom-backdrop {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  width: 100%;
+  height: 100%;
+  padding: 0;
+  border: 0;
+  background: rgba(8, 15, 24, 0.25);
+  backdrop-filter: blur(5px);
+  cursor: default;
 }
 
 .scenario-library[hidden] { display: none; }
@@ -251,8 +274,8 @@
 }
 
 .scenario-library h3 { margin: 0; font-size: 15px; font-weight: 600; }
-.scenario-library__heading p { margin: 4px 0 0; color: var(--color-text-muted); font-size: 10px; }
-.scenario-library .comparison-info__tip { top: calc(100% + 10px); bottom: auto; }
+.scenario-library .comparison-info__tip { display: none; top: calc(100% + 10px); bottom: auto; }
+.scenario-library .comparison-info:is(:hover, :focus-within) .comparison-info__tip { display: block; }
 
 .scenario-slot-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 9px; margin-top: 16px; }
 .scenario-preset {
@@ -427,6 +450,7 @@
 
 .scenario-slot__actions button:last-child { color: var(--color-text-muted); background: transparent; }
 .scenario-library button:disabled,
+.comparison-scenarios-toggle:disabled,
 .scenario-library input:disabled { opacity: 0.45; cursor: not-allowed; }
 .comparison-scenario-message {
   flex: 0 0 auto;
@@ -438,6 +462,59 @@
 }
 
 .comparison-scenario-message.is-error { color: var(--color-chart-incoming); }
+
+.comparison-results,
+.comparison-results__content {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.comparison-results { position: relative; }
+.comparison-results__content { isolation: isolate; }
+
+.comparison-recomputing {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 20px;
+  color: var(--color-accent-strong);
+  background: rgba(8, 15, 24, 0.3);
+  backdrop-filter: blur(5px);
+  font: 12px var(--font-body);
+  letter-spacing: 0.04em;
+}
+
+.comparison-recomputing__ring {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: 58px;
+  height: 58px;
+  border: 1px solid var(--color-border-strong);
+  border-radius: 50%;
+  background: var(--color-canvas);
+  box-shadow: 0 0 28px var(--color-accent-soft), inset 0 0 18px var(--color-accent-soft);
+  font-size: 21px;
+}
+
+.comparison-recomputing__ring::before {
+  content: "";
+  position: absolute;
+  inset: -6px;
+  border: 2px solid transparent;
+  border-top-color: var(--color-accent);
+  border-bottom-color: var(--color-accent-soft);
+  border-radius: 50%;
+  animation: comparison-recompute-spin 1.2s linear infinite;
+}
+
+@keyframes comparison-recompute-spin { to { transform: rotate(360deg); } }
 
 .comparison-body {
   min-height: 0;
@@ -482,8 +559,14 @@
   min-height: 21px;
 }
 
+.comparison-scope > .comparison-scope__heading {
+  min-height: 32px;
+  margin-bottom: 14px;
+}
+
 .comparison-scope h3,
 .comparison-changes h3 {
+  flex-shrink: 0;
   margin: 0;
   font-size: 14px;
   font-weight: 600;
@@ -492,9 +575,12 @@
 
 .comparison-scope__context {
   display: flex;
+  flex: 1 1 0;
   align-items: center;
-  min-height: 41px;
-  margin: 5px 0 10px;
+  justify-content: flex-end;
+  min-width: 0;
+  max-width: 320px;
+  margin-left: auto;
   color: var(--color-text-subtle);
   font-size: 11px;
 }
@@ -567,9 +653,12 @@
 }
 
 .comparison-delta {
-  grid-column: 1 / -1;
-  color: var(--color-text-muted);
-  font: 10px var(--font-data);
+  fill: var(--color-text-muted);
+  font: 11px var(--font-data);
+  stroke: var(--color-canvas);
+  stroke-width: 4px;
+  stroke-linejoin: round;
+  paint-order: stroke;
 }
 
 .comparison-chart-container {
@@ -597,6 +686,46 @@
 .comparison-axis {
   fill: var(--color-text-subtle);
   font: 11px var(--font-data);
+}
+
+.comparison-chart-interventions {
+  pointer-events: none;
+  stroke: var(--color-chart-incoming);
+  stroke-width: 1;
+  stroke-dasharray: 2 4;
+  opacity: 0.5;
+}
+
+.comparison-chart-events {
+  position: absolute;
+  height: 20px;
+  pointer-events: none;
+}
+
+.comparison-chart-events .comparison-event {
+  --event-tip-width: min(320px, var(--chart-event-width));
+}
+
+.comparison-chart-events .comparison-event::before { display: none; }
+.comparison-chart-events .comparison-event::after { top: 100%; bottom: auto; height: 10px; }
+.comparison-chart-events .comparison-event__tip {
+  top: calc(100% + 10px);
+  bottom: auto;
+  max-height: min(280px, var(--chart-event-space));
+}
+.comparison-chart-events .comparison-event[data-placement="above"] .comparison-event__tip { top: auto; bottom: calc(100% + 10px); }
+.comparison-chart-events .comparison-event[data-placement="above"]::after { top: auto; bottom: 100%; }
+
+.comparison-chart-events .comparison-event__marker > span {
+  width: 9px;
+  height: 9px;
+  background: var(--color-chart-incoming);
+}
+
+.comparison-chart-events .comparison-event__marker.is-grouped > span {
+  width: 14px;
+  height: 14px;
+  color: var(--color-canvas);
 }
 
 .comparison-scope__heading .comparison-info__tip {
@@ -1186,10 +1315,10 @@
   scrollbar-color: var(--color-border-strong) transparent;
 }
 
-.comparison-body .comparison-info__tip { top: calc(100% + 10px); bottom: auto; }
-.comparison-body .comparison-info::after { top: 100%; bottom: auto; }
-.comparison-body .comparison-info[data-placement="above"] .comparison-info__tip { top: auto; bottom: calc(100% + 10px); }
-.comparison-body .comparison-info[data-placement="above"]::after { top: auto; bottom: 100%; }
+:is(.comparison-body, .scenario-library) .comparison-info__tip { top: calc(100% + 10px); bottom: auto; }
+:is(.comparison-body, .scenario-library) .comparison-info::after { top: 100%; bottom: auto; }
+:is(.comparison-body, .scenario-library) .comparison-info[data-placement="above"] .comparison-info__tip { top: auto; bottom: calc(100% + 10px); }
+:is(.comparison-body, .scenario-library) .comparison-info[data-placement="above"]::after { top: auto; bottom: 100%; }
 .comparison-info__tip:focus-visible { outline: 2px solid var(--color-accent); outline-offset: 2px; }
 
 .comparison-info:hover,

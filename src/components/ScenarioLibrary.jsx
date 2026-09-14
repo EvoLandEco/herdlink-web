@@ -110,12 +110,12 @@ export const ScenarioPresets = memo(function ScenarioPresets({ context, onLoadPr
   );
 });
 
-export const ScenarioLibrary = memo(function ScenarioLibrary({ id, open, context, slots, onSaveScenario, onLoadScenario, Info }) {
+export const ScenarioLibrary = memo(function ScenarioLibrary({ id, panelRef, open, context, slots, onSaveScenario, onLoadScenario, Info }) {
   const headingId = useId();
   return (
-    <section id={id} className="scenario-library" hidden={!open} aria-labelledby={headingId}>
+    <section ref={panelRef} id={id} className="scenario-library" hidden={!open} aria-labelledby={headingId}>
       <div className="scenario-library__heading">
-        <div><h3 id={headingId}>Custom scenarios</h3><p>Keep your settings and intervention schedule.</p></div>
+        <h3 id={headingId}>Custom scenarios</h3>
         <Info label="Custom scenarios" icon={faLayerGroup} rows={[
           ["Save", "Store the dataset, model settings, seed, and complete intervention schedule."],
           ["Overwrite", "Replace the scenario stored in that slot."],

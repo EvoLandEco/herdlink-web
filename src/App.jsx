@@ -928,6 +928,7 @@ export default function App() {
         <ComparisonOverlay
           open={comparison.open}
           data={comparison.data}
+          recomputing={comparison.recomputing}
           onClose={comparison.close}
           onModeChange={comparison.changeMode}
           scenarioSlots={comparison.scenarioSlots}

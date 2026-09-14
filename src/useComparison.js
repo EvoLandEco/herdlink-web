@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { readScenarioSlots, saveScenarioSlot, scenarioStorageKey } from "./scenarioStorage";
 
 export function isComparisonShortcut(event) {
@@ -14,9 +14,27 @@ export function useComparison(hasSupportedScreen) {
   const [scenarioSlots, setScenarioSlots] = useState([null, null, null]);
   const [scenarioError, setScenarioError] = useState("");
   const [scenarioNotice, setScenarioNotice] = useState("");
+  const [recomputing, setRecomputing] = useState(false);
   const openRef = useRef(false);
+  const operationRef = useRef(null);
+  const restoreFocusRef = useRef(null);
+
+  useLayoutEffect(() => {
+    if (recomputing) return;
+    const target = restoreFocusRef.current;
+    restoreFocusRef.current = null;
+    if (open && document.activeElement === document.body && target?.isConnected &&
+      target.closest("#comparisonOverlay") && !target.matches(":disabled") && !target.closest("[inert]") &&
+      target.getClientRects().length && getComputedStyle(target).visibility === "visible") {
+      target.focus({ preventScroll: true });
+    }
+  }, [open, recomputing]);
 
   const close = useCallback(() => {
+    if (operationRef.current?.frame != null) cancelAnimationFrame(operationRef.current.frame);
+    operationRef.current = null;
+    restoreFocusRef.current = null;
+    setRecomputing(false);
     openRef.current = false;
     setOpen(false);
   }, []);
@@ -38,21 +56,42 @@ export function useComparison(hasSupportedScreen) {
   }, [close, hasSupportedScreen]);
 
   const changeMode = useCallback((mode) => {
+    if (operationRef.current) return;
     window.herdlinkComparison?.setMode(mode);
   }, []);
 
-  const loadPreset = useCallback((id) => {
+  const runScenarioLoad = useCallback((load, message) => {
+    if (!openRef.current || operationRef.current) return;
+    const operation = { frame: null, started: false };
+    operationRef.current = operation;
+    restoreFocusRef.current = document.activeElement;
+    setRecomputing(true);
     setScenarioError("");
     setScenarioNotice("");
-    try {
-      const result = window.herdlinkComparison.loadPreset(id);
-      setScenarioNotice(`${result.label} loaded. ${result.detail || ""}`.trim());
-    } catch (error) {
-      setScenarioError(error.message || "The preset could not be loaded.");
-    }
+    operation.frame = requestAnimationFrame(() => {
+      operation.frame = requestAnimationFrame(() => {
+        operation.frame = null;
+        if (operationRef.current !== operation) return;
+        operation.started = true;
+        try {
+          load();
+        } catch (error) {
+          setScenarioError(error.message || message);
+        }
+        window.dispatchEvent(new Event("herdlink:comparison-change"));
+      });
+    });
   }, []);
 
+  const loadPreset = useCallback((id) => {
+    runScenarioLoad(() => {
+      const result = window.herdlinkComparison.loadPreset(id);
+      setScenarioNotice(`${result.label} loaded. ${result.detail || ""}`.trim());
+    }, "The preset could not be loaded.");
+  }, [runScenarioLoad]);
+
   const saveScenario = useCallback((index, name) => {
+    if (operationRef.current) return;
     setScenarioError("");
     setScenarioNotice("");
     try {
@@ -66,19 +105,15 @@ export function useComparison(hasSupportedScreen) {
   }, []);
 
   const loadScenario = useCallback((index) => {
-    setScenarioError("");
-    setScenarioNotice("");
-    try {
+    runScenarioLoad(() => {
       const slots = readScenarioSlots(window.localStorage);
       setScenarioSlots(slots);
       const slot = slots[index];
       if (!slot) throw new Error("This scenario slot is empty.");
       window.herdlinkComparison.loadScenario(slot.scenario);
       setScenarioNotice(`${slot.name} loaded with its saved model settings and seed region.`);
-    } catch (error) {
-      setScenarioError(error.message || "The saved scenario could not be loaded.");
-    }
-  }, []);
+    }, "The saved scenario could not be loaded.");
+  }, [runScenarioLoad]);
 
   useEffect(() => {
     const readSlots = (event) => {
@@ -107,10 +142,19 @@ export function useComparison(hasSupportedScreen) {
         frame = null;
         if (!openRef.current) return;
         try {
-          setData(window.herdlinkComparison?.read() || null);
+          const next = window.herdlinkComparison?.read() || null;
+          setData(next);
+          if (operationRef.current?.started && ["ready", "error", "empty"].includes(next?.status)) {
+            operationRef.current = null;
+            setRecomputing(false);
+          }
         } catch (error) {
           console.error("Unable to calculate comparison:", error);
           setData({ status: "error" });
+          if (operationRef.current?.started) {
+            operationRef.current = null;
+            setRecomputing(false);
+          }
         }
       });
     };
@@ -132,10 +176,13 @@ export function useComparison(hasSupportedScreen) {
       window.removeEventListener("herdlink:comparison-change", refresh);
       document.removeEventListener("keydown", handleKey, true);
       if (frame !== null) cancelAnimationFrame(frame);
+      if (operationRef.current?.frame != null) cancelAnimationFrame(operationRef.current.frame);
+      operationRef.current = null;
+      restoreFocusRef.current = null;
       delete window.isComparisonOverlayOpen;
     };
   }, [hasSupportedScreen, toggle, changeMode]);
 
-  return { open, data, close, toggle, changeMode, scenarioSlots, scenarioError, scenarioNotice,
+  return { open, data, recomputing, close, toggle, changeMode, scenarioSlots, scenarioError, scenarioNotice,
     loadPreset, saveScenario, loadScenario };
 }

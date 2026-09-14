@@ -52,10 +52,10 @@ export function nearestComparisonDate(dates, timestamp) {
 
 export const comparisonEventMarkerWidth = 14;
 
-export function groupComparisonEvents(groups, dates, trackWidth) {
+export function groupComparisonEvents(groups, dates, trackWidth, positionForDate) {
   if (trackWidth <= 0 || !dates.length) return [];
   const positions = new Map(dates.map((date, index) =>
-    [date, dates.length > 1 ? index / (dates.length - 1) : 0]));
+    [date, positionForDate ? positionForDate(date) : dates.length > 1 ? index / (dates.length - 1) : 0]));
   const ordered = groups.filter((group) => positions.has(group.date))
     .sort((a, b) => positions.get(a.date) - positions.get(b.date));
   const clusters = [];

@@ -107,6 +107,7 @@ test("opening waits for runtime registration, respects capture and viewport lock
       useCallback: (callback) => callback,
       useRef: (current) => ({ current }),
       useEffect() {},
+      useLayoutEffect() {},
       document: { getElementById: () => ({ closest: () => inert ? {} : null }) },
       window: {
         herdlinkComparison: runtimeReady ? bridge : undefined,

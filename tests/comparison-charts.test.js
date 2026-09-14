@@ -108,6 +108,36 @@ test("event grouping uses range steps, includes touching targets, and handles si
   assert.deepEqual(groupComparisonEvents(events, [], 100), []);
 });
 
+test("chart event targets follow calendar spacing and exclude dates outside the recorded series", () => {
+  const events = ["2019-12-31", ...dates, "2020-01-03", "2020-01-06"]
+    .map((date) => ({ date, events: [{ date, description: "Blocked" }] }));
+  const saved = structuredClone(events);
+  const points = dates.map((date) => ({ date, original: 1, intervention: 0 }));
+
+  for (const width of [120, 240]) {
+    const chart = buildComparisonChart(points, width);
+    const plotWidth = chart.plot.right - chart.plot.left;
+    const positionForDate = (date) => (chart.x(Date.parse(date)) - chart.plot.left) / plotWidth;
+    const clusters = groupComparisonEvents(events, dates, plotWidth, positionForDate);
+    assert.deepEqual(clusters.flatMap(({ steps }) => steps), events.slice(1, 4));
+    if (width === 120) {
+      assert.deepEqual(clusters.map(({ position, steps }) => [position, steps.length]), [[0.125, 2], [1, 1]]);
+      assert.equal(groupComparisonEvents(events, dates, plotWidth).length, 3);
+    } else {
+      for (const cluster of clusters) {
+        assert.equal(chart.plot.left + cluster.position * plotWidth, chart.x(Date.parse(cluster.steps[0].date)));
+      }
+    }
+  }
+
+  const single = buildComparisonChart([points[0]], 240);
+  const plotWidth = single.plot.right - single.plot.left;
+  assert.deepEqual(groupComparisonEvents(events, [dates[0]], plotWidth,
+    (date) => (single.x(Date.parse(date)) - single.plot.left) / plotWidth),
+  [{ position: 0.5, steps: [events[1]] }]);
+  assert.deepEqual(events, saved);
+});
+
 test("percent changes use percentage points and unavailable values stay missing", () => {
   assert.equal(formatComparisonDelta(0.5, 0.25, "percent"), "−25 pp");
   assert.equal(formatComparisonDelta(10, 13, "count"), "+3");
