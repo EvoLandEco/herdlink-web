@@ -5759,11 +5759,12 @@
               .attr("rx", 4)
               .attr("ry", 4);
             labelGroupsEnter.append("text")
-              .attr("alignment-baseline", "middle")
-              .attr("fill", theme.text);
+              .attr("alignment-baseline", "middle");
 
             const labelGroupsMerge = labelGroupsEnter.merge(labelGroups);
-            labelGroupsMerge.select("text").text((d) => d.nodeId);
+            labelGroupsMerge.select("text")
+              .attr("fill", (d) => d.color)
+              .text((d) => d.nodeId);
             labelGroupsMerge.each(function (d) {
               const bbox = d3.select(this).select("text").node().getBBox();
               d.box = {
