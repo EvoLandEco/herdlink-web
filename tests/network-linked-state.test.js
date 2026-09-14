@@ -21,6 +21,7 @@ test("ledger node colors follow the current partition after a same-date network 
   const allNodes = [{ id: "CR35", community: 0 }, { id: "CR10", community: 0 }];
   const stats = { partition: { CR35: 1, CR10: 2 }, spectralRadius: 0.5 };
   const fills = new Map();
+  let colorDomain;
   const chain = selection();
   const scale = () => "risk-color";
   for (const name of ["domain", "range", "clamp"]) scale[name] = () => scale;
@@ -33,7 +34,10 @@ test("ledger node colors follow the current partition after a same-date network 
     },
     isSimulationModeActive: () => false,
     restoreLedgerHotspotsMax() {}, computeSpectralRadius() { assert.fail("Cached frame statistics already include the spectral radius"); },
-    ledgerBaselineSpectralRadius: 1, nodeColor: (community) => `partition-${community}`,
+    ledgerBaselineSpectralRadius: 1,
+    nodeColor: Object.assign((community) => `partition-${community}`, {
+      domain(values) { colorDomain = Array.from(values); },
+    }),
     theme: {}, document: { getElementById: () => ({
       style: {}, querySelector: () => ({ style: {} }),
     }) },
@@ -53,10 +57,12 @@ test("ledger node colors follow the current partition after a same-date network 
   vm.runInContext(extractFunction("updateNetworkStats"), context);
   context.updateNetworkStats();
   assert.deepEqual(Array.from(fills.values()), ["partition-1", "partition-2"]);
+  assert.deepEqual(colorDomain, [1, 2]);
 
   stats.partition = { CR35: 3, CR10: 3 };
   context.updateNetworkStats();
   assert.deepEqual(Array.from(fills.values()), ["partition-3", "partition-3"]);
+  assert.deepEqual(colorDomain, [3]);
 });
 
 test("radar axes remain finite when restrictions remove a metric across all dates", () => {

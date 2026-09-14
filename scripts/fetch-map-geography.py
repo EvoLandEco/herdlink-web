@@ -153,13 +153,13 @@ def build(archive_path):
         "attribution": "Contains Kadaster TOP250NL data, provided by PDOK (CC BY 4.0).",
         "crs": "EPSG:28992",
         "scale": "1:250,000",
-        "processing": "Source coordinates are retained without simplification. Geometry parts are grouped by display class; place polygons sharing a name are grouped for label placement.",
+        "processing": "Source coordinates are preserved. Geometry parts are grouped by display class; place polygons sharing a name are grouped for label placement.",
         "layers": {
             "roads": {"selection": "Line features in use, with typeWeg autosnelweg or hoofdweg.",
                       "classes": {"motorway": "autosnelweg", "main": "hoofdweg"}},
             "water": {"selection": "All waterloop and meer, plas polygons; watercourse lines in width classes 12–50 m, 50–125 m and greater than 125 m. Sea and tidal flats are excluded.",
                       "classes": {"water": "Water areas", "waterway": "Watercourses at least 12 m wide"}},
-            "land-cover": {"selection": "All bos and zand terrain polygons, plus all woonkern settlement polygons. Other terrain is unclassified; this layer does not map agricultural land.",
+            "land-cover": {"selection": "All bos and zand terrain polygons, plus all woonkern settlement polygons. Other terrain, including agricultural land, is unclassified.",
                            "classes": {"woodland": "Woodland", "urban": "Settlements", "sand": "Sand"}},
             "provinces": {"selection": "All twelve features with typeRegistratiefGebied provincie."},
             "places": {"selection": "All places with source aantalinwoners at least 50,000. Names and population attributes are retained from TOP250NL; polygon label positions are computed by the map renderer."}

@@ -4,6 +4,8 @@
  This is a javascript implementation of the Louvain
  community detection algorithm (http://arxiv.org/abs/0803.0476)
  Based on https://bitbucket.org/taynaud/python-louvain/overview
+ Generalized modularity uses the resolution parameter from
+ Reichardt and Bornholdt (https://doi.org/10.1103/PhysRevE.74.016110).
 
  */
  (function () {
@@ -18,6 +20,7 @@
 		var original_graph = {};
 		var partition_init;
 		var final_modularity;
+		var resolution = 1;
 
 		//Helpers
 		function make_set(array) {
@@ -133,11 +136,15 @@
 			status['degrees'] = {};
 			status['gdegrees'] = {};
 			status['loops'] = {};
+			status['sizes'] = {};
+			status['next_com'] = 0;
 			status['total_weight'] = get_graph_size(graph);
 
 			if (typeof part === 'undefined') {
 				graph.nodes.forEach(function (node, i) {
 					status.nodes_to_com[node] = i;
+					status.sizes[i] = 1;
+					status.next_com = i + 1;
 					var deg = get_degree_for_node(graph, node);
 
 					if (deg < 0)
@@ -152,9 +159,12 @@
 				graph.nodes.forEach(function (node, i) {
 					var com = part[node];
 					status.nodes_to_com[node] = com;
+					status.sizes[com] = (status.sizes[com] || 0) + 1;
+					status.next_com = Math.max(status.next_com, +com + 1);
 					var deg = get_degree_for_node(graph, node);
 					status.degrees[com] = (status.degrees[com] || 0) + deg;
 					status.gdegrees[node] = deg;
+					status.loops[node] = get_edge_weight(graph, node, node) || 0;
 					var inc = 0.0;
 
 					var neighbours = get_neighbours_of_node(graph, node);
@@ -187,7 +197,7 @@
 				var in_degree = status.internals[com] || 0;
 				var degree = status.degrees[com] || 0;
 				if (links > 0) {
-					result = result + in_degree / links - Math.pow((degree / (2.0 * links)), 2);
+					result = result + in_degree / links - resolution * Math.pow((degree / (2.0 * links)), 2);
 				}
 			});
 
@@ -214,6 +224,7 @@
 		function __insert(node, com, weight, status) {
 			//insert node into com and modify status
 			status.nodes_to_com[node] = +com;
+			status.sizes[com] = (status.sizes[com] || 0) + 1;
 			status.degrees[com] = (status.degrees[com] || 0) + (status.gdegrees[node] || 0);
 			status.internals[com] = (status.internals[com] || 0) + weight + (status.loops[node] || 0);
 		}
@@ -223,6 +234,11 @@
 			status.degrees[com] = ((status.degrees[com] || 0) - (status.gdegrees[node] || 0));
 			status.internals[com] = ((status.internals[com] || 0) - weight - (status.loops[node] || 0));
 			status.nodes_to_com[node] = -1;
+			status.sizes[com] -= 1;
+			if (status.sizes[com] === 0) {
+				status.degrees[com] = 0;
+				status.internals[com] = 0;
+			}
 		}
 
 		function __renumber(dict) {
@@ -262,16 +278,22 @@
 					var neigh_communities = __neighcom(node, graph, status);
 					__remove(node, com_node, (neigh_communities[com_node] || 0.0), status);
 					var best_com = com_node;
-					var best_increase = 0;
+					// Compare insertion scores with returning to the original community.
+					var best_increase = (neigh_communities[com_node] || 0) -
+						resolution * (status.degrees[com_node] || 0) * degc_totw;
 					var neigh_communities_entries = Object.keys(neigh_communities);//make iterable;
 
 					neigh_communities_entries.forEach(function (com, i) {
-						var incr = neigh_communities[com] - (status.degrees[com] || 0.0) * degc_totw;
+						var incr = neigh_communities[com] - resolution * (status.degrees[com] || 0.0) * degc_totw;
 						if (incr > best_increase) {
 							best_increase = incr;
-							best_com = com;
+							best_com = +com;
 						}
 					});
+					// An empty community has insertion score zero at every resolution.
+					if (best_increase < 0) {
+						best_com = status.next_com++;
+					}
 
 					__insert(node, best_com, neigh_communities[best_com] || 0, status);
 
@@ -322,9 +344,10 @@
 			if (graph.edges.length === 0) {
 				var part = {};
 				graph.nodes.forEach(function (node, i) {
-					part[node] = node;
+					part[node] = i;
 				});
-				return part;
+				final_modularity = 0;
+				return [part];
 			}
 			var status = {};
 
@@ -399,6 +422,13 @@
 			if (arguments.length > 0) {
 				partition_init = prttn;
 			}
+			return core;
+		};
+
+		core.resolution = function (value) {
+			if (!Number.isFinite(value) || value <= 0)
+				throw new Error('Resolution must be a finite positive number.');
+			resolution = value;
 			return core;
 		};
 

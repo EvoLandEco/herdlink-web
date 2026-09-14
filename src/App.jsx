@@ -140,26 +140,26 @@ const richTips = {
         iconClass: "fa-solid fa-circle",
         title: "Dots",
         text:
-          "Each dot is an allowed route at the displayed date. Log axes show distance between regional reference points in kilometres and animals traded.",
+          "Each dot shows an allowed trade route on this date. The log axes show distance between regional reference points in kilometres and the number of animals traded.",
       },
       {
         iconClass: "fa-solid fa-chart-line",
         title: "Distance curve",
         equation: distanceTradeEquation,
         text:
-          "The dashed curve fits typical volume with equal weight per route in log-volume space, using the untruncated Lévy-walk form from Boender and Hagenaars (2023). Labels identify finite, exponential, or power-law fits.",
+          "The dashed curve summarizes typical trade volume, giving each route equal weight on the log scale. A sets the volume level, σ the distance scale, and ν the decline.",
       },
       {
         iconClass: "fa-solid fa-chart-area",
         title: "Confidence band",
         text:
-          "The shading gives approximate 95% pointwise intervals for typical volume, accounting for routes that share a region. It holds the displayed curve form fixed and excludes uncertainty from choosing that form. It does not predict individual route volumes.",
+          "Shading shows approximate 95% confidence intervals for typical volume at each distance, using the curve form shown. The calculation accounts for routes sharing a region.",
       },
       {
         iconClass: "fa-solid fa-magnifying-glass-chart",
         title: "What to look for",
         text:
-          "The summary shows route and region counts and fitted decline across the observed distance range. Dots above the curve carry more animals than the fitted volume. The plot describes trade, not infection probability or route occurrence.",
+          "The summary shows route counts and the fitted decline across the observed distances. Dots above the curve carry more animals than the typical fitted volume.",
       },
     ],
   },
@@ -167,25 +167,37 @@ const richTips = {
     title: "Trade Clusters",
     iconClass: "fa-regular fa-circle-nodes",
     intro:
-      "This panel shows how trade volume is organized across detected communities. Communities use the combined allowed volume in both directions.",
+      "Communities group regions by allowed trade across the full period. Larger volumes have more influence. Colors and membership stay fixed during date replay.",
     sections: [
       {
-        iconClass: "fa-solid fa-table-cells",
-        title: "Matrix",
+        iconClass: "fa-solid fa-layer-group",
+        title: "Community scale",
         text:
-          "Rows and columns are trade partitions. Brighter cells show stronger volume between a source partition and a destination partition.",
+          "Finer (γ = 1.5) explores smaller groups; Broad (γ = 1) highlights larger patterns. Each scale finds its own groups from the full period.",
+      },
+      {
+        iconClass: "fa-solid fa-table-cells",
+        title: "Heatmap",
+        text:
+          "Rows are source communities; columns are destinations. Brighter cells and longer side bars show more trade on the displayed date.",
+      },
+      {
+        iconClass: "fa-solid fa-circle-nodes",
+        title: "Circular flows",
+        text:
+          "Each COROP region has a fixed position within its community. Thicker curves carry more trade; arrows show direction. Hover or focus a region for its flows and totals.",
       },
       {
         iconClass: "fa-solid fa-chart-simple",
-        title: "Side bars",
+        title: "Scheduled restrictions",
         text:
-          "Bars rank partitions by total trade volume, so large hubs stand out quickly.",
+          "Routes contribute on dates when trade is allowed. Editing restrictions rebuilds the groups across the whole period, including earlier dates.",
       },
       {
         iconClass: "fa-solid fa-people-arrows",
-        title: "Signals",
+        title: "Reading the groups",
         text:
-          "Within, between, and modularity summarize whether trade is mostly inside communities or spread across them.",
+          "Within and between show how trade between regions is shared across communities. Compare these shares and group sizes to explore each scale. Higher modularity at the same scale means stronger agreement with the fixed groups.",
       },
     ],
   },
@@ -200,8 +212,8 @@ const richTips = {
       ["Total Volume", "Total livestock movement volume across all active routes."],
       ["Avg. Volume/Route", "Average volume carried by each active route."],
       ["Avg. Volume/Area", "Average volume associated with each active region."],
-      ["Communities", "Number of detected trade communities."],
-      ["Modularity", "How strongly the network separates into communities."],
+      ["Communities", "Number of fixed communities across the full loaded period at the selected community scale."],
+      ["Modularity", "Agreement of each date's trade with those fixed communities at the selected resolution. Compare values at the same community scale; scores can be negative."],
       ["Spectral Radius", "A network pressure score tied to amplification potential."],
     ],
   },
@@ -209,7 +221,7 @@ const richTips = {
     title: "Node Metric",
     iconClass: "fa-regular fa-share-nodes",
     intro:
-      "Each line is a region. Scores use allowed routes between regions, excluding local trades. Labels mark the highest ranked regions at the current date.",
+      "Each line is a region. Scores use allowed routes between regions. Labels mark the highest ranked regions at the current date.",
     options: [
       ["Sink (PageRank)", "Regions that receive risk from important senders."],
       ["Bottleneck (Betweenness)", "Regions that sit on many trade paths."],
@@ -228,20 +240,20 @@ const richTips = {
         iconClass: "fa-solid fa-route",
         title: "Focused routes",
         text:
-          "Dots represent allowed incoming and outgoing routes at the displayed date. Both axes use log scales. Distance is in kilometres between regional reference points; volume is the number of animals traded.",
+          "Dots show the region's allowed imports and exports on this date. The log axes show distance in kilometres between regional reference points and the number of animals traded.",
       },
       {
         iconClass: "fa-solid fa-ruler-horizontal",
         title: "Distance curves",
         equation: distanceTradeEquation,
         text:
-          "All, Out and In fit this curve separately to all routes, exports and imports. This is the untruncated Lévy-walk shape used by Boender and Hagenaars (2023), with equal weight per route in log-volume space. Labels identify exponential or power-law limits when a finite distance scale cannot be fitted.",
+          "All, Out and In fit the same shape to all routes, exports and imports, with equal weight per route on the log scale. A sets the volume level, σ the distance scale, and ν the decline.",
       },
       {
         iconClass: "fa-solid fa-weight-hanging",
         title: "Volume reading",
         text:
-          "The summaries show route counts and fitted declines across each direction's observed distance range. High dots show routes carrying more animals. Curves describe typical recorded trade volume, not infection probability. The data may not support a decreasing curve for every direction or date.",
+          "Compare the curves to see how imports and exports vary with distance. Summaries show route counts and fitted decline; higher dots represent larger trade volumes. Fit labels show which distance pattern the routes support.",
       },
     ],
   },
@@ -329,13 +341,13 @@ const richTips = {
         iconClass: "fa-solid fa-calendar-day",
         title: "Timing",
         text:
-          "The checkbox applies only to the displayed time step. Import and export permissions do not control these local routes.",
+          "The checkbox controls local routes for the displayed time step, independently of regional import and export permissions.",
       },
       {
         iconClass: "fa-solid fa-flask",
         title: "Shared with simulation",
         text:
-          "This is the same setting as Local Transmission in simulation mode. Unchecking it also stops local contact transmission for this time step, even when no local trade is recorded. Later disease outcomes can change; earlier simulated states stay fixed.",
+          "The same checkbox controls local contact spread in simulation, including dates with zero recorded local trade. Its effects carry forward through the simulation; earlier states stay fixed.",
       },
     ],
   },
@@ -349,7 +361,7 @@ const richTips = {
         iconClass: "fa-solid fa-chart-simple",
         title: "Reading routes",
         text:
-          "The value is recorded movement volume. The bar shows distance to the destination, with its color indicating the destination's community. Blocked routes are excluded from network analysis.",
+          "The value is recorded movement volume. The bar shows distance to the destination, with its color indicating the destination's community. Network measures use allowed routes.",
       },
       {
         iconClass: "fa-solid fa-list-check",
@@ -369,7 +381,7 @@ const richTips = {
         iconClass: "fa-solid fa-chart-simple",
         title: "Reading routes",
         text:
-          "The value is recorded movement volume. The bar shows distance to the source, with its color indicating the source's community. Blocked routes are excluded from network analysis.",
+          "The value is recorded movement volume. The bar shows distance to the source, with its color indicating the source's community. Network measures use allowed routes.",
       },
       {
         iconClass: "fa-solid fa-list-check",
@@ -389,13 +401,13 @@ const richTips = {
         iconClass: "fa-solid fa-virus",
         title: "Within the region",
         text:
-          "Unchecking this box stops local contact transmission and recorded livestock movements that begin and end in this region. This is the same setting as Local Trades in network mode. Import and export permissions do not control these local routes.",
+          "This checkbox controls local contact spread and livestock movements within the region. It shares the Local Trades setting in network mode and operates independently of regional import and export permissions.",
       },
       {
         iconClass: "fa-solid fa-calendar-day",
         title: "Timing",
         text:
-          "The change applies only to the displayed time step. The simulation recomputes disease outcomes from that point onward, while earlier states stay fixed.",
+          "The change applies to the displayed time step. The simulation recomputes disease outcomes from that point onward, while earlier states stay fixed.",
       },
     ],
   },
@@ -485,8 +497,14 @@ const richTips = {
     title: "Partition Exposure",
     iconClass: "fa-solid fa-diagram-project",
     intro:
-      "This panel groups simulation pressure by trade partition.",
+      "Explore simulated pressure within and between trade communities. Groups reflect allowed trade across the full period, including scheduled restrictions.",
     sections: [
+      {
+        iconClass: "fa-solid fa-layer-group",
+        title: "Community scale",
+        text:
+          "Finer (γ = 1.5) explores smaller groups; Broad (γ = 1) highlights larger patterns. Changing scale regroups the same simulation results. Membership stays fixed during replay; editing restrictions rebuilds the groups across the whole period.",
+      },
       {
         iconClass: "fa-solid fa-table-cells-large",
         title: "Partition load",

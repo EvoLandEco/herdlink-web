@@ -35,14 +35,14 @@ Trade ledger and simulation modes share one network and two controls for movemen
 
 - Link availability changes an individual directed route for the displayed time
   step. Local Trades in ledger mode and Local Transmission in simulation mode
-  share the same checkbox setting. It controls recorded movements within the
-  region and local contact transmission in the simulation, including time steps
-  without recorded local trades.
+  share the same checkbox setting. At each simulation step, it governs local
+  contact transmission alongside recorded movements within the region.
 - Imports and exports controls govern all movement to or from a region,
   starting at the displayed date and lasting until re-enabled. They include
-  partners that appear at later dates and do not stop local transmission. The
-  searchable panel lists every node in the dataset. A timeline shows each region
-  with restrictions anywhere in the schedule: teal allows both directions,
+  partners that appear at later dates. Local transmission follows its own
+  checkbox setting. The searchable panel lists every node in the dataset.
+  A timeline shows each region with restrictions anywhere in the schedule:
+  teal allows both directions,
   salmon blocks exports, purple blocks imports, and amber blocks both. Hover a
   segment or change point for details. Click a change point to jump to its date,
   or the first time step on or after it at coarser time resolutions. Dates outside
@@ -63,9 +63,15 @@ the same routes. The ledger route list keeps recorded volumes visible for blocke
 routes, with the reason shown beside the partner name. Its bars show partner
 distance and community; simulation bars show the partner's infectious share.
 
-Trade communities use an undirected network with the allowed volumes in both
-directions added together. Modularity measures the returned partition on that
-same network. The trade matrix retains the direction of each movement.
+Trade communities use one undirected graph of allowed volume across the full
+loaded period, with reciprocal routes added together. Broad (γ = 1) and Finer
+(γ = 1.5) select two cached community scales. Membership, colors, and matrix
+order stay fixed during replay. Scheduled restrictions apply at each
+record's date; editing them can regroup the whole timeline, including earlier
+dates. Matrix volumes and modularity describe the displayed date against those
+fixed groups; within and between shares use interregional volume. Scale changes
+reuse simulation results. The [community methods](docs/trade-communities.md)
+cover interpretation, limits, and performance checks.
 
 Trade vs Distance plots recorded route volume against distance in kilometres.
 Its fitted curve uses the untruncated Lévy-walk shape to describe typical trade
@@ -73,9 +79,9 @@ volume, with separate curves for imports and exports in focus mode. The
 [methods and profiling notes](docs/distance-trade-fit.md) explain the fit,
 its connection to the literature, and its limits.
 
-Ledger hotspot scores use allowed routes between regions and exclude local
-trades. Rings mark up to three positive eligible scores per metric at the
-displayed date. Blocking exports removes a region's Seeding and Bottleneck
+Ledger hotspot scores use allowed routes between regions. Rings mark up to
+three positive eligible scores per metric at the displayed date. Blocking
+exports removes a region's Seeding and Bottleneck
 marks; incoming routes can still support Vulnerable, Sink, or Amplifier marks.
 Sink requires imports, while Amplifier considers connections in either
 direction. Simulation rings show incoming exposure, outgoing pressure,
@@ -95,14 +101,14 @@ to every step on or after their start date until a later permission change.
 The schedules stay active when switching between ledger and simulation modes.
 
 Trajectory panels use smooth curves within each period of unchanged links.
-Each intervention boundary connects the last state before the edit to the first
-state under it without smoothing across the boundary.
+Each intervention boundary uses a step to connect the last state
+before the edit to the first state under it.
 
 ## Shortcuts
 
 Press `C` to compare the original ledger with the current movement restrictions.
 In simulation mode, both scenarios use the same model, seed, settings, and
-estimated populations; the original scenario has no movement restrictions.
+estimated populations; the original scenario allows all movement.
 Choose a region and a trajectory metric to inspect their differences over time.
 The overlay's mode switch and `E` change the active application mode.
 
@@ -155,13 +161,14 @@ Region colouring shows the analytical view, pig density, or pig holdings density
 Census colours follow the trade date's calendar year and share one linear scale
 across 2018–2022. Zero and missing observations have separate appearances. The
 census measures animals and businesses at their main establishment address;
-holdings are not individual farm sites. Census definitions follow each reference
-year, while the displayed COROP boundaries are from 2024. These layers do not
-change the disease model or identify the vehicle routes behind regional flows.
+interpret holdings as business counts at that address. Census definitions follow
+each reference year, while the displayed COROP boundaries are from 2024. These
+layers provide spatial context. The disease model uses ledger routes and
+simulation settings, and regional links connect origin and destination regions.
 
 - [Kadaster TOP250NL](https://www.pdok.nl/introductie/-/article/basisregistratie-topografie-brt-topnl)
   supplies the bundled context geometry in Dutch RD New coordinates. Land cover
-  distinguishes woodland, settlements, and sand; it does not classify agriculture.
+  displays woodland, settlement, and sand classes.
   Place labels use the source's population threshold of 50,000. Source dates,
   licence, selections, and archive checksum are recorded in
   [geography-sources.json](src/assets/files/herdlink/layers/geography-sources.json).
@@ -175,8 +182,7 @@ change the disease model or identify the vehicle routes behind regional flows.
   on demand. They require an internet connection. Tiles are embedded in the SVG
   before PNG export, together with the layer legend.
 
-The source data use CC BY 4.0. The application code's MIT licence does not replace
-the data licences.
+The source data use CC BY 4.0. The MIT licence applies to the application code.
 
 Rebuild the bundled data with Python 3:
 
@@ -233,8 +239,7 @@ npm run preview
 Vite gives the app, classic runtime scripts, styles, datasets, geography, and
 logos filenames based on their contents. Each app build refers to its own asset
 URLs. The runtime loads its classic scripts in dependency order and resolves
-bundled data through `src/assetUrls.js`. Asset contents determine the URLs;
-release dates and version labels do not.
+bundled data through `src/assetUrls.js`.
 
 SimpleKeyboard JavaScript and CSS use release 3.8.187. D3 uses 6.7.0.
 Bootstrap, Vivus, and LeaderLine also use exact release URLs. The FontAwesome
@@ -251,14 +256,14 @@ be replaced.
 Initial archive creation requires the `github-pages` artifact from the latest
 successful deployment. If that artifact is unavailable, deployment stops with
 the run ID. Seed the archive from a trusted copy of the published assets before
-deploying. Once the archive exists, retention uses Git storage rather than
-expiring Actions artifacts. Keep the archive branch and its asset files intact.
+deploying. The archive persists in Git storage. Keep the archive branch and its
+asset files intact.
 Its files count toward GitHub Pages' published site size limit.
 
-GitHub Pages controls its HTTP response headers and has no setting for per-file
-cache policies. Content hashing prevents mixed asset contents, but Pages can
-still cache the entry HTML. A CDN or host with response-header controls is
-required for these policies:
+GitHub Pages manages HTTP caching through its host-wide response headers.
+Content hashing keeps asset versions separate; the entry HTML follows Pages'
+cache policy. Per-file policies require a CDN or host with response-header
+controls:
 
 | Resource | Cache-Control |
 | --- | --- |

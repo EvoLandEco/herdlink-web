@@ -66,7 +66,7 @@ test("scenario context reads live ledger settings without running simulations an
   assert.deepEqual(Array.from(value.presets, ({ delayDays }) => delayDays), [0, 3, 14, 7, 7, 7]);
   assert.equal(value.settings.sigma, 0);
   assert.equal(value.settings.gamma, 0);
-  assert.match(value.note, /more trade/);
+  assert.match(value.note, /reduce trade/);
   elements.simulationModel.value = "SIS";
   context.loadedCSVData = null;
   context.window.isSwitchingCSV = true;
@@ -228,7 +228,7 @@ test("delayed response waits fourteen days after entry prevalence triggers and r
   for (const [parameters, count] of [[{ beta: 0, movementBeta: 0 }, 3], [{ model: "SIR", initialPct: 4, beta: 1, gamma: 0 }, 1]]) {
     const context = runtime(parameters, count).context;
     context.loadPreset("seed-containment");
-    assert.match(context.loadPreset("delayed-response").detail, /never reaches 5% entering/);
+    assert.match(context.loadPreset("delayed-response").detail, /stays below 5% entering every recorded step/);
     assert.equal(context.simulationNodeInterventions.size, 0);
   }
   const tiny = runtime({ initialPct: 1 }, 3).context;

@@ -134,7 +134,7 @@ test("the hotspot guide shows the active mode's title and five metric definition
       assert.match(markup, /up to three regions with positive scores/);
       assert.match(markup, /sender infectious share at step start × movement beta/);
       assert.match(markup, /max\(1, infectious population at step end\)/);
-      assert.match(markup, /not a reproduction number/);
+      assert.match(markup, /Outgoing movement pressure relative to the infectious population at the end of the step/);
     } else {
       assert.match(markup, /Weighted PageRank with damping 0\.85/);
     }

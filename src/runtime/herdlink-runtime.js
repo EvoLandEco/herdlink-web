@@ -13,6 +13,11 @@
           const simulationRegionIdsByDataset = new WeakMap();
           const tradeRecordsByDataset = new WeakMap();
           const originalLedgerStatsByDataset = new WeakMap();
+          let tradeCommunityTimeline = null;
+          let communityScale = "finer";
+          let communityView = "heatmap";
+          let communityFlowGeometry = null;
+          let communityFlowLayoutId = 0;
           let uniqueDates = [];
           let temporalUpdateTimeout;
           window.allTemporalStats = {};
@@ -1512,7 +1517,7 @@
             if (mode === "simulation") {
               const compartments = [
                 metric("S", "Susceptible", "decimal", "Animals susceptible at the end of the recorded step."),
-                metric("E", "Exposed", "decimal", "Animals exposed but not infectious at the end of the recorded step."),
+                metric("E", "Exposed", "decimal", "Animals in the latent stage between exposure and infectiousness at the end of the recorded step."),
                 metric("I", "Infectious", "decimal", "Infectious animals at the end of the recorded step."),
                 metric("R", "Recovered", "decimal", "Recovered animals at the end of the recorded step."),
                 metric("N", "Holding", "count", "Estimated animal population, identical in both scenarios."),
@@ -1536,9 +1541,9 @@
                 metric("avgTradeEdge", "Movements per record", "decimal", "Total animal movements divided by enabled positive ledger records."),
                 metric("avgTradeNode", "Movements per region", "decimal", "Total animal movements divided by regions with enabled positive records."),
                 metric("numComponents", "Connected components", "count", "Components with direction ignored, including isolated regions present in this date's ledger."),
-                metric("numPartitions", "Communities", "count", "Number of communities in the weighted undirected trade network."),
-                metric("modularity", "Modularity", "decimal", "Louvain modularity on the weighted undirected network, combining reciprocal records."),
-                metric("spectralRadius", "Spectral radius", "decimal", "Spectral radius of the directed movement adjacency for this date. This network measure is not a reproduction number."),
+                metric("numPartitions", "Communities", "count", "Number of fixed trade communities across the full loaded period, with scheduled restrictions applied."),
+                metric("modularity", "Modularity", "decimal", "Agreement of this date's allowed trade with the fixed full-period communities, using the selected scale's strength penalty. Compare scores at the same community scale."),
+                metric("spectralRadius", "Spectral radius", "decimal", "The largest eigenvalue magnitude of the directed movement matrix for this date, describing amplification through trade connections."),
               ],
               nodeMetrics: [
                 metric("inDegree", "Incoming movements", "count", "Animal movements arriving from other regions on enabled records."),
@@ -1594,8 +1599,8 @@
           function getScenarioContext() {
             const settings = readSimulationSettings();
             const seedLabel = `${getStatnaam(settings.seedRegion)} (${settings.seedRegion})`;
-            const contactNote = "Local contact continues. With zero movement transmission, movement controls may leave disease outcomes unchanged.";
-            const timingNote = "Response delays are scenario assumptions in calendar days. Measures begin at the first recorded date on or after the deadline; if none remains, trade stays open.";
+            const contactNote = "Local contact spread continues under movement restrictions. Movement beta controls how strongly trade contributes to spread; at zero, spread follows local contacts.";
+            const timingNote = "Response delays use calendar days. Measures begin at the first recorded date on or after the deadline. Trade stays open when the deadline falls beyond the dataset.";
             return {
               datasetKey: currentTimeSpan,
               datasetLabel: currentTimeSpan ? `${currentTimeSpan[0].toUpperCase()}${currentTimeSpan.slice(1)} trade` : "Animal trade network",
@@ -1603,7 +1608,7 @@
               nodeInterventions: Array.from(simulationNodeInterventions, ([time, changes]) =>
                 [time, Array.from(changes, ([id, directions]) => [id, { ...directions }])]),
               linkInterventions: Array.from(simulationLinkInterventions, ([time, changes]) => [time, Array.from(changes)]),
-              note: "Broader closures can block more trade without further reducing infection when seed exports are already contained.",
+              note: "Containing seed exports can be enough to keep infection local. Broader closures also reduce trade among other regions.",
               presets: [
                 { id: "open-trade", label: "Open trade", delayDays: 0, summary: "All routes available",
                   description: "Clear all route edits and regional import/export restrictions.",
@@ -1618,13 +1623,13 @@
                 { id: "delayed-response", label: "Delayed response", delayDays: 14, summary: "5% prevalence + 14-day response",
                   description: "Block exports from the seed region.",
                   scope: seedLabel,
-                  timing: "14 calendar days after seed prevalence entering a step first reaches 5% in the original simulation. Use the initial seed state, then the preceding step's result. Without a trigger, trade stays open.",
-                  detail: `The threshold uses the initial seed state, then each preceding step's result. If it is never reached, trade stays open. ${timingNote}` },
+                  timing: "14 calendar days after seed prevalence entering a step first reaches 5% in the original simulation. The check uses the initial seed state, then the preceding step's result. Trade stays open while prevalence remains below 5%.",
+                  detail: `The threshold uses the initial seed state, then each preceding step's result. Trade stays open while prevalence remains below 5%. ${timingNote}` },
                 { id: "partner-ring", label: "Partner ring", delayDays: 7, summary: "Seed and partners · 7-day response",
                   description: "Block exports from the seed and its direct trading partners.",
                   scope: "Seed plus incoming and outgoing partners with positive cross-region movements in the first recorded step. Targets stay fixed.",
                   timing: "7 calendar days after the first recorded date.",
-                  detail: `Targets use positive movements in that step; later partners are not added. ${timingNote}` },
+                  detail: `Targets are the seed's trading partners in the first recorded step and stay fixed throughout the scenario. ${timingNote}` },
                 { id: "hub-controls", label: "Hub controls", delayDays: 7, summary: "Top exporters · 7-day response",
                   description: "Block exports from the largest exporters.",
                   scope: "Up to three regions with the largest positive cross-region export totals across the dataset. Ties use region ID; targets stay fixed.",
@@ -1634,7 +1639,7 @@
                   description: "Temporarily close cross-region exports.",
                   scope: "All regions; local routes stay open.",
                   timing: "7 calendar days after the first recorded date.",
-                  duration: "SIR/SIS: ceil(1/recovery) recorded steps. SEIR/SEIRS: ceil(1/recovery + 1/latency). Count from closure; a required zero rate means no reopening within the dataset.",
+                  duration: "SIR/SIS: ceil(1/recovery) recorded steps. SEIR/SEIRS: ceil(1/recovery + 1/latency). Count from closure; a required zero rate keeps exports closed through the dataset.",
                   detail: `The closure duration counts recorded steps. Reopening requires a later step in the dataset. ${timingNote}` },
               ],
             };
@@ -1823,8 +1828,8 @@
             }
             if (id !== "open-trade" && !startDate) {
               detail = triggerStep < 0
-                ? "Original seed prevalence never reaches 5% entering a recorded step. No restrictions are applied; trade stays open."
-                : `The ${preset.delayDays}-day response delay ends beyond the recorded dates. No restrictions are applied; trade stays open.`;
+                ? "Original seed prevalence stays below 5% entering every recorded step, so trade stays open throughout the dataset."
+                : `The ${preset.delayDays}-day response delay ends beyond the recorded dates, so trade stays open throughout the dataset.`;
             }
             applyScenario(nodes, new Map(), null, preset.label);
             return { label: preset.label, detail, scenario: {
@@ -1894,7 +1899,8 @@
                   ? { global: window.allTemporalStats, node: window.allTemporalNodeStats }
                   : computeTemporalNetworkStats(uniqueDates, { store: false });
                 const project = (value) => buildComparisonSeries(uniqueDates, ids, definitions,
-                  (key) => value.global[key], (key) => value.node[key]);
+                  (key) => ({ ...value.global[key], ...value.global[key]?.communityScales?.[communityScale] }),
+                  (key) => value.node[key]);
                 cache.intervention = project(current);
                 if (!cache.original) {
                   if (!simulationNodeInterventions.size && !simulationLinkInterventions.size) {
@@ -2751,8 +2757,7 @@
           }
 
           function getSimulationPartitionKey(id) {
-            const node = allNodes.find((item) => item.id === id);
-            const key = node?.community;
+            const key = tradeCommunityTimeline?.partition[id];
             return key === undefined || key === null ? "NA" : String(key);
           }
 
@@ -2813,8 +2818,7 @@
 
             const partitionList = Array.from(partitions.values()).sort(
               (a, b) =>
-                b.I - a.I ||
-                b.newInfections - a.newInfections ||
+                Number(a.key) - Number(b.key) ||
                 d3.ascending(a.key, b.key),
             );
             return { partitions: partitionList, matrix };
@@ -2901,7 +2905,7 @@
                     ${getSimulationPartitionDisplayKey(partition.key)}
                   </span>
                   <span class="simulation-partition-map-regions">
-                    ${visibleMembers.join(" ")}${hiddenMembers ? ` +${hiddenMembers}` : ""}
+                    ${members.length} region${members.length === 1 ? "" : "s"} · ${visibleMembers.join(" ")}${hiddenMembers ? ` +${hiddenMembers}` : ""}
                   </span>
                 </div>
               `;
@@ -2919,7 +2923,7 @@
               .style("--partition-map-columns", layout.columns)
               .html(`
                 <div class="simulation-partition-map-header">
-                  <span class="simulation-partition-map-title">Partition -> CR regions</span>
+                  <span class="simulation-partition-map-title">${partitions.filter((partition) => partition.key !== "NA").length} fixed groups · ${partitions.filter((partition) => partition.key !== "NA" && partition.members.length === 1).length} singletons</span>
                   <span class="simulation-partition-map-hint">Hover to expand</span>
                 </div>
                 <div class="simulation-partition-map-compact">
@@ -2995,7 +2999,7 @@
             const { partitions, matrix } = getSimulationPartitionData(frame);
             const mappingLayout = getSimulationPartitionMappingLayout(node);
             const margin = {
-              top: 78,
+              top: 124,
               right: 76,
               bottom: partitions.length ? mappingLayout.compactHeight + 12 : 36,
               left: 42,
@@ -3004,7 +3008,8 @@
             const height = Math.max(10, node.clientHeight - margin.top - margin.bottom);
             let svg = container.select("svg.simulation-partition-chart");
             if (svg.empty()) {
-              container.selectAll("svg").remove();
+              container.selectAll("svg.simulation-partition-chart, svg.trade-community-chart, svg.community-flow-chart")
+                .interrupt().call((charts) => charts.selectAll("*").interrupt()).remove();
               svg = container
                 .append("svg")
                 .attr("class", "simulation-partition-chart");
@@ -3069,6 +3074,7 @@
               .merge(cellSelection)
               .call((selection) =>
                 transitionSelection(selection)
+                  .attr("opacity", 1)
                   .attr("x", (cell) => x(cell.target))
                   .attr("y", (cell) => matrixOffsetY + y(cell.source))
                   .attr("width", x.bandwidth())
@@ -3190,11 +3196,11 @@
               .attr("class", "simulation-partition-summary");
             summaryEnter.append("text").attr("class", "simulation-kpi-label");
             summaryEnter.append("text").attr("class", "simulation-kpi-value");
-            const summaryWidth = Math.min(82, node.clientWidth / 3);
-            const summaryMerged = summaryEnter.merge(summary);
+            const summaryWidth = (node.clientWidth - 32) / summaryItems.length;
+            const summaryMerged = summaryEnter.merge(summary).attr("text-anchor", "middle");
             summaryMerged.attr(
               "transform",
-              (item, index) => `translate(${16 + index * summaryWidth},50)`,
+              (item, index) => `translate(${16 + (index + 0.5) * summaryWidth},96)`,
             );
             summaryMerged
               .select("text.simulation-kpi-label")
@@ -4190,7 +4196,7 @@
             renderSimulationGlobalStatsChart();
             renderSimulationNodeStatsChart();
             renderSimulationSpatialPatternPanel();
-            renderSimulationPartitionStructurePanel();
+            updateSCCs();
             if (selectedNodeData) {
               renderSimulationFocusTrajectory();
               renderSimulationNodeInsight(window.currentSelectedTradeNodeInsight);
@@ -4383,6 +4389,49 @@
             if (!date || !updateNetworkForDateHandler || !loadedCSVData) return;
             updateNetworkForDateHandler(date, loadedCSVData);
             updateCurrentDateDisplay(date);
+          }
+
+          function refreshTradeCommunityScale() {
+            const partition = tradeCommunityTimeline.partition;
+            allNodes.forEach((node) => {
+              node.community = partition[node.id];
+            });
+            nodeColor.domain(Array.from(new Set(Object.values(partition))).sort((a, b) => a - b));
+            updateSCCs();
+            if (isSimulationModeActive()) {
+              if (selectedNodeData) updateTradeNodeInsight(window.currentSelectedTradeNodeInsight);
+              return;
+            }
+            updateNetworkStats();
+            if (["numPartitions", "modularity"].includes(window.currentSelectedStat)) {
+              updateGlobalStatsChart(window.currentSelectedStat);
+            }
+            updateNodeStatsChart(window.currentSelectedNodeStat);
+            d3.selectAll("#tradeDistribution .trade-circle")
+              .attr("fill", (point) => nodeColor(partition[point.sourceId]));
+            if (selectedNodeData) {
+              updateTradeTable();
+              updateTradeNodeInsight(window.currentSelectedTradeNodeInsight);
+            }
+          }
+
+          function setTradeCommunityScale(scale) {
+            if ((scale !== "broad" && scale !== "finer") || scale === communityScale) return false;
+            communityScale = scale;
+            comparisonDataCache.delete("trade");
+            if (tradeCommunityTimeline) {
+              const byScale = tradeCommunityTimeline.byScale;
+              tradeCommunityTimeline = { ...byScale[scale], byScale };
+              let maxModularity = 0;
+              for (const [key, stats] of Object.entries(window.allTemporalStats)) {
+                window.allTemporalStats[key] = { ...stats, ...stats.communityScales[scale] };
+                maxModularity = Math.max(maxModularity, window.allTemporalStats[key].modularity);
+              }
+              window.maxTemporalStats.modularity = maxModularity;
+              if (!window.isSwitchingCSV) refreshTradeCommunityScale();
+            }
+            window.herdlinkComparison?.refresh();
+            return true;
           }
 
           function cancelSimulationRecompute() {
@@ -4842,8 +4891,7 @@
                 activeNodes,
                 enabledLinks,
               );
-              // Compute modularity.
-              const modResult = computeModularity(activeNodes, enabledLinks);
+              partition = tradeCommunityTimeline.partition;
     
               // Compute spectral radius (risk score).
               spectralRadius = computeSpectralRadius(activeNodes, enabledLinks);
@@ -4853,8 +4901,7 @@
               totalTradeVolume = simpleStats.totalTradeVolume;
               avgTradeEdge = simpleStats.avgTradeEdge;
               avgTradeNode = simpleStats.avgTradeNode;
-              modularity = modResult.modularity;
-              partition = modResult.partition;
+              modularity = evaluatePartitionModularity(enabledLinks, partition, tradeCommunityTimeline.resolution);
     
               // Count distinct partitions.
               numPartitions = new Set(Object.values(partition)).size;
@@ -4889,6 +4936,9 @@
               );
             }
 
+            if (partition) {
+              nodeColor.domain(Array.from(new Set(Object.values(partition))).sort((a, b) => a - b));
+            }
             d3.selectAll(".nodeGroup circle.primary")
               .attr("fill", (node) => nodeColor(node.community));
     
@@ -5093,7 +5143,7 @@
               yDomain = [0, maxValue * 1.1];
             } else {
               // Otherwise, add a bit extra at both ends (10% below and above)
-              yDomain = [minValue * 0.9, maxValue * 1.1];
+              yDomain = [minValue - Math.abs(minValue) * 0.1, maxValue + Math.abs(maxValue) * 0.1];
             }
             const y = d3.scaleLinear().domain(yDomain).range([height, 0]).nice();
     
@@ -5811,12 +5861,7 @@
             labelGroupsMerge.raise();
           }
     
-          /**
-           * Computes network statistics for each unique date.
-           * For each date, it builds the network (nodes and links) from the CSV data,
-           * then computes basic stats, connectivity (number of connected components), modularity, and spectral radius.
-           * The results are stored globally in window.allTemporalStats, keyed by ISO date string.
-           */
+          // Date statistics share a partition fitted to allowed trade across the full dataset.
           function computeTemporalNetworkStats(dates = uniqueDates, inputs = {}) {
             const {
               data = loadedCSVData,
@@ -5838,12 +5883,32 @@
             if (store) originalLedgerStatsByDataset.set(data, original);
             const ids = collectSimulationRegionIds(data);
             const rowsByDate = getTradeRecordsByDate(data);
+            const communities = computeTradeCommunityTimeline(data, nodeInterventions, linkInterventions);
+            const communityStatsForDate = (date) => {
+              const communityScales = Object.fromEntries(Object.entries(communities.byScale).map(([scale, value]) =>
+                [scale, {
+                  partition: value.partition,
+                  numPartitions: value.numPartitions,
+                  modularity: value.modularityByDate.get(date.getTime()) ?? 0,
+                }]));
+              return { ...communityScales[communityScale], communityScales };
+            };
+            if (store) {
+              tradeCommunityTimeline = communities;
+              // A schedule edit can change reference groups even on dates with unchanged routes.
+              for (const [key, stats] of Object.entries(window.allTemporalStats)) {
+                window.allTemporalStats[key] = {
+                  ...stats,
+                  ...communityStatsForDate(new Date(key)),
+                };
+              }
+            }
             const nodeEvents = Array.from(nodeInterventions).sort(([a], [b]) => a - b);
             const permissions = new Map();
             let interventionIndex = 0;
     
             // Loop over each unique date.
-            dates.forEach((date) => {
+            [...dates].sort((a, b) => a - b).forEach((date) => {
               while (interventionIndex < nodeEvents.length && nodeEvents[interventionIndex][0] <= date.getTime()) {
                 const [time, changes] = nodeEvents[interventionIndex++];
                 applySimulationNodePermissions(permissions, changes, time);
@@ -5925,13 +5990,6 @@
                 activeNodes,
                 enabledLinks,
               );
-              // Compute modularity.
-              const { partition, modularity } = computeModularity(
-                activeNodes,
-                enabledLinks,
-              );
-              // Count distinct partitions.
-              const numPartitions = new Set(Object.values(partition)).size;
               // Compute spectral radius (risk score).
               const spectralRadius = computeSpectralRadius(
                 activeNodes,
@@ -5954,9 +6012,7 @@
                 avgTradeEdge: simpleStats.avgTradeEdge,
                 avgTradeNode: simpleStats.avgTradeNode,
                 numComponents: numComponents,
-                modularity: modularity,
-                partition: partition,
-                numPartitions: numPartitions,
+                ...communityStatsForDate(date),
                 spectralRadius: spectralRadius,
               };
     
@@ -5966,7 +6022,7 @@
               if (store) {
                 window.allTemporalStats[key] = stats;
                 window.allTemporalNodeStats[key] = nodeStats;
-                if (!links.some((link) => link.weight > 0 && link.disabled)) {
+                if (!nodeInterventions.size && !linkInterventions.size) {
                   original.global[key] = stats;
                   original.node[key] = nodeStats;
                 }
@@ -6135,7 +6191,8 @@
             return componentCount;
           }
     
-          function computeModularity(nodes, links) {
+          function computeModularity(nodes, links, resolution = 1) {
+            const nodeIds = nodes.map((node) => node.id).sort();
             const edges = new Map();
             for (const link of links) {
               const ids = [getNodeId(link.source), getNodeId(link.target)].sort();
@@ -6146,13 +6203,84 @@
             }
             if (!edges.size) {
               return {
-                partition: Object.fromEntries(nodes.map((node, index) => [node.id, index])),
+                partition: Object.fromEntries(nodeIds.map((id, index) => [id, index])),
                 modularity: 0,
               };
             }
             // Louvain uses one undirected edge for the combined volume in both directions.
-            const results = jLouvain().nodes(nodes.map((node) => node.id)).edges([...edges.values()])();
-            return { partition: results.communities, modularity: results.modularity };
+            const orderedEdges = [...edges.values()].sort((a, b) =>
+              a.source.localeCompare(b.source) || a.target.localeCompare(b.target));
+            const results = jLouvain().nodes(nodeIds).edges(orderedEdges).resolution(resolution)();
+            const labels = new Map();
+            const partition = Object.fromEntries(nodeIds.map((id) => {
+              const group = results.communities[id];
+              if (!labels.has(group)) labels.set(group, labels.size);
+              return [id, labels.get(group)];
+            }));
+            return { partition, modularity: results.modularity };
+          }
+
+          function evaluatePartitionModularity(links, partition, resolution = 1) {
+            let volume = 0;
+            let within = 0;
+            const strengths = Object.create(null);
+            for (const link of links) {
+              const source = partition[getNodeId(link.source)];
+              const target = partition[getNodeId(link.target)];
+              volume += link.weight;
+              if (source === target) within += link.weight;
+              strengths[source] = (strengths[source] || 0) + link.weight;
+              strengths[target] = (strengths[target] || 0) + link.weight;
+            }
+            if (!volume) return 0;
+            let expected = 0;
+            for (const strength of Object.values(strengths)) expected += (strength / (2 * volume)) ** 2;
+            return within / volume - resolution * expected;
+          }
+
+          function computeTradeCommunityTimeline(data, nodeInterventions, linkInterventions) {
+            const rowsByDate = getTradeRecordsByDate(data);
+            const ids = collectSimulationRegionIds(data);
+            const events = [...nodeInterventions].sort(([a], [b]) => a - b);
+            const permissions = new Map();
+            const aggregate = new Map();
+            const graphs = new Map();
+            let eventIndex = 0;
+            for (const [time, rows] of [...rowsByDate].sort(([a], [b]) => a - b)) {
+              while (eventIndex < events.length && events[eventIndex][0] <= time) {
+                const [eventTime, changes] = events[eventIndex++];
+                applySimulationNodePermissions(permissions, changes, eventTime);
+              }
+              const disabled = getDisabledLinkKeys(new Date(time), ids, permissions, linkInterventions);
+              const links = [];
+              for (const row of rows) {
+                const source = row.COROP_LEV;
+                const target = row.COROP_AFN;
+                const weight = +row.AANTAL;
+                if (!source || !target || source.toUpperCase() === "NA" || target.toUpperCase() === "NA" ||
+                    !(weight > 0) || !Number.isFinite(weight) || disabled.has(`${source}-${target}`)) continue;
+                links.push({ source, target, weight });
+                const a = source < target ? source : target;
+                const b = source < target ? target : source;
+                const key = `${a}-${b}`;
+                const edge = aggregate.get(key);
+                if (edge) edge.weight += weight;
+                else aggregate.set(key, { source: a, target: b, weight });
+              }
+              graphs.set(time, links);
+            }
+            const edges = [...aggregate.values()];
+            // Regions without allowed volume have no evidence for a trade community.
+            const nodes = [...new Set(edges.flatMap((edge) => [edge.source, edge.target]))]
+              .map((id) => ({ id }));
+            const byScale = Object.fromEntries([["broad", 1], ["finer", 1.5]].map(([scale, resolution]) => {
+              const { partition } = computeModularity(nodes, edges, resolution);
+              const modularityByDate = new Map([...graphs].map(([time, links]) =>
+                [time, evaluatePartitionModularity(links, partition, resolution)]));
+              return [scale, { partition, resolution,
+                numPartitions: new Set(Object.values(partition)).size, modularityByDate }];
+            }));
+            return { ...byScale[communityScale], byScale };
           }
 
           /**
@@ -7007,7 +7135,9 @@
     
           function initAesthetics() {
             setTradeEdgeScales(nonZeroLinks);
-            nodeColor = d3.scaleOrdinal(["#78b8ed", "#ffba86", "#7ccbae", "#f28b96", "#bca6ed", "#d3b49a", "#e8a2cf", "#a0b1c5", "#cfce87", "#72d5df"]);
+            nodeColor = d3.scaleOrdinal(["#78b8ed", "#ffba86", "#7ccbae", "#f28b96", "#bca6ed", "#d3b49a", "#e8a2cf", "#a0b1c5", "#cfce87", "#72d5df"])
+              .domain(Array.from(new Set(Object.values(tradeCommunityTimeline?.partition || {}))).sort((a, b) => a - b))
+              .unknown(theme.muted);
             nodeSize = d3
               .scaleSqrt()
               .domain(d3.extent(allNodes, (d) => d.tradeTotal))
@@ -7687,7 +7817,7 @@
               },
               {
                 metric: "eigenvector", code: "P/I", name: "Pressure per Infectious", role: "Pressure per Infectious", icon: "fa-tower-broadcast",
-                text: "Outgoing movement pressure relative to the infectious population. This is a pressure indicator, not a reproduction number.",
+                text: "Outgoing movement pressure relative to the infectious population at the end of the step.",
                 method: "Outgoing pressure / max(1, infectious population at step end)",
               },
             ];
@@ -7869,8 +7999,8 @@
                       </div>
                       <p class="hotspot-info-subtitle">
                         ${simulation
-                          ? "Rings mark up to three regions with positive scores for each metric in the displayed simulation step. Movement pressure uses infectious shares at the start of the step; prevalence and burden use the end of the step. Incoming and outgoing pressure exclude local transmission and do not count new infections."
-                          : "Rings mark up to three regions with positive eligible scores on allowed routes between regions at the displayed date. Local trades are excluded. Sink requires imports; Amplifier requires a connection to another region."}
+                          ? "Rings mark up to three regions with positive scores for each metric in this simulation step. Movement pressure measures exposure carried between regions using infectious shares at step start. Prevalence and burden describe the population at step end."
+                          : "Rings mark up to three regions with positive eligible scores on allowed routes between regions at this date. Sink highlights regions receiving imports; Amplifier highlights regions connected to influential partners."}
                         Each metric has a distinct color and ring pattern, shared with the legend.
                       </p>
                     </div>
@@ -10418,8 +10548,8 @@
                 const available = model.confidence.status === "available";
                 rows.push({ text: available ? "Approx. 95% CI" : "CI unavailable", color: theme.muted,
                   title: available
-                    ? "Approximate pointwise confidence intervals for the fitted typical volume, allowing routes that share a region to be correlated. The displayed curve form is treated as fixed; uncertainty from choosing that form is excluded. This is not a range for individual trade volumes."
-                    : "The data do not support an estimable confidence band for this fitted curve." });
+                    ? "Approximate 95% confidence intervals for typical volume at each distance, using the curve form shown and accounting for routes that share a region."
+                    : "The plot shows the fitted typical volume; the confidence estimate is unavailable for this curve." });
               }
             }
             const summaries = g.selectAll("text.distance-fit-summary").data(rows).join("text")
@@ -10451,16 +10581,16 @@
 
           function distanceTradeFitDescription(fit) {
             if (fit.status === "fit") {
-              return `V(d) = A (1 + d/σ)^−ν; σ = ${fit.sigma.toPrecision(3)} km; ν = ${fit.nu.toPrecision(3)}. Log RMSE = ${fit.logRmse.toFixed(3)} across ${fit.n} routes. The curve describes typical trade volume on recorded routes, not infection probability.`;
+              return `V(d) = A (1 + d/σ)^−ν; σ = ${fit.sigma.toPrecision(3)} km; ν = ${fit.nu.toPrecision(3)}. Log RMSE = ${fit.logRmse.toFixed(3)} across ${fit.n} routes. The curve describes typical trade volume on recorded routes.`;
             }
             if (fit.status === "insufficient-data") return "A curve needs at least three distinct positive distances and positive trade volumes.";
-            if (fit.status === "no-decay") return "These routes do not support a decreasing distance curve.";
+            if (fit.status === "no-decay") return "The fitted distance trend is flat across these routes.";
             if (fit.status === "power-law-limit" || fit.status === "exponential-limit") {
               const name = fit.status === "power-law-limit" ? "power-law" : "exponential";
-              return `The distance kernel approaches its ${name} limit for these routes; its scale and shape have no finite joint estimate. Log RMSE = ${fit.logRmse.toFixed(3)} across ${fit.n} routes. This describes recorded trade volume, not infection probability.`;
+              return `The fitted trade curve follows the kernel's ${name} limit. Log RMSE = ${fit.logRmse.toFixed(3)} across ${fit.n} routes. This limit describes how typical volume changes with distance.`;
             }
-            if (fit.status === "unidentifiable") return "These routes do not resolve the curve's distance scale and shape separately.";
-            return "The curve fit did not converge.";
+            if (fit.status === "unidentifiable") return "The distance scale and decline shape remain unresolved for these routes.";
+            return "Curve fitting stopped before convergence.";
           }
 
           function updateTradeDistribution() {
@@ -10636,11 +10766,13 @@
             yGridLabels.exit().remove();
     
             // Update scatter points using the D3 update pattern
+            const communityByNode = tradeCommunityTimeline?.partition || {};
             const circles = g
               .selectAll(".trade-circle")
               .data(tradeData, (d) => d.sourceId + "-" + d.targetId);
             circles.exit().transition().duration(750).attr("r", 0).remove();
             circles
+              .attr("fill", (d) => nodeColor(communityByNode[d.sourceId]))
               .transition()
               .duration(750)
               .attr("cx", (d) => xScale(d.distance))
@@ -10653,10 +10785,7 @@
               .attr("cx", (d) => xScale(d.distance))
               .attr("cy", (d) => yScale(d.weight))
               .attr("r", 0)
-              .attr("fill", (d) => {
-                const sourceNode = allNodes.find((n) => n.id === d.sourceId);
-                return sourceNode ? nodeColor(sourceNode.community) : theme.muted;
-              })
+              .attr("fill", (d) => nodeColor(communityByNode[d.sourceId]))
               .attr("opacity", 0.7)
               .transition()
               .duration(750)
@@ -11255,7 +11384,7 @@
     
             // Recalculate node radius for all nodes (new and updated).
             nodeSize.domain(d3.extent(allNodes, (d) => d.tradeTotal));
-            nodeColor.domain(d3.extent(allNodes, (d) => d.community));
+            nodeColor.domain(Array.from(new Set(Object.values(tradeCommunityTimeline?.partition || {}))).sort((a, b) => a - b));
     
             nodeEnter.each(function (d) {
               d.r = nodeSize(d.tradeTotal);
@@ -11313,11 +11442,11 @@
               // If tradeTotal > 0, fade in the circle and fade out the overlay.
               if (d.tradeTotal > 0) {
                 circleSel
+                  .attr("fill", nodeColor(d.community))
                   .transition()
                   .duration(200)
                   .style("opacity", 1)
                   .attr("r", d.r)
-                  .attr("fill", nodeColor(d.community))
                   .attr("stroke", null)
                   .attr("stroke-width", null);
                 foSel
@@ -12599,29 +12728,239 @@
             return key === "NA" ? theme.muted : nodeColor(Number(key));
           }
 
+          function buildCommunityFlowData(ids, partition, links) {
+            const nodesById = new Map([...new Set(ids)].map((id) => [id, {
+              id, key: partition[id] == null ? "NA" : String(partition[id]), incoming: 0, outgoing: 0, local: 0,
+            }]));
+            const groupsByKey = new Map();
+            for (const node of nodesById.values()) {
+              if (!groupsByKey.has(node.key)) groupsByKey.set(node.key, { key: node.key, members: [], nodeCount: 0 });
+              const group = groupsByKey.get(node.key);
+              group.members.push(node.id);
+              group.nodeCount++;
+            }
+            const groups = [...groupsByKey.values()].sort((a, b) =>
+              a.key === "NA" ? 1 : b.key === "NA" ? -1 : Number(a.key) - Number(b.key));
+            for (const group of groups) group.members.sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
+            const flows = new Map();
+            let total = 0, local = 0;
+            for (const link of links) {
+              if (link.disabled || link.source == null || link.target == null) continue;
+              const source = getNodeId(link.source), target = getNodeId(link.target), weight = +link.weight;
+              if (!nodesById.has(source) || !nodesById.has(target) || !Number.isFinite(weight) || weight <= 0) continue;
+              const key = JSON.stringify([source, target]);
+              if (flows.has(key)) flows.get(key).weight += weight;
+              else flows.set(key, { key, source, target, weight });
+              nodesById.get(source).outgoing += weight;
+              nodesById.get(target).incoming += weight;
+              total += weight;
+              if (source === target) {
+                nodesById.get(source).local += weight;
+                local += weight;
+              }
+            }
+            return {
+              total, local,
+              activeCount: [...nodesById.values()].filter((node) => node.incoming > 0 || node.outgoing > 0).length,
+              groups, nodes: groups.flatMap((group) => group.members.map((id) => nodesById.get(id))),
+              flows: [...flows.values()].sort((a, b) => a.source.localeCompare(b.source) || a.target.localeCompare(b.target)),
+            };
+          }
+
+          function getCommunityFlowGeometry(groups, partition) {
+            const rosterKey = groups.map((group) => `${group.key}:${group.members.join(",")}`).join(";");
+            if (communityFlowGeometry?.partition === partition && communityFlowGeometry.rosterKey === rosterKey) {
+              return communityFlowGeometry;
+            }
+            const root = d3.hierarchy({ children: groups.map((group) => ({
+              key: group.key, children: group.members.map((id) => ({ id, key: group.key })),
+            })) });
+            d3.cluster().size([2 * Math.PI, 1])(root);
+            communityFlowGeometry = {
+              partition, rosterKey, root, nodesById: new Map(root.leaves().map((node) => [node.data.id, node])),
+            };
+            return communityFlowGeometry;
+          }
+
+          function renderCommunityFlowPanel() {
+            const container = d3.select("#tradeClusters");
+            const element = container.node();
+            const simulation = isSimulationModeActive();
+            const partition = tradeCommunityTimeline?.partition || {};
+            const links = simulation
+              ? Array.from(simulationState.currentFrame?.linkStates.values() || [], (link) => ({
+                  source: link.source, target: link.target, weight: link.riskLoad,
+                }))
+              : enabledLinks;
+            const data = buildCommunityFlowData(collectSimulationRegionIds(loadedCSVData), partition, links);
+            const geometry = getCommunityFlowGeometry(data.groups, partition);
+            const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+            function animateFlow(selection) {
+              return reducedMotion ? selection.interrupt() : transitionSelection(selection);
+            }
+            function exitFlow(selection) {
+              if (reducedMotion) {
+                selection.interrupt().selectAll("*").interrupt();
+                selection.remove();
+                return;
+              }
+              const departing = selection.filter(":not(.is-exiting)").classed("is-exiting", true);
+              animateFlow(departing).attr("opacity", 0).style("--flow-fade", 0)
+                .on("end", function () { d3.select(this).selectAll("*").interrupt(); }).remove();
+            }
+            container.select("div.simulation-partition-map").remove();
+            container.classed("simulation-partition-map-expanded", false);
+            const width = element.clientWidth, height = element.clientHeight;
+            const top = 103, bottom = 35;
+            const radius = Math.max(24, Math.min((width - 86) / 2, (height - top - bottom - 68) / 2));
+            const cx = width / 2, cy = top + (height - top - bottom) / 2;
+            let svg = container.select("svg.community-flow-chart");
+            if (svg.empty()) {
+              container.selectAll("svg.simulation-partition-chart, svg.trade-community-chart")
+                .interrupt().call((charts) => charts.selectAll("*").interrupt()).remove();
+              svg = container.append("svg").attr("class", "community-flow-chart");
+            }
+            svg.attr("width", width).attr("height", height).attr("viewBox", `0 0 ${width} ${height}`);
+            svg.selectAll("title").data([null]).join("title")
+              .text(simulation ? "Directed exposure flows between COROP regions" : "Directed trade flows between COROP regions");
+            const plot = svg.selectAll("g.community-flow-plot")
+              .data([geometry.rosterKey], (key) => key).join(
+                (enter) => enter.append("g").attr("class", "community-flow-plot")
+                  .attr("id", () => `community-flow-layout-${++communityFlowLayoutId}`).attr("opacity", 0),
+                (update) => update,
+                (exit) => {
+                  exit.attr("aria-hidden", true).selectAll(".community-flow-node")
+                    .attr("tabindex", -1).on("mouseenter focus mouseleave blur", null);
+                  exitFlow(exit);
+                },
+              )
+              .classed("is-exiting", false).attr("aria-hidden", null)
+              .attr("transform", `translate(${cx},${cy})`);
+            animateFlow(plot).attr("opacity", 1);
+            plot.selectAll("circle.community-flow-orbit").data([0.48, 0.76, 1]).join("circle")
+              .attr("class", "community-flow-orbit").attr("r", (scale) => radius * scale)
+              .attr("stroke-dasharray", (scale) => scale < 1 ? "2 6" : null);
+            const defs = plot.selectAll("defs").data([null]).join("defs");
+            const markers = defs.selectAll("marker").data(data.groups, (group) => group.key).join("marker")
+              .attr("id", (group) => `${plot.attr("id")}-arrow-${group.key}`)
+              .attr("viewBox", "0 -3 6 6").attr("refX", 5).attr("refY", 0)
+              .attr("markerWidth", 5).attr("markerHeight", 5).attr("markerUnits", "userSpaceOnUse").attr("orient", "auto");
+            markers.selectAll("path").data((group) => [group]).join("path")
+              .attr("d", "M0,-2.5 L5,0 L0,2.5").attr("fill", "none")
+              .attr("stroke", (group) => getTradeCommunityColor(group.key)).attr("stroke-width", 1.2);
+            const arc = d3.arc().innerRadius(radius + 24).outerRadius(radius + 27);
+            const halfStep = Math.PI / (data.nodes.length + data.groups.length);
+            plot.selectAll("path.community-flow-sector").data(geometry.root.children, (group) => group.data.key).join("path")
+              .attr("class", "community-flow-sector")
+              .attr("d", (group) => arc({ startAngle: group.leaves()[0].x - halfStep * 0.75,
+                endAngle: group.leaves().at(-1).x + halfStep * 0.75 }))
+              .attr("fill", (group) => getTradeCommunityColor(group.data.key));
+            const point = (angle, r) => [Math.sin(angle) * r, -Math.cos(angle) * r];
+            plot.selectAll("text.community-flow-community-label").data(geometry.root.children, (group) => group.data.key).join("text")
+              .attr("class", "community-flow-community-label").attr("text-anchor", "middle").attr("dy", "0.32em")
+              .attr("transform", (group) => `translate(${point(group.x, radius + 35)})`)
+              .style("fill", (group) => getTradeCommunityColor(group.data.key)).text((group) => getTradeCommunityLabel(group.data.key));
+            const line = d3.lineRadial().curve(d3.curveBundle.beta(0.82)).angle((node) => node.x).radius((node) => node.y * radius);
+            const maxWeight = d3.max(data.flows, (flow) => flow.weight) || 1;
+            const flowWidth = d3.scaleSqrt().domain([0, maxWeight]).range([0.35, 2.4]);
+            const portAngle = Math.min(0.016, halfStep / 4);
+            const paths = plot.selectAll("g.community-flow-links").data([null]).join("g").attr("class", "community-flow-links")
+              .selectAll("path.community-flow-link").data(data.flows, (flow) => flow.key).join(
+                (enter) => enter.append("path").attr("class", "community-flow-link")
+                  .attr("opacity", 0).style("--flow-fade", 0),
+                (update) => update,
+                (exit) => exitFlow(exit),
+              )
+              .classed("is-exiting", false).attr("data-source", (flow) => flow.source).attr("data-target", (flow) => flow.target)
+              .attr("d", (flow) => {
+                const source = geometry.nodesById.get(flow.source), target = geometry.nodesById.get(flow.target);
+                if (source === target) {
+                  const start = point(source.x + portAngle, radius), end = point(source.x - portAngle, radius);
+                  const c1 = point(source.x + 0.065, radius - 18), c2 = point(source.x - 0.065, radius - 18);
+                  return `M${start}C${c1} ${c2} ${end}`;
+                }
+                const route = source.path(target).map((node) => ({ x: node.x, y: node.y }));
+                route[0].x += portAngle;
+                route[route.length - 1].x -= portAngle;
+                return line(route);
+              })
+              .attr("stroke", (flow) => getTradeCommunityColor(geometry.nodesById.get(flow.source).data.key))
+              .attr("marker-end", (flow) => `url(#${plot.attr("id")}-arrow-${geometry.nodesById.get(flow.source).data.key})`);
+            animateFlow(paths)
+              .attr("stroke-width", (flow) => flowWidth(flow.weight))
+              .style("--flow-weight", (flow) => 0.12 + 0.46 * Math.sqrt(flow.weight / maxWeight))
+              .style("--flow-fade", 1)
+              .attr("opacity", 1);
+            const nodes = plot.selectAll("g.community-flow-nodes").data([null]).join("g").attr("class", "community-flow-nodes")
+              .selectAll("g.community-flow-node").data(data.nodes, (node) => node.id).join("g")
+              .attr("class", "community-flow-node").attr("tabindex", 0).attr("role", "img").attr("data-region", (node) => node.id)
+              .attr("transform", (node) => `rotate(${geometry.nodesById.get(node.id).x * 180 / Math.PI - 90}) translate(${radius},0)`)
+              .style("color", (node) => getTradeCommunityColor(node.key))
+              .attr("aria-label", (node) => `${node.id}, ${getStatnaam(node.id)}, ${getTradeCommunityLabel(node.key)}. Incoming ${formatSmall(node.incoming)}, outgoing ${formatSmall(node.outgoing)}, local ${formatSmall(node.local)} ${simulation ? "exposure" : "animals"}.`);
+            nodes.selectAll("circle.community-flow-hit").data((node) => [node]).join("circle")
+              .attr("class", "community-flow-hit").attr("r", 7).attr("fill", "transparent")
+              .style("stroke", "none").style("filter", "none");
+            const dots = nodes.selectAll("circle.community-flow-dot").data((node) => [node]).join("circle")
+              .attr("class", "community-flow-dot")
+              .attr("r", 3);
+            animateFlow(dots)
+              .attr("fill", (node) => node.incoming + node.outgoing > 0 ? getTradeCommunityColor(node.key) : theme.surface)
+              .style("stroke", (node) => getTradeCommunityColor(node.key));
+            nodes.selectAll("text").data((node) => [node]).join("text").attr("class", "community-flow-node-label")
+              .attr("x", (node) => geometry.nodesById.get(node.id).x < Math.PI ? 6 : -6)
+              .attr("dy", "0.32em").attr("text-anchor", (node) => geometry.nodesById.get(node.id).x < Math.PI ? "start" : "end")
+              .attr("transform", (node) => geometry.nodesById.get(node.id).x < Math.PI ? null : "rotate(180)")
+              .text((node) => node.id.slice(2));
+            const caption = svg.selectAll("text.community-flow-summary").data([null]).join("text")
+              .attr("class", "community-flow-summary community-flow-caption").attr("x", width / 2).attr("y", 80).attr("text-anchor", "middle");
+            const detail = svg.selectAll("text.community-flow-detail").data([null]).join("text")
+              .attr("class", "community-flow-detail community-flow-caption").attr("x", width / 2)
+              .attr("y", height - 21).attr("text-anchor", "middle");
+            const summary = `${formatSmall(data.total)} ${simulation ? "exposure" : "animals"} · ${data.activeCount}/${data.nodes.length} active · ${data.total > 0 ? `${(100 * data.local / data.total).toFixed(1)}%` : "—"} local`;
+            function highlight(id) {
+              const node = data.nodes.find((item) => item.id === id);
+              svg.classed("has-highlight", !!node).attr("data-highlighted", node ? id : null);
+              const partners = new Set([id]);
+              for (const flow of data.flows) {
+                if (flow.source === id) partners.add(flow.target);
+                if (flow.target === id) partners.add(flow.source);
+              }
+              paths.classed("is-highlighted", (flow) => !!node && (flow.source === id || flow.target === id));
+              nodes.classed("is-highlighted", (item) => !!node && partners.has(item.id));
+              caption.text(node ? `${node.id} · ${getStatnaam(node.id)}` : `${data.nodes.length} COROP regions · ${data.flows.length} ${simulation ? "exposure" : "trade"} flows`);
+              detail.text(node ? `In ${formatSmall(node.incoming)} · Out ${formatSmall(node.outgoing)} · Local ${formatSmall(node.local)}`
+                : summary);
+            }
+            nodes.on("mouseenter", (event, node) => highlight(node.id)).on("focus", (event, node) => highlight(node.id))
+              .on("mouseleave", () => highlight(document.activeElement?.closest(".community-flow-node")?.getAttribute("data-region")))
+              .on("blur", () => highlight(null));
+            highlight(svg.attr("data-highlighted"));
+          }
+
+          function setCommunityView(view) {
+            if ((view !== "heatmap" && view !== "flow") || view === communityView) return false;
+            communityView = view;
+            document.getElementById("communityViewSwitch").setAttribute("aria-checked", String(view === "flow"));
+            if (loadedCSVData && !window.isSwitchingCSV) updateSCCs();
+            return true;
+          }
+
           function getTradeCommunityStructureData() {
-            const nodes = activeNodes.length
-              ? activeNodes
-              : allNodes.filter((node) => node.active);
             const links = enabledLinks.filter((link) => link.weight > 0);
             const temporalStats =
               window.currentDate &&
               window.allTemporalStats?.[window.currentDate.toISOString()];
-
-            if (temporalStats?.partition) {
-              allNodes.forEach((node) => {
-                node.community = temporalStats.partition[node.id];
-              });
-            }
+            const partition = tradeCommunityTimeline?.partition || {};
+            const nodesById = new Map(allNodes.map((node) => [node.id, node]));
+            allNodes.forEach((node) => {
+              node.community = partition[node.id];
+            });
 
             const communities = new Map();
             const nodeCommunity = new Map();
-            nodes.forEach((node) => {
-              const key =
-                node.community === undefined || node.community === null
-                  ? "NA"
-                  : String(node.community);
-              nodeCommunity.set(node.id, key);
+            Object.entries(partition).forEach(([id, communityId]) => {
+              const key = String(communityId);
+              nodeCommunity.set(id, key);
               if (!communities.has(key)) {
                 communities.set(key, {
                   key,
@@ -12634,13 +12973,15 @@
                 });
               }
               const community = communities.get(key);
-              community.members.push(node.id);
+              community.members.push(id);
               community.nodeCount += 1;
-              community.nodeVolume += node.tradeTotal || 0;
+              community.nodeVolume += nodesById.get(id)?.tradeTotal || 0;
             });
 
             let total = 0;
             let within = 0;
+            let interregionalTotal = 0;
+            let interregionalWithin = 0;
             const matrix = new Map();
             links.forEach((link) => {
               const sourceId = getNodeId(link.source);
@@ -12656,6 +12997,10 @@
               communities.get(targetKey).incoming += weight;
               total += weight;
               if (sourceKey === targetKey) within += weight;
+              if (sourceId !== targetId) {
+                interregionalTotal += weight;
+                if (sourceKey === targetKey) interregionalWithin += weight;
+              }
             });
 
             communities.forEach((community) => {
@@ -12669,15 +13014,12 @@
 
             const communityList = Array.from(communities.values()).sort(
               (a, b) =>
-                b.load - a.load ||
-                b.nodeVolume - a.nodeVolume ||
-                b.nodeCount - a.nodeCount ||
+                Number(a.key) - Number(b.key) ||
                 d3.ascending(a.key, b.key),
             );
             const modularity =
               temporalStats?.modularity ??
-              computeModularity(nodes, links).modularity ??
-              0;
+              evaluatePartitionModularity(links, partition, tradeCommunityTimeline?.resolution ?? 1);
 
             return {
               communities: communityList,
@@ -12685,6 +13027,9 @@
               total,
               within,
               between: total - within,
+              interregionalTotal,
+              interregionalWithin,
+              interregionalBetween: interregionalTotal - interregionalWithin,
               modularity,
             };
           }
@@ -12696,7 +13041,7 @@
             const { communities, matrix } = data;
             const mappingLayout = getSimulationPartitionMappingLayout(containerNode);
             const margin = {
-              top: 78,
+              top: 124,
               right: 104,
               bottom: communities.length ? mappingLayout.compactHeight + 12 : 36,
               left: 42,
@@ -12712,7 +13057,8 @@
 
             let svg = container.select("svg.trade-community-chart");
             if (svg.empty()) {
-              container.selectAll("svg").remove();
+              container.selectAll("svg.simulation-partition-chart, svg.trade-community-chart, svg.community-flow-chart")
+                .interrupt().call((charts) => charts.selectAll("*").interrupt()).remove();
               svg = container.append("svg").attr("class", "trade-community-chart");
             }
             svg
@@ -12766,17 +13112,18 @@
               .domain([0, maxValue]);
 
             const summaryItems = [
-              ["Within", formatPct(data.total ? data.within / data.total : 0)],
-              ["Between", formatPct(data.total ? data.between / data.total : 0)],
-              ["Modularity", d3.format(".3f")(data.modularity || 0)],
+              ["Interregional within", data.interregionalTotal ? formatPct(data.interregionalWithin / data.interregionalTotal) : "—"],
+              ["Between", data.interregionalTotal ? formatPct(data.interregionalBetween / data.interregionalTotal) : "—"],
+              [`Modularity γ=${tradeCommunityTimeline.resolution}`, d3.format(".3f")(data.modularity)],
             ];
-            const summaryWidth = Math.min(92, containerNode.clientWidth / 3);
+            const summaryWidth = (containerNode.clientWidth - 32) / summaryItems.length;
             const summary = svg
               .selectAll("g.trade-community-summary")
               .data([null])
               .join("g")
               .attr("class", "trade-community-summary")
-              .attr("transform", "translate(16,50)");
+              .attr("text-anchor", "middle")
+              .attr("transform", "translate(16,96)");
             const summaryGroups = summary
               .selectAll("g.trade-community-summary-item")
               .data(summaryItems, (item) => item[0])
@@ -12808,7 +13155,7 @@
                   .style("opacity", 1)
                   .attr(
                     "transform",
-                    (item, index) => `translate(${index * summaryWidth},0)`,
+                    (item, index) => `translate(${(index + 0.5) * summaryWidth},0)`,
                   ),
               );
             summaryGroups
@@ -12994,6 +13341,10 @@
            * Renders global partition structure for the ledger view.
            */
           function updateSCCs() {
+            if (communityView === "flow") {
+              if (!selectedNodeData) renderCommunityFlowPanel();
+              return;
+            }
             if (isSimulationModeActive() && simulationState.currentFrame) {
               renderSimulationPartitionStructurePanel();
               return;
@@ -13975,6 +14326,13 @@
 
             if (!persistentUiHandlersBound) {
               window.addEventListener("resize", matchButtonWidths);
+
+              document.getElementById("communityScaleSelect").addEventListener("change", function () {
+                setTradeCommunityScale(this.value);
+              });
+              document.getElementById("communityViewSwitch").addEventListener("click", function () {
+                setCommunityView(communityView === "heatmap" ? "flow" : "heatmap");
+              });
 
               document
                 .getElementById("statSelect")

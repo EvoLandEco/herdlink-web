@@ -25,6 +25,7 @@ const functions = [
   "initNodesAndLinks", "restoreLinks", "getSimulationTrajectoryPath", "setAppDataMode", "cancelSimulationRecompute",
   "applyNetworkControlChanges", "refreshNetworkControlStats", "computeTemporalNetworkStats",
   "computeMaxTemporalNetworkStats", "computeSimpleStats", "computeNumberOfConnectedComponents",
+  "computeTradeCommunityTimeline", "computeModularity", "evaluatePartitionModularity",
 ].map(extractFunction).join("\n");
 
 const settings = {
@@ -42,13 +43,12 @@ function runtime(edges = [["CR01", "CR02", 1000], ["CR02", "CR01", 100], ["CR02"
     Date, Map, Set, uniqueDates, loadedCSVData,
     simulationRegionIdsByDataset: new WeakMap(),
     tradeRecordsByDataset: new WeakMap(),
-    originalLedgerStatsByDataset: new WeakMap(),
+    originalLedgerStatsByDataset: new WeakMap(), tradeCommunityTimeline: null, communityScale: "broad",
     appDataMode: "simulation", allNodes: [], allLinks: [], nlLabelPoints: null,
     simulationState: {}, simulationLinkInterventions: new Map(),
     simulationNodeInterventions: new Map(),
     networkStatsDirtyDates: new Set(), networkStatsDirtyFrom: null, ledgerBaselineSpectralRadius: 0,
     window: { currentDate: uniqueDates[0] }, tradeIntensity: null, exposureIntensity: null,
-    computeModularity: () => ({ partition: {}, modularity: 0 }),
     computeSpectralRadius: () => 0, computeHotSpotMetrics: () => ({}),
     setLedgerHotspotsMax: () => {},
     metricNames: ["inDegree", "outDegree", "betweenness", "pageRank", "eigenvector"],
@@ -61,7 +61,7 @@ function runtime(edges = [["CR01", "CR02", 1000], ["CR02", "CR01", 100], ["CR02"
       curveMonotoneX: "smooth", curveStepAfter: "step",
     },
   });
-  vm.runInContext(functions, context);
+  vm.runInContext(readFileSync(new URL("../src/runtime/jLouvain.js", import.meta.url), "utf8") + "\n" + functions, context);
   context.initNodesAndLinks(loadedCSVData.filter((row) => row.time === uniqueDates[0]));
   context.computeTemporalNetworkStats();
   return context;
@@ -164,11 +164,12 @@ test("network and simulation modes share dated controls while preserving ledger 
   assert.equal(snapshot(context.loadedCSVData), rawLedger);
 });
 
-test("network analytics refresh edited dates and persistent restriction periods without replacing untouched dates", () => {
+test("network analytics refresh edited routes while retaining unaffected node calculations", () => {
   const context = runtime();
   const dates = context.uniqueDates;
   const rawLedger = snapshot(context.loadedCSVData);
   const baseline = { ...context.window.allTemporalStats };
+  const nodeBaseline = { ...context.window.allTemporalNodeStats };
   const stats = (index) => context.window.allTemporalStats[dates[index].toISOString()];
   assert.equal(stats(0).totalTradeVolume, 1200);
 
@@ -176,7 +177,8 @@ test("network analytics refresh edited dates and persistent restriction periods 
   context.refreshNetworkControlStats();
   assert.equal(stats(2).totalTradeVolume, 200);
   for (const index of [0, 1, 3, 4, 5]) {
-    assert.equal(stats(index), baseline[dates[index].toISOString()]);
+    assert.deepEqual(stats(index), baseline[dates[index].toISOString()]);
+    assert.equal(context.window.allTemporalNodeStats[dates[index].toISOString()], nodeBaseline[dates[index].toISOString()]);
   }
   assert.equal(context.networkStatsDirtyDates.size, 0);
 
@@ -187,7 +189,8 @@ test("network analytics refresh edited dates and persistent restriction periods 
   assert.equal(stats(3).totalEdges, 1);
   assert.equal(stats(3).totalNodes, 2);
   assert.equal(stats(3).numComponents, 2);
-  assert.equal(stats(0), baseline[dates[0].toISOString()]);
+  assert.deepEqual(stats(0), baseline[dates[0].toISOString()]);
+  assert.equal(context.window.allTemporalNodeStats[dates[0].toISOString()], nodeBaseline[dates[0].toISOString()]);
   assert.equal(context.networkStatsDirtyFrom, null);
   assert.equal(context.window.maxTemporalStats.totalTradeVolume, 1200);
   assert.equal(snapshot(context.loadedCSVData), rawLedger);
@@ -211,7 +214,11 @@ test("network statistics group interleaved records by timestamp and refresh only
   const untouched = stats(0);
   context.setSimulationNodeIntervention("CR02", "exports", false, dates[2]);
   context.computeTemporalNetworkStats([new Date(dates[2])]);
-  assert.equal(stats(0), untouched);
+  const { communityScales: beforeScales, ...beforeMetrics } = untouched;
+  const { communityScales: afterScales, ...afterMetrics } = stats(0);
+  assert.deepEqual(afterMetrics, beforeMetrics);
+  assert.notDeepEqual(afterScales.finer.partition, beforeScales.finer.partition);
+  assert.equal(afterScales.finer.partition, stats(2).communityScales.finer.partition);
   assert.equal(stats(2).totalTradeVolume, 10);
   assert.equal(stats(2).totalEdges, 1);
 });

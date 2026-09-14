@@ -6,9 +6,9 @@
     "licenseUrl": "https://www.cbs.nl/en-gb/about-us/website/copyright",
     "retrievedAt": "2026-09-11",
     "referenceDate": "1 April of each census year",
-    "method": "Published COROP pig and pig-holding totals divided by the same year's published COROP land area in square kilometres. Water is excluded. Densities are rounded to six decimal places.",
-    "missingValues": "Null means CBS has no published numeric value. A density is null when its count or land area is null. Published zero is retained as zero; no values are estimated.",
-    "geography": "Census records use the COROP classification of their reference year. The map displays 2024 COROP boundaries; these values are not recalculated to 2024 geography.",
+    "method": "Published COROP pig and pig-holding totals divided by the same year's published land area in square kilometres. Densities use land area and are rounded to six decimal places.",
+    "missingValues": "Null marks an unavailable CBS value or a density whose count or land area is unavailable. Published zeros retain their value.",
+    "geography": "Census values retain the COROP classification of their reference year. The map displays 2024 COROP boundaries.",
     "landAreaSurveyYears": {
       "2018": 2015,
       "2019": 2015,
@@ -17,10 +17,10 @@
       "2022": 2017
     },
     "caveats": [
-      "Agricultural activities are assigned to the business's main establishment address, which can differ from where animals are kept. Holdings are businesses with pigs, not a count of separate farm sites.",
+      "Holdings count businesses with pigs at their main establishment address. A business can keep animals at other sites.",
       "From 2018, CBS adjusts fattening-pig counts for temporary empty housing using the prior year's declaration. Agricultural census totals can therefore differ from livestock population tables.",
       "Land areas use the CBS land-use survey listed for each year. Changes in densities can reflect land-area measurement and regional boundary changes as well as animal and holding counts.",
-      "These are annual census observations, not the number of animals or holdings involved in the displayed trade network, and they do not alter the disease model."
+      "Annual census observations describe the region's agricultural population. They provide map context alongside trade records; the simulation uses its own population estimates."
     ],
     "sources": [
       {

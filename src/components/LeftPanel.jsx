@@ -195,6 +195,41 @@ export function LeftPanel() {
           </div>
           <div id="tradeClusters">
             <div className="trade-clusters-label panel-title-label"></div>
+            <div className="community-scale-control">
+              <label htmlFor="communityScaleSelect">Community scale</label>
+              <select id="communityScaleSelect" defaultValue="finer">
+                <option value="broad">Broad</option>
+                <option value="finer">Finer</option>
+              </select>
+              <button
+                id="communityViewSwitch"
+                className="community-view-switch"
+                type="button"
+                role="switch"
+                aria-label="Circular flow view"
+                aria-checked="false"
+                title="Switch between heatmap and circular flows"
+              >
+                <span className="community-view-switch__heatmap" aria-hidden="true">
+                  <svg viewBox="0 0 16 16" fill="none">
+                    <rect x="2" y="2" width="4.5" height="4.5" rx="1" />
+                    <rect x="9.5" y="2" width="4.5" height="4.5" rx="1" />
+                    <rect x="2" y="9.5" width="4.5" height="4.5" rx="1" />
+                    <rect x="9.5" y="9.5" width="4.5" height="4.5" rx="1" />
+                  </svg>
+                  <span className="community-view-switch__label">Heatmap</span>
+                </span>
+                <span className="community-view-switch__flow" aria-hidden="true">
+                  <svg viewBox="0 0 16 16" fill="none">
+                    <path d="M8 2.5 8 8m0 0-4.8 3.5M8 8l4.8 3.5M3.2 11.5l9.6 0" />
+                    <circle cx="8" cy="2.5" r="1.5" />
+                    <circle cx="3.2" cy="11.5" r="1.5" />
+                    <circle cx="12.8" cy="11.5" r="1.5" />
+                  </svg>
+                  <span className="community-view-switch__label">Flow</span>
+                </span>
+              </button>
+            </div>
           </div>
           <div id="tradeNodeDistribution">
             <div className="trade-node-distribution-label panel-title-label"></div>

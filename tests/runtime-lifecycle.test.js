@@ -28,6 +28,7 @@ function runtime() {
     allNodes: [], allLinks: [], nonZeroLinks: [], nlMapData: {}, nlLabelPoints: null,
     linkGroup: selection, linkSelection: selection, nodeGroup: selection, svg: selection,
     nodeEnter: selection, labelSelection: selection,
+    tradeCommunityTimeline: { partition: {} },
     nodeSize: { domain() {} }, nodeColor: { domain() {} },
     hotspotLabelDy: 0, w: 800, h: 600, theme: {}, isSwitchingCSV: false,
     hotspots: {}, getHotspotRankings: () => ({}),
@@ -76,6 +77,17 @@ test("date changes keep map physics stopped and let graph physics cool", () => {
   context.updateTemporalNetwork();
   assert.equal(context.forceState.running, false);
   assert.equal(context.forceState.starts, 1);
+});
+
+test("date rendering uses the full sorted community color domain", () => {
+  const context = runtime();
+  context.tradeCommunityTimeline.partition = { CR03: 2, CR01: 0, CR02: 1 };
+  let domain;
+  context.nodeColor.domain = (values) => { domain = Array.from(values); };
+  context.updateTemporalNetwork();
+  assert.deepEqual(domain, [0, 1, 2]);
+  context.updateTemporalNetwork();
+  assert.deepEqual(domain, [0, 1, 2]);
 });
 
 test("view changes stop map physics and clear a held drag target", () => {

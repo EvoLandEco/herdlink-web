@@ -12,6 +12,7 @@ const functions = [
   "collectSimulationRegionIds", "buildSimulationLedger", "estimateSimulationHoldings",
   "getSimulationFrameSummary", "buildSimulationTrajectory", "computeTemporalNetworkStats",
   "computeSimpleStats", "computeNumberOfConnectedComponents", "computeModularity",
+  "computeTradeCommunityTimeline", "evaluatePartitionModularity",
   "computeHotSpotMetrics", "computeEigenvectorCentrality", "buildAdjList",
   "getStronglyConnectedComponents", "computePerronPair", "computePerronRoot", "computeSpectralRadius",
   "getComparisonMetricDefinitions", "buildComparisonSeries", "getOriginalSimulationSeries", "getComparisonData", "initHerdLink",
@@ -35,7 +36,7 @@ function runtime() {
   const context = vm.createContext({
     Date, Map, Set, uniqueDates, loadedCSVData,
     simulationRegionIdsByDataset: new WeakMap(), tradeRecordsByDataset: new WeakMap(),
-    originalLedgerStatsByDataset: new WeakMap(),
+    originalLedgerStatsByDataset: new WeakMap(), tradeCommunityTimeline: null, communityScale: "broad",
     simulationLinkInterventions: new Map(), simulationNodeInterventions: new Map(),
     networkStatsDirtyDates: new Set(), networkStatsDirtyFrom: null, ledgerBaselineSpectralRadius: 0,
     comparisonDataCache: new Map(), comparisonDataError: null, appDataMode: "trade", simulationRecomputeTimer: null,
@@ -181,7 +182,7 @@ test("a restricted dataset computes only missing original dates and reuses them 
   };
   const first = context.getComparisonData();
   const firstOriginal = plain(first.original);
-  assert.deepEqual(calculations, [{ dates: [allDates[1].toISOString()], store: false }]);
+  assert.deepEqual(calculations, [{ dates: allDates.slice(0, 2).map((date) => date.toISOString()), store: false }]);
   assert.deepEqual(plain(first.original.global.map((row) => row.totalTradeVolume)), [130, 230]);
   assert.equal(first.intervention.global[1].totalTradeVolume, 30);
   assert.equal(prior.original.global[0].totalTradeVolume, 13);
@@ -197,7 +198,10 @@ test("a restricted dataset computes only missing original dates and reuses them 
   context.uniqueDates = allDates.slice(1, 3);
   const narrowed = context.getComparisonData();
   assert.deepEqual(plain(narrowed.original.global.map((row) => row.totalTradeVolume)), [230, 330]);
-  assert.equal(calculations.length, 1);
+  assert.deepEqual(calculations, [
+    { dates: allDates.slice(0, 2).map((date) => date.toISOString()), store: false },
+    { dates: allDates.slice(2).map((date) => date.toISOString()), store: false },
+  ]);
   assert.deepEqual(plain(first.original), firstOriginal);
 });
 

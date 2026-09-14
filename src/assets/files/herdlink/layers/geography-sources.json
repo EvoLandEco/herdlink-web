@@ -19,7 +19,7 @@
   "attribution": "Contains Kadaster TOP250NL data, provided by PDOK (CC BY 4.0).",
   "crs": "EPSG:28992",
   "scale": "1:250,000",
-  "processing": "Source coordinates are retained without simplification. Geometry parts are grouped by display class; place polygons sharing a name are grouped for label placement.",
+  "processing": "Source coordinates are preserved. Geometry parts are grouped by display class; place polygons sharing a name are grouped for label placement.",
   "layers": {
     "roads": {
       "selection": "Line features in use, with typeWeg autosnelweg or hoofdweg.",
@@ -36,7 +36,7 @@
       }
     },
     "land-cover": {
-      "selection": "All bos and zand terrain polygons, plus all woonkern settlement polygons. Other terrain is unclassified; this layer does not map agricultural land.",
+      "selection": "All bos and zand terrain polygons, plus all woonkern settlement polygons. Other terrain, including agricultural land, is unclassified.",
       "classes": {
         "woodland": "Woodland",
         "urban": "Settlements",

@@ -374,7 +374,7 @@ function ComparisonContent({ data, animate }) {
               <ComparisonInfo label="Largest changes" icon={faRankingStar} rows={[
                 ["Ranking", "Up to six regions, ranked by absolute change for the selected region metric and inspected date."],
                 ["Inspect", "Select a region to show its trajectory in the Region panel."],
-              ]} footer="The sign shows direction; it does not tell you whether a change is beneficial.">Find the regions most affected by your interventions.</ComparisonInfo>
+              ]} footer="Positive values show increases; negative values show decreases. Interpret each change using the selected metric.">Find the regions most affected by your interventions.</ComparisonInfo>
             </div>
             <p className="comparison-changes__metric">{selectedMetric?.label || "Region metric"}</p>
             {changedRegions.length ? (
