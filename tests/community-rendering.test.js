@@ -16,6 +16,7 @@ function extractFunction(name) {
 
 function runtime() {
   const context = vm.createContext({
+    loadedCSVData: [], simulationRegionIdsByDataset: new WeakMap(),
     allNodes: [
       { id: "CR01", active: true, tradeTotal: 100 },
       { id: "CR02", active: true, tradeTotal: 100 },
@@ -27,7 +28,7 @@ function runtime() {
     d3: { ascending },
   });
   vm.runInContext([
-    "getNodeId", "evaluatePartitionModularity", "getTradeCommunityStructureData",
+    "getNodeId", "collectSimulationRegionIds", "evaluatePartitionModularity", "getTradeCommunityStructureData",
     "getSimulationPartitionKey", "getSimulationPartitionData",
   ].map(extractFunction).join("\n"), context);
   return context;
@@ -39,6 +40,7 @@ test("trade matrices retain the full community roster and numeric order as date 
   assert.deepEqual(plain(first.communities.map(({ key, members, nodeCount }) => ({ key, members, nodeCount }))), [
     { key: "2", members: ["CR02"], nodeCount: 1 },
     { key: "10", members: ["CR01", "CR03"], nodeCount: 2 },
+    { key: "NA", members: Array.from({ length: 37 }, (_, index) => `CR${String(index + 4).padStart(2, "0")}`), nodeCount: 37 },
   ]);
   assert.equal(first.matrix.get("10->2"), 100);
   assert.equal(context.allNodes[2].community, undefined);
@@ -48,7 +50,7 @@ test("trade matrices retain the full community roster and numeric order as date 
   const second = context.getTradeCommunityStructureData();
   assert.deepEqual(plain(second.communities.map(({ key, members }) => ({ key, members }))),
     plain(first.communities.map(({ key, members }) => ({ key, members }))));
-  assert.deepEqual(Array.from(second.communities, ({ load }) => load), [0, 1000]);
+  assert.deepEqual(Array.from(second.communities, ({ load }) => load), [0, 1000, 0]);
   assert.equal(second.within, 500);
   assert.equal(second.between, 0);
 });
@@ -73,18 +75,82 @@ test("interregional mixing excludes local trades while the matrix retains their 
   assert.equal(result.matrix.get("10->10"), 925);
 });
 
-test("an empty aggregate has no trade communities and clears stale node membership", () => {
+test("an empty aggregate retains the unassigned roster and clears stale node membership", () => {
   const context = runtime();
   context.tradeCommunityTimeline = { partition: {} };
   context.enabledLinks = [];
   const result = context.getTradeCommunityStructureData();
-  assert.deepEqual(plain(result.communities), []);
+  assert.equal(result.communities.length, 1);
+  assert.equal(result.communities[0].key, "NA");
+  assert.equal(result.communities[0].nodeCount, 40);
   assert.equal(result.matrix.size, 0);
   assert.equal(result.total, 0);
   assert.equal(result.within, 0);
   assert.equal(result.between, 0);
   assert.equal(result.modularity, 0);
   assert.ok(context.allNodes.every((node) => node.community === undefined));
+});
+
+test("local trade in unassigned regions remains in the heatmap without changing inferred communities", () => {
+  const context = runtime();
+  const partition = Object.freeze({ CR01: 0, CR02: 0 });
+  context.tradeCommunityTimeline = { partition, numPartitions: 1, resolution: 1 };
+  context.allNodes.push({ id: "CR03", active: true, tradeTotal: 198 });
+  context.enabledLinks = [
+    { source: "CR01", target: "CR02", weight: 1 },
+    { source: { id: "CR03" }, target: { id: "CR03" }, weight: 99 },
+  ];
+  const result = context.getTradeCommunityStructureData();
+  assert.equal(result.total, 100);
+  assert.equal(result.within, 100);
+  assert.equal(result.matrix.get("0->0"), 1);
+  assert.equal(result.matrix.get("NA->NA"), 99);
+  assert.equal(result.interregionalTotal, 1);
+  assert.equal(result.interregionalWithin, 1);
+  assert.equal(result.modularity, 0);
+  const unassigned = result.communities.find(({ key }) => key === "NA");
+  assert.equal(unassigned.nodeCount, 38);
+  assert.equal(unassigned.load, 198);
+  assert.equal(unassigned.nodeVolume, 198);
+  assert.ok(unassigned.members.includes("CR03"));
+  assert.equal(context.tradeCommunityTimeline.partition, partition);
+  assert.equal(context.tradeCommunityTimeline.numPartitions, 1);
+  assert.equal(context.allNodes.find(({ id }) => id === "CR03").community, undefined);
+});
+
+test("an entirely local ledger displays its unassigned volume with zero inferred groups", () => {
+  const context = runtime();
+  const partition = Object.freeze({});
+  context.tradeCommunityTimeline = { partition, numPartitions: 0, resolution: 1.5 };
+  context.enabledLinks = [
+    { source: "CR01", target: "CR01", weight: 100 },
+    { source: "CR03", target: "CR03", weight: 99 },
+  ];
+  const result = context.getTradeCommunityStructureData();
+  assert.equal(result.communities.length, 1);
+  assert.equal(result.communities[0].key, "NA");
+  assert.equal(result.communities[0].nodeCount, 40);
+  assert.equal(result.total, 199);
+  assert.equal(result.matrix.get("NA->NA"), 199);
+  assert.equal(result.interregionalTotal, 0);
+  assert.equal(result.modularity, 0);
+  assert.equal(context.tradeCommunityTimeline.partition, partition);
+  assert.equal(context.tradeCommunityTimeline.numPartitions, 0);
+
+  Object.assign(context, { theme: { muted: "neutral" },
+    nodeColor() { assert.fail("Unassigned regions use the neutral color"); },
+  });
+  vm.runInContext(["getTradeCommunityLabel", "getTradeCommunityColor", "getSimulationPartitionDisplayKey",
+    "getSimulationPartitionColor", "renderSimulationPartitionMapping"].map(extractFunction).join("\n"), context);
+  assert.equal(context.getTradeCommunityLabel("NA"), "NA");
+  assert.equal(context.getTradeCommunityColor("NA"), "neutral");
+  let html;
+  const panel = { empty: () => false, on() { return this; }, style() { return this; }, html(value) { html = value; return this; } };
+  context.renderSimulationPartitionMapping({ select: () => panel }, result.communities,
+    { maxItems: 2, maxRows: 2, columns: 2, maxMembers: 3, compactHeight: 50, expandedHeight: 200 });
+  assert.match(html, /0 fixed groups · 0 singletons/);
+  assert.match(html, /40 regions/);
+  assert.doesNotMatch(html, /PNA/);
 });
 
 test("simulation membership includes regions absent from the displayed trade date", () => {

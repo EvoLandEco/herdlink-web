@@ -847,7 +847,7 @@ test("replay applies both intervention scopes and restores flags when stepping b
   }
 });
 
-test("all compartment models conserve holdings with restricted links", () => {
+test("all compartment models conserve model population with restricted links", () => {
   const context = runtime();
   toggle(context, "CR02", "CR01", true, context.uniqueDates[1]);
   toggle(context, "CR02", "CR02", true, context.uniqueDates[2]);
@@ -865,6 +865,23 @@ test("all compartment models conserve holdings with restricted links", () => {
       assert.ok(Math.abs(frame.summary.S + frame.summary.E + frame.summary.I + frame.summary.R - frame.summary.N) < 1e-8);
     }
   }
+});
+
+test("explicit simulation populations reject missing, zero and nonfinite entries", () => {
+  const context = runtime();
+  const population = Object.fromEntries(context.buildSimulationTrajectory(settings).holdings);
+  for (const value of [undefined, 0, -1, NaN, Infinity]) {
+    assert.throws(() => context.buildSimulationTrajectory({
+      ...settings, holdings: { ...population, CR01: value },
+    }), /Model population for CR01 must be a positive finite number/);
+  }
+});
+
+test("nonfinite movement weights leave model populations and compartments finite", () => {
+  const context = runtime();
+  const expected = snapshot(context.buildSimulationTrajectory(settings));
+  context.loadedCSVData.push({ time: context.uniqueDates[0], COROP_LEV: "CR01", COROP_AFN: "CR02", AANTAL: Infinity });
+  assert.equal(snapshot(context.buildSimulationTrajectory(settings)), expected);
 });
 
 test("simulation edge colors retain a valid zero logarithmic endpoint", () => {

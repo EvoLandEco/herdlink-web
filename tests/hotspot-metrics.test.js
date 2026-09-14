@@ -48,6 +48,27 @@ test("betweenness distinguishes longer paths when movement volumes are rescaled"
   }
 });
 
+test("betweenness shares credit between exact inverse-weight ties at binary scales", () => {
+  const routes = [["A", "B", 10], ["B", "C", 15], ["A", "C", 6]];
+  for (const scale of [Number.MIN_VALUE, 2 ** -100, 0.25, 1, 2 ** 100]) {
+    const result = metrics(["A", "B", "C"], routes.map(([source, target, weight]) => [source, target, weight * scale]));
+    assert.equal(result.A.betweenness, 0);
+    assert.equal(result.B.betweenness, 0.5);
+    assert.equal(result.C.betweenness, 0);
+  }
+});
+
+test("betweenness preserves the ordering of closely unequal inverse-weight paths", () => {
+  for (const [directWeight, expected] of [[6 + 6 * Number.EPSILON, 0], [6 - 6 * Number.EPSILON, 1]]) {
+    for (const scale of [0.25, 1, 2 ** 100]) {
+      const result = metrics(["A", "B", "C"], [
+        ["A", "B", 10 * scale], ["B", "C", 15 * scale], ["A", "C", directWeight * scale],
+      ]);
+      assert.equal(result.B.betweenness, expected);
+    }
+  }
+});
+
 test("blocked CR35 exports do not count within-region trades as seeding", () => {
   const csv = readFileSync(new URL("../src/assets/data/weekly_aggregation.csv", import.meta.url), "utf8");
   const links = csv.trim().split("\n").slice(1).flatMap((line) => {

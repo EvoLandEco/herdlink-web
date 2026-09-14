@@ -104,3 +104,25 @@ test("malformed date, region and route tuples cannot match a valid scenario sign
     }
   }
 });
+
+test("scenario signatures preserve population values independently of region key order", () => {
+  const value = { ...scenario, settings: {
+    ...scenario.settings, introductionDate: "2020-01-05", holdings: { CR01: 450, CR02: 2000, CR35: 10000 },
+  } };
+  const before = JSON.stringify(value);
+  const reordered = structuredClone(value);
+  reordered.settings.holdings = Object.fromEntries(Object.entries(reordered.settings.holdings).reverse());
+  assert.equal(scenarioSignature(reordered), scenarioSignature(value));
+  assert.equal(JSON.stringify(value), before);
+  reordered.settings.holdings.CR02++;
+  assert.notEqual(scenarioSignature(reordered), scenarioSignature(value));
+  reordered.settings.holdings.CR02--;
+  reordered.settings.introductionDate = "2020-01-06";
+  assert.notEqual(scenarioSignature(reordered), scenarioSignature(value));
+});
+
+test("an omitted introduction matches the first recorded date", () => {
+  assert.equal(scenarioSignature(scenario), scenarioSignature({
+    ...scenario, settings: { ...scenario.settings, introductionDate: scenario.dates[0].slice(0, 10) },
+  }));
+});

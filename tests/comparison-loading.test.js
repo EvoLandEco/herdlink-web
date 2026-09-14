@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import test from "node:test";
 import vm from "node:vm";
 import { scenarioSignature } from "../src/scenarioStorage.js";
+import { presetSettingsKey } from "../src/runtime/intervention-presets.js";
 
 const source = readFileSync(new URL("../src/useComparison.js", import.meta.url), "utf8")
   .replace(/^import .*;\n/gm, "").replace(/^export /gm, "");
@@ -69,7 +70,7 @@ function hook() {
       slots[index] = { name, scenario };
       return slots;
     },
-    scenarioSignature,
+    scenarioSignature, presetSettingsKey,
     scenarioStorageKey: "scenarios",
   });
   vm.runInContext(source, context);
@@ -349,14 +350,14 @@ test("active indicators follow complete configurations through loads, inspection
 test("a successful no-action preset outranks Open while failed and canceled loads cannot claim another preset", () => {
   const app = hook();
   app.setSnapshot(comparison(openScenario)); app.api.toggle(); app.frame();
-  app.bridge.loadPreset = () => ({ label: "Delayed", scenario: openScenario });
-  app.api.loadPreset("delayed-response"); finishLoad(app);
-  assert.equal(app.api.activePresetId, "delayed-response");
-  app.api.loadPreset("delayed-response"); finishLoad(app);
-  assert.equal(app.api.activePresetId, "delayed-response");
+  app.bridge.loadPreset = () => ({ label: "Standstill", scenario: openScenario });
+  app.api.loadPreset("temporary-standstill"); finishLoad(app);
+  assert.equal(app.api.activePresetId, "temporary-standstill");
+  app.api.loadPreset("temporary-standstill"); finishLoad(app);
+  assert.equal(app.api.activePresetId, "temporary-standstill");
   app.bridge.loadPreset = () => { throw new Error("Load failed"); };
   app.api.loadPreset("hub-controls"); finishLoad(app);
-  assert.equal(app.api.activePresetId, "delayed-response");
+  assert.equal(app.api.activePresetId, "temporary-standstill");
   app.bridge.loadPreset = () => {
     app.setSnapshot(comparison(seedScenario, "loading"));
     return { label: "Seed", scenario: seedScenario };
@@ -368,6 +369,94 @@ test("a successful no-action preset outranks Open while failed and canceled load
   assert.equal(app.api.activePresetId, null);
   app.api.loadPreset("seed-containment"); app.api.close(); app.frame();
   app.api.toggle(); app.frame();
+  assert.equal(app.api.activePresetId, null);
+});
+
+test("network preset active state follows the scale used to select its saved targets", () => {
+  const app = hook();
+  const atScale = (scale) => {
+    const data = comparison(seedScenario);
+    data.scenarioContext.communityScale = scale;
+    return data;
+  };
+  app.setSnapshot(atScale("finer")); app.api.toggle(); app.frame();
+  app.bridge.loadPreset = () => ({ label: "Community", scenario: seedScenario, communityScale: "finer" });
+  app.api.loadPreset("seed-community"); finishLoad(app);
+  assert.equal(app.api.activePresetId, "seed-community");
+  app.setSnapshot(atScale("broad")); app.refresh(); app.frame();
+  assert.equal(app.api.activePresetId, null);
+  app.setSnapshot(atScale("finer")); app.refresh(); app.frame();
+  assert.equal(app.api.activePresetId, "seed-community");
+});
+
+test("ranked preset identity follows its date and budget while community scale stays independent", () => {
+  const app = hook();
+  const atSettings = (targetBudget, introductionDate = "2020-01-01", communityScale = "finer") => {
+    const data = comparison(seedScenario);
+    data.scenarioContext.presetSettings = { targetBudget, introductionDate, responseDays: 7, standstillDays: 14 };
+    data.scenarioContext.communityScale = communityScale;
+    return data;
+  };
+  app.setSnapshot(atSettings(3)); app.api.toggle(); app.frame();
+  app.bridge.loadPreset = () => ({ label: "Hubs", scenario: seedScenario,
+    presetKey: presetSettingsKey("hub-controls", { introductionDate: "2020-01-01", targetBudget: 3, responseDays: 7, standstillDays: 14 }) });
+  app.api.loadPreset("hub-controls"); finishLoad(app);
+  assert.equal(app.api.activePresetId, "hub-controls");
+  app.setSnapshot(atSettings(3, "2020-01-01", "broad")); app.refresh(); app.frame();
+  assert.equal(app.api.activePresetId, "hub-controls");
+  app.setSnapshot(atSettings(5)); app.refresh(); app.frame();
+  assert.equal(app.api.activePresetId, null);
+  app.setSnapshot(atSettings(3, "2020-04-01")); app.refresh(); app.frame();
+  assert.equal(app.api.activePresetId, null);
+  let changed;
+  app.bridge.setPresetSettings = (patch) => { changed = patch; };
+  app.api.changePresetSettings({ targetBudget: 5 }); app.commit();
+  assert.equal(changed.targetBudget, 5);
+  assert.equal(app.recomputing, false);
+});
+
+test("preset badges follow only the timing and count settings that each preset uses", () => {
+  const baseSettings = { introductionDate: "2020-01-01", targetBudget: 3, responseDays: 7, standstillDays: 14 };
+  const ids = ["open-trade", "seed-containment", "partner-ring", "seed-community", "hub-controls", "trade-bottlenecks", "temporary-standstill"];
+  for (const id of ids) {
+    const app = hook();
+    const scenario = { ...(id === "open-trade" ? openScenario : seedScenario),
+      settings: { ...seedScenario.settings, introductionDate: baseSettings.introductionDate } };
+    const atSettings = (patch) => {
+      const data = comparison(scenario);
+      data.scenarioContext.presetSettings = { ...baseSettings, ...patch };
+      return data;
+    };
+    app.setSnapshot(atSettings({})); app.api.toggle(); app.frame();
+    app.bridge.loadPreset = () => ({ label: id, scenario, presetKey: presetSettingsKey(id, baseSettings) });
+    app.api.loadPreset(id); finishLoad(app);
+    assert.equal(app.api.activePresetId, id);
+    for (const [key, value, relevant] of [
+      ["introductionDate", "2020-02-01", true],
+      ["responseDays", 0, id !== "open-trade"],
+      ["targetBudget", 5, ["hub-controls", "trade-bottlenecks"].includes(id)],
+      ["standstillDays", 2, id === "temporary-standstill"],
+    ]) {
+      app.setSnapshot(atSettings({ [key]: value })); app.refresh(); app.frame();
+      assert.equal(app.api.activePresetId, relevant ? null : id, `${id}: ${key}`);
+    }
+    let configured;
+    app.bridge.setPresetSettings = (patch) => { configured = patch; };
+    app.api.changePresetSettings({ responseDays: 3, standstillDays: 5 }); app.commit();
+    assert.deepEqual(configured, { responseDays: 3, standstillDays: 5 });
+    assert.equal(app.recomputing, false);
+  }
+});
+
+test("the Open badge follows the applied introduction date", () => {
+  const app = hook();
+  const data = comparison({ ...openScenario, settings: { ...openScenario.settings, introductionDate: "2020-01-01" } });
+  data.scenarioContext.presetSettings = { introductionDate: "2020-01-01", targetBudget: 3 };
+  app.setSnapshot(data); app.api.toggle(); app.frame();
+  assert.equal(app.api.activePresetId, "open-trade");
+  app.setSnapshot({ ...data, scenarioContext: { ...data.scenarioContext,
+    presetSettings: { introductionDate: "2020-04-01", targetBudget: 3 } } });
+  app.refresh(); app.frame();
   assert.equal(app.api.activePresetId, null);
 });
 
@@ -417,8 +506,8 @@ test("screen changes retain started preset identity and cancel queued loads", ()
 
 test("custom loads recognize known presets and equivalent schedules prefer the most recent successful preset", () => {
   const app = hook();
-  const pause = { ...seedScenario, nodeInterventions: [[1578441600000, [["CR35", { exports: false }], ["CR02", { exports: false }]]]] };
-  const configurations = { "seed-containment": seedScenario, "temporary-standstill": pause, "open-trade": openScenario, "delayed-response": openScenario };
+  const ring = { ...seedScenario, nodeInterventions: [[1578441600000, [["CR35", { exports: false }], ["CR02", { exports: false }]]]] };
+  const configurations = { "seed-containment": seedScenario, "partner-ring": ring, "open-trade": openScenario, "temporary-standstill": openScenario };
   app.setSnapshot(comparison(openScenario)); app.api.toggle(); app.frame();
   app.bridge.loadPreset = (id) => {
     app.setSnapshot(comparison(configurations[id]));
@@ -427,13 +516,13 @@ test("custom loads recognize known presets and equivalent schedules prefer the m
   app.api.loadPreset("seed-containment"); finishLoad(app);
   app.bridge.captureScenario = () => seedScenario;
   app.api.saveScenario(0, "Saved seed"); app.commit();
-  app.api.loadPreset("temporary-standstill"); finishLoad(app);
-  assert.equal(app.api.activePresetId, "temporary-standstill");
+  app.api.loadPreset("partner-ring"); finishLoad(app);
+  assert.equal(app.api.activePresetId, "partner-ring");
   app.bridge.loadScenario = (scenario) => app.setSnapshot(comparison(scenario));
   app.api.loadScenario(0); finishLoad(app);
   assert.equal(app.api.activePresetId, "seed-containment");
   assert.equal(app.api.activeScenarioSlot, 0);
-  for (const id of ["delayed-response", "open-trade", "delayed-response"]) {
+  for (const id of ["temporary-standstill", "open-trade", "temporary-standstill"]) {
     app.api.loadPreset(id); finishLoad(app);
     assert.equal(app.api.activePresetId, id);
   }

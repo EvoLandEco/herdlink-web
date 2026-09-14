@@ -55,6 +55,7 @@ function score(links, partition) {
   let internal = 0;
   const degrees = new Map();
   for (const { source, target, weight } of links) {
+    if ((source.id ?? source) === (target.id ?? target)) continue;
     volume += weight;
     const first = partition[source.id ?? source];
     const second = partition[target.id ?? target];
@@ -128,7 +129,7 @@ test("empty and fully restricted graphs have no inferred communities", () => {
   }
 });
 
-test("fixed-partition modularity counts self loops and reciprocal weights consistently", () => {
+test("fixed-partition modularity uses interregional volume and counts reciprocal weights consistently", () => {
   const context = runtime();
   const partition = { a: 0, b: 0, c: 1 };
   const links = [
@@ -136,14 +137,54 @@ test("fixed-partition modularity counts self loops and reciprocal weights consis
     { source: "a", target: "b", weight: 7 },
     { source: { id: "b" }, target: { id: "a" }, weight: 11 },
     { source: "b", target: "c", weight: 5 },
-    { source: "c", target: "c", weight: 3 },
+    { source: { id: "c" }, target: { id: "c" }, weight: 3 },
   ];
   assert.ok(Math.abs(context.evaluatePartitionModularity(links, partition) - score(links, partition)) < 1e-12);
   const nullTerm = (score(links, partition) - context.evaluatePartitionModularity(links, partition, 1.5)) / 0.5;
-  const directNullTerm = [(2 * 13 + 2 * (7 + 11) + 5) / 78, (5 + 2 * 3) / 78]
+  const directNullTerm = [(2 * (7 + 11) + 5) / 46, 5 / 46]
     .reduce((sum, strength) => sum + strength ** 2, 0);
   assert.ok(Math.abs(nullTerm - directNullTerm) < 1e-12);
   assert.equal(context.evaluatePartitionModularity([], {}), 0);
+  assert.equal(context.evaluatePartitionModularity([{ source: "local", target: "local", weight: 1000 }], {}), 0);
+});
+
+test("local trade preserves ledger totals while leaving both community partitions and date scores unchanged", () => {
+  const data = [...fixture(), record(0, "CR01", "CR01", 10_000), record(0, "CR05", "CR05", 5000),
+    record(2, "CR05", "CR05", 5000)];
+  const context = runtime(data);
+  const baseline = context.computeTradeCommunityTimeline(fixture(), new Map(), new Map());
+  const result = context.computeTradeCommunityTimeline(data, new Map(), new Map());
+  for (const scale of ["broad", "finer"]) {
+    assert.deepEqual(plain(result.byScale[scale].partition), plain(baseline.byScale[scale].partition));
+    assert.equal(result.byScale[scale].partition.CR05, undefined);
+    for (const date of dates.slice(0, 2)) assert.equal(result.byScale[scale].modularityByDate.get(+date),
+      baseline.byScale[scale].modularityByDate.get(+date));
+    assert.equal(result.byScale[scale].modularityByDate.get(+dates[2]), 0);
+  }
+  context.computeTemporalNetworkStats();
+  assert.equal(context.window.allTemporalStats[dates[0].toISOString()].totalTradeVolume, 15_100);
+  assert.equal(context.window.allTemporalStats[dates[2].toISOString()].totalTradeVolume, 5000);
+});
+
+test("bundled interregional communities agree across all temporal tables", () => {
+  let reference;
+  for (const dataset of ["daily", "weekly", "monthly", "yearly"]) {
+    const data = readFileSync(new URL(`../src/assets/data/${dataset}_aggregation.csv`, import.meta.url), "utf8")
+      .trim().split(/\r?\n/).slice(1).map((line) => {
+        const [, time, COROP_LEV, COROP_AFN, AANTAL] = line.replaceAll('"', "").split(",");
+        return { time: new Date(time), COROP_LEV, COROP_AFN, AANTAL: +AANTAL };
+      });
+    const context = runtime(data);
+    const result = context.computeTradeCommunityTimeline(data, new Map(), new Map());
+    const partitions = Object.fromEntries(Object.entries(result.byScale).map(([scale, value]) => [scale, plain(value.partition)]));
+    if (reference) assert.deepEqual(partitions, reference, dataset);
+    else reference = partitions;
+    for (const [scale, sizes] of [["broad", [30, 10]], ["finer", [16, 11, 7, 3, 3]]]) {
+      const counts = new Map();
+      for (const group of Object.values(partitions[scale])) counts.set(group, (counts.get(group) || 0) + 1);
+      assert.deepEqual([...counts.values()].sort((a, b) => b - a), sizes);
+    }
+  }
 });
 
 test("a partial date refresh propagates its aggregate partition without recalculating other centralities", () => {

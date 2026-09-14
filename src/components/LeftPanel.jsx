@@ -85,7 +85,7 @@ export function LeftPanel() {
             <div className="header-row header-row-1">
               <div className="logo-container">
                 <h4 className="app-title">HerdLink</h4>
-                <div className="app-version">v0.9.5</div>
+                <div className="app-version">v0.9.6</div>
                 <div className="app-credit">
                   <a
                     className="app-credit-link"
@@ -197,7 +197,7 @@ export function LeftPanel() {
             <div className="trade-clusters-label panel-title-label"></div>
             <div className="community-scale-control">
               <label htmlFor="communityScaleSelect">Community scale</label>
-              <select id="communityScaleSelect" defaultValue="finer">
+              <select id="communityScaleSelect" defaultValue="finer" title="Community scale">
                 <option value="broad">Broad</option>
                 <option value="finer">Finer</option>
               </select>
@@ -207,7 +207,7 @@ export function LeftPanel() {
                 type="button"
                 role="switch"
                 aria-label="Circular flow view"
-                aria-checked="false"
+                aria-checked="true"
                 title="Switch between heatmap and circular flows"
               >
                 <span className="community-view-switch__heatmap" aria-hidden="true">

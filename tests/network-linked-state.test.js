@@ -128,6 +128,7 @@ test("simulation recomputes dirty network partitions before building and display
     window: {},
     loadedCSVData: [{}], uniqueDates: [new Date("2020-01-01T00:00:00Z")], simulationState: {},
     readSimulationSettings: () => ({}),
+    ensurePresetDailyData: async () => [{}], presetDailyDataError: null,
     refreshNetworkControlStats: () => order.push("partitions"),
     buildSimulationTrajectory: () => { order.push("trajectory"); return {}; },
     refreshCurrentNetworkFrame: () => order.push("frame"),

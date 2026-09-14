@@ -1,6 +1,6 @@
 # HerdLink Web
 
-![Version](https://img.shields.io/badge/version-v0.9.5-2f6fed)
+![Version](https://img.shields.io/badge/version-v0.9.6-2f6fed)
 ![Deployment](https://img.shields.io/badge/deployment-GitHub%20Pages-121013?logo=github)
 ![Website](https://img.shields.io/website?url=https%3A%2F%2Fherdlink.nl&label=HerdLink.nl)
 ![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)
@@ -63,13 +63,14 @@ the same routes. The ledger route list keeps recorded volumes visible for blocke
 routes, with the reason shown beside the partner name. Its bars show partner
 distance and community; simulation bars show the partner's infectious share.
 
-Trade communities use one undirected graph of allowed volume across the full
+Trade communities use one undirected graph of allowed interregional volume across the full
 loaded period, with reciprocal routes added together. Broad (γ = 1) and Finer
 (γ = 1.5) select two cached community scales. Membership, colors, and matrix
 order stay fixed during replay. Scheduled restrictions apply at each
 record's date; editing them can regroup the whole timeline, including earlier
 dates. Matrix volumes and modularity describe the displayed date against those
-fixed groups; within and between shares use interregional volume. Scale changes
+fixed groups; modularity and mixing shares use interregional volume. Local trade
+remains in the heatmap, flow view, and disease simulation. Scale changes
 reuse simulation results. The [community methods](docs/trade-communities.md)
 cover interpretation, limits, and performance checks.
 
@@ -85,12 +86,12 @@ exports removes a region's Seeding and Bottleneck
 marks; incoming routes can still support Vulnerable, Sink, or Amplifier marks.
 Sink requires imports, while Amplifier considers connections in either
 direction. Simulation rings show incoming exposure, outgoing pressure,
-prevalence, infectious burden, and pressure per infectious animal. Infection can
+prevalence, infectious burden, and pressure per infectious model unit. Infection can
 persist after movement stops; local transmission is separate from import and
 export pressure.
 
 Edits made in either mode can change disease outcomes from the selected step
-onward. Earlier simulated states, regional holdings, and initial infections stay
+onward. Earlier simulated states, regional model populations, and initial infections stay
 fixed. Replay shows the controls active at each date. Restore all in either mode
 clears both kinds of edits across every date; the simulation uses this restored
 network when it runs.
@@ -100,6 +101,31 @@ apply only to matching dates in the selected resolution. Node restrictions apply
 to every step on or after their start date until a later permission change.
 The schedules stay active when switching between ledger and simulation modes.
 
+Seven [intervention presets](docs/network-scenarios.md) compare Open trade, Seed
+containment, Trace Ring, Community Cordon, Hubs, Bridges, and Standstill. The
+Custom dropdown sets Target regions, Response delay, and Standstill duration.
+Defaults are three targets, a seven-day delay, and a 14-day Standstill.
+Historical targeting uses 365 preceding days of canonical daily trade, while
+tracing follows outgoing seed movements before response. Community scale controls
+the cordon membership, and an independent target count controls
+Hubs and Bridges. Compare disease outcomes alongside retained trade to account
+for each policy's scope.
+
+Set Introduction date beside Seed region in Simulation Controls. Changing the
+date updates infection timing; existing restrictions keep their calendar dates.
+Loading a preset selects its targets and builds its response schedule from that
+date. Custom parameter changes configure the next preset load while applied
+restrictions keep their dates and targets. Response delay applies to all six
+intervention presets; zero delay starts controls on the introduction date and
+gives Trace Ring a seed-only target set. Target regions sets the Hubs and Bridges
+selection count, and Standstill duration sets its time to reopening.
+
+Disease compartments use [synthetic model population units](docs/simulation-population.md)
+scaled from trade activity. CBS pig census values describe agricultural activity
+at business main addresses and provide the map's pig and holdings density layers.
+Using them as geographic disease populations requires alignment with animal sites
+and the movement data.
+
 Trajectory panels use smooth curves within each period of unchanged links.
 Each intervention boundary uses a step to connect the last state
 before the edit to the first state under it.
@@ -108,7 +134,7 @@ before the edit to the first state under it.
 
 Press `C` to compare the original ledger with the current movement restrictions.
 In simulation mode, both scenarios use the same model, seed, settings, and
-estimated populations; the original scenario allows all movement.
+synthetic model populations; the original scenario allows all movement.
 Choose a region and a trajectory metric to inspect their differences over time.
 The overlay's mode switch and `E` change the active application mode.
 

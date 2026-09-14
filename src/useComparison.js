@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { readScenarioSlots, saveScenarioSlot, scenarioSignature, scenarioStorageKey } from "./scenarioStorage";
+import { presetSettingsKey } from "./runtime/intervention-presets.js";
 
 export function isComparisonShortcut(event) {
   return !event.defaultPrevented && !event.repeat && !event.isComposing &&
@@ -25,9 +26,12 @@ export function useComparison(hasSupportedScreen) {
     ? scenarioSignature({ ...data.scenarioContext, dates: data.dates }) : null, [data]);
   const slotSignatures = useMemo(() => scenarioSlots.map((slot) => scenarioSignature(slot?.scenario)), [scenarioSlots]);
   const canMarkActive = !recomputing && currentSignature !== null;
-  const matchingPreset = loadedPresets.find((preset) => preset.signature === currentSignature);
+  const matchingPreset = loadedPresets.find((preset) => preset.signature === currentSignature &&
+    (preset.communityScale == null || preset.communityScale === data?.scenarioContext?.communityScale) &&
+    (preset.presetKey == null || preset.presetKey === presetSettingsKey(preset.id, data?.scenarioContext?.presetSettings)));
   const activePresetId = !canMarkActive ? null : matchingPreset
     ? matchingPreset.id : !data.scenarioContext.nodeInterventions.length && !data.scenarioContext.linkInterventions.length
+      && (!data.scenarioContext.presetSettings || data.scenarioContext.settings?.introductionDate === data.scenarioContext.presetSettings.introductionDate)
       ? "open-trade" : null;
   const activeScenarioSlot = canMarkActive && selectedScenario?.signature === currentSignature &&
     slotSignatures[selectedScenario.index] === currentSignature ? selectedScenario.index : null;
@@ -101,10 +105,21 @@ export function useComparison(hasSupportedScreen) {
     runScenarioLoad(() => {
       const result = window.herdlinkComparison.loadPreset(id);
       const signature = scenarioSignature(result.scenario);
-      pendingScenarioRef.current = signature ? { id, signature } : null;
+      pendingScenarioRef.current = signature ? { id, signature, communityScale: result.communityScale, presetKey: result.presetKey } : null;
       setScenarioNotice(`${result.label} loaded. ${result.detail || ""}`.trim());
     }, "The preset could not be loaded.");
   }, [runScenarioLoad]);
+
+  const changePresetSettings = useCallback((patch) => {
+    if (operationRef.current) return;
+    setScenarioError("");
+    setScenarioNotice("");
+    try {
+      window.herdlinkComparison.setPresetSettings(patch);
+    } catch (error) {
+      setScenarioError(error.message);
+    }
+  }, []);
 
   const saveScenario = useCallback((index, name) => {
     if (operationRef.current) return;
@@ -219,5 +234,5 @@ export function useComparison(hasSupportedScreen) {
 
   return { open, data, recomputing, close, toggle, changeMode, scenarioSlots, scenarioError, scenarioNotice,
     activePresetId, activeScenarioSlot,
-    loadPreset, saveScenario, loadScenario };
+    loadPreset, changePresetSettings, saveScenario, loadScenario };
 }

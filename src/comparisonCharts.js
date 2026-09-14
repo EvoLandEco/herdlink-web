@@ -50,7 +50,22 @@ export function nearestComparisonDate(dates, timestamp) {
   return timestamp - Date.parse(dates[low - 1]) <= Date.parse(dates[low]) - timestamp ? low - 1 : low;
 }
 
-export const comparisonEventMarkerWidth = 14;
+export function getComparisonIntroduction(date, dates) {
+  const timestamp = Date.parse(date);
+  if (!Number.isFinite(timestamp) || !dates.length) return null;
+  let low = 0;
+  let high = dates.length;
+  while (low < high) {
+    const middle = Math.floor((low + high) / 2);
+    if (Date.parse(dates[middle]) < timestamp) low = middle + 1;
+    else high = middle;
+  }
+  return low === dates.length ? null : {
+    date: new Date(timestamp).toISOString(), recordedDate: dates[low], index: low,
+  };
+}
+
+export const comparisonEventMarkerWidth = 72;
 
 export function groupComparisonEvents(groups, dates, trackWidth, positionForDate) {
   if (trackWidth <= 0 || !dates.length) return [];
@@ -72,7 +87,10 @@ export function groupComparisonEvents(groups, dates, trackWidth, positionForDate
     }
   }
   return clusters.map(({ left, right, steps }) => ({
-    position: (left + right) / (2 * trackWidth), steps,
+    position: (left + right) / (2 * trackWidth),
+    startPosition: positions.get(steps[0].date),
+    endPosition: positions.get(steps.at(-1).date),
+    steps,
   }));
 }
 

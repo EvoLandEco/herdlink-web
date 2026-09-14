@@ -1,14 +1,23 @@
 # Trade communities
 
-The community map describes allowed animal volume across the full loaded
+The community map describes allowed interregional animal volume across the full loaded
 period. Broad (γ = 1) and Finer (γ = 1.5) provide two scales for comparing dates,
 with Finer selected by default. Each allowed record contributes its volume to
-an undirected edge; reciprocal
-routes and repeated records are added together. Local trade contributes a self loop.
+an undirected edge between distinct regions; reciprocal
+routes and repeated records are added together. Local trade remains in the
+heatmap, flow view, and simulation ledgers.
 Louvain optimizes generalized modularity on this aggregate graph at each scale,
 using a fixed node and edge order. Community IDs follow the first region in each
-group in sorted region order. Regions with zero allowed volume across the
+group in sorted region order. Regions with zero allowed interregional volume across the
 period remain unassigned.
+
+The grouping question concerns connections between regions. Heavy original
+self-loops strengthen a region's own community in Louvain and can keep it
+separate despite its external ties. Using cross-region trade focuses the
+partition on those external relationships. The
+[Louvain documentation](https://networkx.org/documentation/stable/reference/algorithms/generated/networkx.algorithms.community.louvain.louvain_communities.html)
+explains this effect and distinguishes input loops from the internal loops
+created when communities are aggregated during optimization.
 
 The date slider reuses the selected partition. Map colors, community membership,
 and matrix order stay fixed. Each scale fits its own groups, independently of
@@ -51,7 +60,7 @@ retrospectively.
 
 ## Modularity at each date
 
-For a date with total allowed volume \(m\), within community volume
+For a date with total allowed interregional volume \(m\), within community volume
 \(w_{\mathrm{within}}\), and community strengths \(s_c\), the displayed score is
 
 \[
@@ -59,13 +68,14 @@ Q_\gamma = \frac{w_{\mathrm{within}}}{m}
     - \gamma \sum_c \left(\frac{s_c}{2m}\right)^2.
 \]
 
-Each route adds its volume to both endpoint strengths. A self loop contributes
-twice to strength and once to total and within community volume. This is the
+Each cross-region route adds its volume to both endpoint strengths. Local
+movement contributes to the displayed trade totals while this score uses the
+connections between regions. This is the
 weighted undirected generalized modularity used by the Louvain algorithm,
 evaluated at each date against the fixed partition and selected γ. Negative
 values indicate less within community volume than the γ-scaled null expectation
 from the same node strengths. Scores at the same community scale share an
-objective and can be compared. Dates with zero allowed trade display zero
+objective and can be compared. Dates with zero allowed interregional trade display zero
 by convention.
 
 ## Reading the groups
@@ -80,9 +90,10 @@ Within community share and modularity show how well the reference groups
 describe each date, helping reveal seasonal differences hidden by aggregation.
 Modularity's resolution limit can merge smaller groups, and several partitions
 can share an objective value. Finer provides another scale to explore those
-patterns. On the unrestricted bundled data, Broad gives groups of 30, 6, and
-4 regions; Finer gives 17, 8, 5, 3, 3, 2, 1, and 1. Group sizes, the two
-singletons, and interregional mixing shares help assess that division.
+patterns. On the unrestricted bundled data, Broad gives groups of 30 and
+10 regions; Finer gives 16, 11, 7, 3, and 3. Group sizes and interregional
+mixing shares help assess that division. Changing local shipment volumes alone
+preserves these memberships and modularity scores.
 
 Colors identify trade groups within one scenario. Compare region membership
 when matching groups across separately fitted scenarios. Assessing communities
@@ -105,11 +116,11 @@ Unrestricted comparisons keep their own cached partitions at both scales.
 
 The browser optimizer uses γ in both its objective and its move calculation.
 Each move compares rejoining the source community with other neighboring
-communities and a singleton community. On the bundled aggregate, the canonical
-ordering matches the best native Leiden result from 30 seeds at both scales,
-including membership and objective. The browser runs Louvain, whose communities
-can be disconnected. The reference checks establish agreement among the tested
-fits; global optimality and uniqueness remain open. See the
+communities and a singleton community. Coarsening retains the internal edge
+weights of aggregated communities as loops in the Louvain quotient graph.
+The browser runs Louvain, whose communities can be disconnected. Connectivity,
+optimizer stability, and alternative objectives can be assessed separately.
+See the
 [method comparison](community-method-comparison.md) for the experiments and
 alternative objectives.
 
@@ -128,20 +139,20 @@ updating the modularity maximum, with rendering excluded.
 
 | Dataset | Records / dates | Both scales, median / p95 | Cached selection, median / p95 |
 | --- | ---: | ---: | ---: |
-| Daily | 143,373 / 1,201 | 83.817 / 88.846 | 0.553 / 0.595 |
-| Weekly | 54,504 / 172 | 30.844 / 34.046 | 0.103 / 0.127 |
-| Monthly | 17,683 / 40 | 11.472 / 12.789 | 0.017 / 0.022 |
-| Yearly | 2,698 / 4 | 3.077 / 3.696 | 0.003 / 0.003 |
+| Daily | 143,373 / 1,201 | 70.544 / 77.413 | 0.486 / 0.584 |
+| Weekly | 54,504 / 172 | 29.205 / 36.403 | 0.082 / 0.092 |
+| Monthly | 17,683 / 40 | 10.116 / 11.646 | 0.018 / 0.045 |
+| Yearly | 2,698 / 4 | 3.147 / 3.770 | 0.003 / 0.007 |
 
-A single route edit rebuilds both daily partitions in a median 81.410 ms;
-a persistent export restriction takes 86.749 ms. Scale selection preserves
+A single route edit rebuilds both daily partitions in a median 70.012 ms;
+a persistent export restriction takes 77.934 ms. Scale selection preserves
 node positions and the fitted distance curve while recoloring its dots.
 
 Circular flow geometry is cached by partition and region roster. Replay refreshes
 dated weights, paths, and labels. On the same machine,
-data assembly and path generation took a median 0.975 ms for the busiest weekly
-frame (340 routes) and 2.016 ms for the busiest yearly frame (725 routes), with
-p95 values of 1.225 ms and 2.487 ms. These measurements use D3 6.7.0, 100 warmups,
+data assembly and path generation took a median 0.917 ms for the busiest weekly
+frame (340 routes) and 1.889 ms for the busiest yearly frame (725 routes), with
+p95 values of 1.157 ms and 2.616 ms. These measurements use D3 6.7.0, 100 warmups,
 and 1,000 measured samples, and exclude SVG insertion, styling, layout, and paint.
 The check also verifies finite paths, distinct endpoints for reciprocal routes,
 and stable region positions. Reproduce it with the app's D3 version:

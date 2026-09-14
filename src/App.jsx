@@ -12,10 +12,12 @@ import { assetUrls } from "./assetUrls";
 import jLouvainUrl from "./runtime/jLouvain.js?url";
 import d3AnnotationUrl from "./runtime/d3anno.js?url";
 import herdLinkRuntimeUrl from "./runtime/herdlink-runtime.js?url";
+import * as interventionPresets from "./runtime/intervention-presets.js";
 
 window.createHerdLinkMapLayers = createMapLayers;
 window.downloadHerdLinkScreenshot = downloadAppScreenshot;
 window.HERDLINK_ASSET_URLS = assetUrls;
+window.herdlinkPresetTools = interventionPresets;
 
 const runtimeScripts = [
   { src: "https://cdn.jsdelivr.net/npm/d3@6.7.0/dist/d3.min.js" },
@@ -114,7 +116,19 @@ const richTips = {
         iconClass: "fa-solid fa-location-dot",
         title: "Starting state",
         text:
-          "Seed region chooses the single region that begins infected, with CR35 selected by default. Initial % sets the infected share in that region at the start of the simulation.",
+          "Seed region chooses where infection starts, with CR35 selected by default. Introduction date sets the first infected date; coarse timelines introduce infection at the first displayed step on or after it. Initial % sets the seed's infectious share.",
+      },
+      {
+        iconClass: "fa-solid fa-calendar-days",
+        title: "Scenario date",
+        text:
+          "Introduction date sets infection timing while scheduled restrictions keep their calendar dates. Custom sets the target count, response delay, and Standstill duration for the next preset load. Loading a preset builds its targets and response schedule from the selected introduction date.",
+      },
+      {
+        iconClass: "fa-solid fa-users",
+        title: "Population units",
+        text:
+          "Compartments use synthetic population units scaled from trade activity. Presets use the preceding year's trade and share fixed populations across policy comparisons. CBS pig census counts provide a separate map layer, attributed to business main addresses.",
       },
       {
         iconClass: "fa-solid fa-arrows-turn-to-dots",
@@ -126,7 +140,7 @@ const richTips = {
         iconClass: "fa-solid fa-clock",
         title: "Timing",
         text:
-          "Latency moves exposed regions toward infectious. Recovery moves infectious regions into recovered or susceptible states.",
+          "Latency moves exposed population units into the infectious compartment. Recovery moves infectious units into recovered or susceptible states. Rates apply once per displayed step.",
       },
     ],
   },
@@ -167,7 +181,7 @@ const richTips = {
     title: "Trade Clusters",
     iconClass: "fa-regular fa-circle-nodes",
     intro:
-      "Communities group regions by allowed trade across the full period. Larger volumes have more influence. Colors and membership stay fixed during date replay.",
+      "Communities group regions by allowed interregional trade across the full period. Larger volumes have more influence. Colors and membership stay fixed during date replay. Local trade remains visible in both charts.",
     sections: [
       {
         iconClass: "fa-solid fa-layer-group",
@@ -497,7 +511,7 @@ const richTips = {
     title: "Partition Exposure",
     iconClass: "fa-solid fa-diagram-project",
     intro:
-      "Explore simulated pressure within and between trade communities. Groups reflect allowed trade across the full period, including scheduled restrictions.",
+      "Explore simulated pressure within and between trade communities. Groups reflect allowed interregional trade across the full period, including scheduled restrictions. Local exposure remains visible in the charts.",
     sections: [
       {
         iconClass: "fa-solid fa-layer-group",
@@ -523,7 +537,7 @@ const richTips = {
     title: "Compartment Trajectory",
     iconClass: "fa-solid fa-chart-area",
     intro:
-      "This chart shows how the simulated population moves through disease states over time.",
+      "This chart shows how synthetic model population units move through disease states over time. Regional populations are scaled from trade activity and held fixed throughout a run.",
     sections: [
       {
         iconClass: "fa-solid fa-layer-group",
@@ -987,6 +1001,7 @@ export default function App() {
           scenarioError={comparison.scenarioError}
           scenarioNotice={comparison.scenarioNotice}
           onLoadPreset={comparison.loadPreset}
+          onChangePresetSettings={comparison.changePresetSettings}
           onSaveScenario={comparison.saveScenario}
           onLoadScenario={comparison.loadScenario}
         />

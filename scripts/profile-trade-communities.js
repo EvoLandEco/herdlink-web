@@ -124,7 +124,7 @@ const report = {
   node: process.version, cpu: cpus()[0].model,
   baselineCommit: execFileSync("git", ["rev-parse", baselineRef], { cwd: root, encoding: "utf8" }).trim(),
   rounds, warmupRounds,
-  timingScope: "Community graph assembly, restrictions, Louvain and modularity; excludes CSV parsing, date indexing, centralities and rendering. The baseline fits every date separately; aggregate fits Broad and Finer to one full-period graph and scores both across dates.",
+  timingScope: "Community graph assembly, restrictions, Louvain and modularity; excludes CSV parsing, date indexing, centralities and rendering. The baseline fits every date separately with local trade; aggregate fits Broad and Finer to one full-period interregional graph and scores both across dates.",
   cachedScaleSelectionScope: "Real scale selector copying cached community fields for every date and calculating the selected modularity maximum; comparison rendering and UI redraw are stubbed. Includes no community detection, centrality or simulation work.",
   datasets: [],
 };
@@ -158,6 +158,7 @@ for (const aggregation of ["daily", "weekly", "monthly", "yearly"]) {
         singletons: sizes.filter((size) => size === 1).length }];
     })),
     distinctUndirectedRoutes: new Set(data.filter((row) => row.COROP_LEV && row.COROP_AFN &&
+      row.COROP_LEV !== row.COROP_AFN &&
       row.COROP_LEV.toUpperCase() !== "NA" && row.COROP_AFN.toUpperCase() !== "NA" &&
       row.AANTAL > 0 && Number.isFinite(row.AANTAL))
       .map((row) => [row.COROP_LEV, row.COROP_AFN].sort().join(":"))).size,

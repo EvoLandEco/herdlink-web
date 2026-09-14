@@ -4,11 +4,12 @@
     "publisher": "Statistics Netherlands (CBS)",
     "license": "CC BY 4.0",
     "licenseUrl": "https://www.cbs.nl/en-gb/about-us/website/copyright",
-    "retrievedAt": "2026-09-11",
+    "retrievedAt": "2026-09-14",
     "referenceDate": "1 April of each census year",
     "method": "Published COROP pig and pig-holding totals divided by the same year's published land area in square kilometres. Densities use land area and are rounded to six decimal places.",
     "missingValues": "Null marks an unavailable CBS value or a density whose count or land area is unavailable. Published zeros retain their value.",
-    "geography": "Census values retain the COROP classification of their reference year. The map displays 2024 COROP boundaries.",
+    "geography": "CBS assigns pig totals and business totals to the business's main establishment address, using the COROP classification of the reference year. The map displays 2024 COROP boundaries.",
+    "publicationSchedule": "The municipal table normally publishes provisional census figures in November and definitive figures in March of the following year. This extract contains published definitive values; historical release vintages require separate source records.",
     "landAreaSurveyYears": {
       "2018": 2015,
       "2019": 2015,
@@ -17,10 +18,11 @@
       "2022": 2017
     },
     "caveats": [
-      "Holdings count businesses with pigs at their main establishment address. A business can keep animals at other sites.",
+      "Pig and holding totals follow the business's main establishment address. Animals can be kept at sites in other regions. Holdings count businesses with pigs.",
       "From 2018, CBS adjusts fattening-pig counts for temporary empty housing using the prior year's declaration. Agricultural census totals can therefore differ from livestock population tables.",
+      "The animal reference date is 1 April. A published zero describes that census observation; recorded movements can occur at other dates. Null denotes an unavailable value.",
       "Land areas use the CBS land-use survey listed for each year. Changes in densities can reflect land-area measurement and regional boundary changes as well as animal and holding counts.",
-      "Annual census observations describe the region's agricultural population. They provide map context alongside trade records; the simulation uses its own population estimates."
+      "Annual census observations provide map context alongside trade records. The simulation uses declared synthetic population units; geographic alignment with animal sites is a separate validation step."
     ],
     "sources": [
       {

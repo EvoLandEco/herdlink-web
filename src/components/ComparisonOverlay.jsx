@@ -1,4 +1,4 @@
-import { memo, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { Fragment, memo, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { faBook, faCalendarDays, faChartLine, faCodeCompare, faFlask, faLayerGroup, faLocationDot, faNetworkWired, faRankingStar } from "@fortawesome/free-solid-svg-icons";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import { ScenarioLibrary, ScenarioPresets } from "./ScenarioLibrary";
@@ -8,6 +8,7 @@ import {
   comparisonEventMarkerWidth,
   formatComparisonDelta,
   formatComparisonValue,
+  getComparisonIntroduction,
   groupComparisonEvents,
   nearestComparisonDate,
   pairComparisonSeries,
@@ -35,8 +36,9 @@ function useComparisonTipPosition(label, maxHeight = 420) {
     const place = () => {
       const bounds = body.getBoundingClientRect();
       const anchor = info.getBoundingClientRect();
-      const above = Math.max(0, anchor.top - bounds.top - 10);
-      const below = Math.max(0, bounds.bottom - anchor.bottom - 10);
+      const contentTop = bounds.top + body.clientTop;
+      const above = Math.max(0, anchor.top - contentTop - 10);
+      const below = Math.max(0, contentTop + body.clientHeight - anchor.bottom - 10);
       const needed = Math.min(maxHeight, tip.scrollHeight + 2);
       const down = below >= needed || below >= above;
       info.dataset.placement = down ? "below" : "above";
@@ -55,7 +57,7 @@ function useComparisonTipPosition(label, maxHeight = 420) {
     };
   }, [active, label, maxHeight]);
   return {
-    infoRef, tipRef,
+    active, infoRef, tipRef,
     onPointerEnter: () => setActive(true),
     onPointerLeave: (event) => { if (!event.currentTarget.contains(document.activeElement)) setActive(false); },
     onFocus: () => setActive(true),
@@ -65,7 +67,7 @@ function useComparisonTipPosition(label, maxHeight = 420) {
 
 function ComparisonInfo({ label, children, icon = faChartLine, rows = [], footer, rich = false }) {
   const id = useId();
-  const { infoRef, tipRef, ...tipEvents } = useComparisonTipPosition(label);
+  const { active, infoRef, tipRef, ...tipEvents } = useComparisonTipPosition(label);
   return (
     <span ref={infoRef} className="comparison-info" {...tipEvents}>
       <button
@@ -73,7 +75,7 @@ function ComparisonInfo({ label, children, icon = faChartLine, rows = [], footer
         className="panel-info-button has-tip"
         data-tip={typeof children === "string" ? children : label}
         aria-label={`${label} explained`}
-        aria-describedby={id}
+        aria-describedby={active ? id : undefined}
       >
         <span aria-hidden="true">i</span>
       </button>
@@ -96,7 +98,7 @@ function ComparisonInfo({ label, children, icon = faChartLine, rows = [], footer
   );
 }
 
-function PairedChart({ points, metric, date, currentDate, interventionEvents, scope, identity, animate, onInspect }) {
+function PairedChart({ points, metric, date, currentDate, interventionEvents, introduction, scope, identity, animate, onInspect }) {
   const containerRef = useRef(null);
   const [size, setSize] = useState(null);
   const animatedPoints = useAnimatedComparisonSeries(points, identity, animate);
@@ -117,6 +119,8 @@ function PairedChart({ points, metric, date, currentDate, interventionEvents, sc
   const eventClusters = useMemo(() => groupComparisonEvents(interventionEvents, dates, plotWidth,
     (eventDate) => chartStart === chartEnd ? 0.5 : (Date.parse(eventDate) - chartStart) / (chartEnd - chartStart),
   ), [chartStart, chartEnd, plotWidth, dates, interventionEvents]);
+  const introductionPosition = introduction && chart
+    ? (chart.x(Date.parse(introduction.recordedDate)) - chart.plot.left) / plotWidth : null;
   const selected = points.find((point) => point.date === date);
   const animatedSelected = animatedPoints.find((point) => point.date === date);
   const delta = formatComparisonDelta(selected?.original, selected?.intervention, metric.format);
@@ -149,10 +153,13 @@ function PairedChart({ points, metric, date, currentDate, interventionEvents, sc
             </g>
           ))}
           <g className="comparison-chart-interventions" aria-hidden="true">
-            {eventClusters.flatMap((cluster) => cluster.steps).map((step) => (
-              <line key={step.date} x1={chart.x(Date.parse(step.date))} x2={chart.x(Date.parse(step.date))} y1={chart.plot.top - 7} y2={chart.plot.bottom} />
+            {eventClusters.filter((cluster) => cluster.steps.length === 1).map((cluster) => (
+              <line key={cluster.steps[0].date} x1={chart.plot.left + cluster.position * plotWidth} x2={chart.plot.left + cluster.position * plotWidth} y1={chart.plot.top - 7} y2={chart.plot.bottom} />
             ))}
           </g>
+          {introduction && <line className="comparison-introduction-line"
+            x1={chart.x(Date.parse(introduction.recordedDate))} x2={chart.x(Date.parse(introduction.recordedDate))}
+            y1={chart.plot.top - 27} y2={chart.plot.bottom} />}
           <path className="comparison-line comparison-line--original" d={chart.original} />
           <path className="comparison-line comparison-line--intervention" d={chart.intervention} />
           {date !== currentDate && points.some((point) => point.date === currentDate) && <line className="comparison-current-date" x1={chart.x(Date.parse(currentDate))} x2={chart.x(Date.parse(currentDate))} y1={chart.plot.top} y2={chart.plot.bottom} />}
@@ -175,18 +182,19 @@ function PairedChart({ points, metric, date, currentDate, interventionEvents, sc
           <text className="comparison-axis" x={chart.plot.left} y={size.height - 7}>{dateLabel(points[0].date)}</text>
           {points.length > 1 && <text className="comparison-axis" x={chart.plot.right} y={size.height - 7} textAnchor="end">{dateLabel(points.at(-1).date)}</text>}
         </svg>
-        {eventClusters.length > 0 && <div className="comparison-chart-events" role="group" aria-label={`${scope} chart intervention events`}
+        {(eventClusters.length > 0 || introduction) && <div className="comparison-chart-events" role="group" aria-label={`${scope} chart events`}
           style={{ left: chart.plot.left, top: chart.plot.top - 22, width: chart.plot.right - chart.plot.left,
             "--event-marker-width": `${comparisonEventMarkerWidth}px`, "--chart-event-space": `${chart.plot.bottom - chart.plot.top - 20}px`,
             "--chart-event-width": `${chart.plot.right - chart.plot.left}px` }}>
-          {eventClusters.map((cluster) => <InterventionMarker key={cluster.steps[0].date} cluster={cluster} onInspect={onInspect} />)}
+          <InterventionTrack clusters={eventClusters} onInspect={onInspect} />
+          {introduction && <IntroductionMarker introduction={introduction} position={introductionPosition} onInspect={onInspect} />}
         </div>}
       </> : size?.width > 0 && <div className="comparison-chart-empty">No results for this metric.</div>}
     </div>
   );
 }
 
-function ComparisonScope({ title, description, helpRows, metrics, original, intervention, dates, date, currentDate, interventionEvents, metricKey, identity, animate, onMetricChange, onInspect, children }) {
+function ComparisonScope({ title, description, helpRows, metrics, original, intervention, dates, date, currentDate, interventionEvents, introduction, metricKey, identity, animate, onMetricChange, onInspect, children }) {
   const selectId = useId();
   const metric = metrics.find((entry) => entry.key === metricKey) || metrics[0];
   const originalFrame = original.find((frame) => frame.date === date);
@@ -213,7 +221,7 @@ function ComparisonScope({ title, description, helpRows, metrics, original, inte
         <div><span className="comparison-series-label comparison-series-label--original">Original</span><strong>{formatComparisonValue(originalFrame?.[metric.key], metric.format)}</strong></div>
         <div><span className="comparison-series-label comparison-series-label--intervention">Intervention</span><strong>{formatComparisonValue(interventionFrame?.[metric.key], metric.format)}</strong></div>
       </div>
-      <PairedChart points={points} metric={metric} date={date} currentDate={currentDate} interventionEvents={interventionEvents} scope={title} identity={`${identity}:${metric.key}`} animate={animate} onInspect={onInspect} />
+      <PairedChart points={points} metric={metric} date={date} currentDate={currentDate} interventionEvents={interventionEvents} introduction={introduction} scope={title} identity={`${identity}:${metric.key}`} animate={animate} onInspect={onInspect} />
       <details className="comparison-stats">
         <summary>All {title.toLowerCase()} stats <span>{metrics.length}</span></summary>
         <table>
@@ -233,45 +241,70 @@ function ComparisonScope({ title, description, helpRows, metrics, original, inte
   );
 }
 
-const InterventionMarker = memo(function InterventionMarker({ cluster, onInspect }) {
+function InterventionTrack({ clusters, onInspect }) {
+  return clusters.map((cluster) => <Fragment key={cluster.steps[0].date}>
+    {cluster.steps.length > 1 && <span className="comparison-event-range" aria-hidden="true"
+      style={{ left: `${cluster.startPosition * 100}%`, width: `${(cluster.endPosition - cluster.startPosition) * 100}%` }} />}
+    <InterventionMarker cluster={cluster} onInspect={onInspect} />
+  </Fragment>);
+}
+
+function IntroductionMarker({ introduction, position, onInspect }) {
+  const cluster = useMemo(() => ({ position, steps: [{ date: introduction.recordedDate, events: [{
+    date: introduction.date, description: `Seed introduction in ${introduction.seedLabel}. Both scenarios share this introduction.`,
+  }] }] }), [introduction, position]);
+  return <InterventionMarker cluster={cluster} introduction onInspect={onInspect} />;
+}
+
+const InterventionMarker = memo(function InterventionMarker({ cluster, introduction = false, onInspect }) {
   const tooltipId = useId();
   const { position, steps } = cluster;
   const grouped = steps.length > 1;
   const eventCount = steps.reduce((count, step) => count + step.events.length, 0);
   const firstDate = steps[0].date;
-  const label = grouped
+  const [detailDate, setDetailDate] = useState(firstDate);
+  const selectedDate = steps.some((step) => step.date === detailDate) ? detailDate : firstDate;
+  const label = introduction
+    ? `Inspect seed introduction on ${dateLabel(steps[0].events[0].date)}${steps[0].events[0].date !== firstDate ? `, recorded at ${dateLabel(firstDate)}` : ""}`
+    : grouped
     ? `Choose among ${steps.length} intervention steps from ${dateLabel(firstDate)} to ${dateLabel(steps.at(-1).date)}`
     : `Inspect ${eventCount} intervention ${eventCount === 1 ? "event" : "events"} at ${dateLabel(firstDate)}`;
-  const { infoRef, tipRef: tooltipRef, ...tipEvents } = useComparisonTipPosition(label, 280);
+  const { active, infoRef, tipRef: tooltipRef, ...tipEvents } = useComparisonTipPosition(label, 280);
   return (
-    <div ref={infoRef} className="comparison-event" style={{ left: `${position * 100}%`, "--event-position": position }} {...tipEvents}>
+    <div ref={infoRef} className={`comparison-event${introduction ? " is-introduction" : grouped ? " is-range" : ""}`} style={{ left: `${position * 100}%`, "--event-position": position }} {...tipEvents}>
       <button
         type="button"
-        className={`comparison-event__marker${grouped ? " is-grouped" : ""}`}
+        className={`comparison-event__marker${grouped || eventCount > 1 || introduction ? " is-grouped" : ""}`}
         aria-label={label}
-        aria-describedby={tooltipId}
+        aria-describedby={active ? tooltipId : undefined}
         onClick={() => grouped ? tooltipRef.current.focus() : onInspect(firstDate)}
       >
-        <span aria-hidden="true">{grouped ? "+" : null}</span>
+        <span aria-hidden="true">{introduction ? <><i />Intro</> : grouped ? `${axisFormatter.format(steps.length)} steps` : eventCount > 1 ? `${axisFormatter.format(eventCount)} events` : null}</span>
       </button>
       <div ref={tooltipRef} id={tooltipId} className="comparison-event__tip" role={grouped ? "group" : "tooltip"} aria-label={grouped ? "Intervention steps" : undefined} tabIndex="0">
+        {active && <>
         <div className="comparison-event__heading">
-          <strong><FontAwesomeIcon icon={faCalendarDays} aria-hidden="true" />{grouped ? `${steps.length} recorded steps` : dateLabel(firstDate)}</strong>
-          <span>{eventCount} {eventCount === 1 ? "event" : "events"}</span>
+          <strong><FontAwesomeIcon icon={introduction ? faLocationDot : faCalendarDays} aria-hidden="true" />{introduction ? "Seed introduction" : grouped ? `${steps.length} recorded steps` : dateLabel(firstDate)}</strong>
+          <span>{introduction ? dateLabel(steps[0].events[0].date) : `${eventCount} ${eventCount === 1 ? "event" : "events"}`}</span>
         </div>
-        {steps.map((step) => (
+        {grouped && <p className="comparison-event__range-label">{dateLabel(firstDate)} — {dateLabel(steps.at(-1).date)}</p>}
+        {introduction && steps[0].events[0].date !== firstDate && <p className="comparison-event__range-label">First recorded step: {dateLabel(firstDate)}</p>}
+        {steps.map((step, stepIndex) => (
           <div key={step.date} className="comparison-event__step">
-            {grouped && <button type="button" onClick={() => onInspect(step.date)}>
-              <time dateTime={step.date}>{dateLabel(step.date)}</time><span>Inspect</span>
+            {grouped && <button type="button" aria-expanded={selectedDate === step.date}
+              aria-controls={selectedDate === step.date ? `${tooltipId}-${stepIndex}` : undefined}
+              onClick={() => { setDetailDate(step.date); onInspect(step.date); }}>
+              <time dateTime={step.date}>{dateLabel(step.date)}</time><span>{step.events.length} {step.events.length === 1 ? "event" : "events"}</span>
             </button>}
-            <ul>{step.events.map((event, index) => (
+            {(!grouped || selectedDate === step.date) && <ul id={`${tooltipId}-${stepIndex}`}>{step.events.map((event, index) => (
               <li key={`${event.date}:${index}`}>
                 {event.date !== step.date && <time dateTime={event.date}>{dateLabel(event.date)}</time>}
                 {event.description}
               </li>
-            ))}</ul>
+            ))}</ul>}
           </div>
         ))}
+        </>}
       </div>
     </div>
   );
@@ -312,6 +345,13 @@ function ComparisonContent({ data, animate }) {
   const interventionEvents = data?.interventionEvents || [];
   const eventClusters = useMemo(() => groupComparisonEvents(interventionEvents, dates, eventTrackWidth),
     [interventionEvents, dates, eventTrackWidth]);
+  const introductionDate = data?.mode === "simulation" ? data.settings?.introductionDate
+    : data?.scenarioContext?.presetSettings?.ready ? data.scenarioContext.settings?.introductionDate : null;
+  const seedLabel = data?.scenarioContext?.seedLabel;
+  const introduction = useMemo(() => {
+    const point = getComparisonIntroduction(introductionDate, dates);
+    return point ? { ...point, seedLabel } : null;
+  }, [introductionDate, dates, seedLabel]);
   const changes = ready && selectedMetric ? regions.map((region) => {
     const original = data.original.nodes[region.id]?.[dateIndex]?.[selectedMetric.key];
     const intervention = data.intervention.nodes[region.id]?.[dateIndex]?.[selectedMetric.key];
@@ -334,13 +374,15 @@ function ComparisonContent({ data, animate }) {
               ["Intervention", "Applies your route edits and restriction schedule."],
               ["Simulation", "Both scenarios share the same model settings and seed."],
               ["Reading the chart", "Both lines share a scale. The dashed line shows Original; gaps mark missing results."],
-              ["Interventions", "Diamonds mark scenario changes. Hover for details; select a marker to inspect its date."],
+              ["Introduction", "The violet Intro marker shows the seed introduction shared by both scenarios."],
+              ["Interventions", "Diamonds mark changes. Count badges and glowing rails gather nearby dates; open a badge to choose a step."],
             ]}
             metrics={data.globalMetrics}
             original={data.original.global}
             intervention={data.intervention.global}
             dates={data.dates} date={date} currentDate={data.date}
             interventionEvents={interventionEvents}
+            introduction={introduction}
             metricKey={globalMetricKey} onMetricChange={setGlobalMetricKey} onInspect={setInspectedDate}
           />
           {selectedRegion ? (
@@ -351,13 +393,15 @@ function ComparisonContent({ data, animate }) {
               helpRows={[
                 ["Choose a region", "Use the selector or select an entry in Largest changes. Your main network selection stays fixed."],
                 ["Read its trajectory", "Both lines share a scale. The dashed line shows Original; gaps mark missing results."],
-                ["Interventions", "Markers show all scenario changes, including interventions in other regions. Hover for details or select a date."],
+                ["Introduction", "The violet Intro marker shows introduction in the scenario's seed region."],
+                ["Interventions", "Markers show all scenario changes. Count badges gather nearby dates; hover for details or select a date."],
               ]}
               metrics={data.nodeMetrics}
               original={data.original.nodes[selectedRegion.id] || []}
               intervention={data.intervention.nodes[selectedRegion.id] || []}
               dates={data.dates} date={date} currentDate={data.date}
               interventionEvents={interventionEvents}
+              introduction={introduction}
               metricKey={nodeMetricKey} onMetricChange={setNodeMetricKey} onInspect={setInspectedDate}
             >
               <div className="comparison-region-select">
@@ -408,26 +452,27 @@ function ComparisonContent({ data, animate }) {
         <div className="comparison-timeline__heading">
           <label htmlFor={rangeId}>Inspect date <time dateTime={date}>{dateLabel(date)}</time></label>
           <span className="comparison-timeline__actions">
+            <span className="comparison-event-legend" aria-hidden="true">
+              {introduction && <span className="comparison-event-legend__introduction"><i />Introduction</span>}
+              {interventionEvents.length > 0 && <span className="comparison-event-legend__intervention"><i />Interventions</span>}
+            </span>
             {date !== data.date && <button type="button" onClick={() => setInspectedDate(null)}>Current date</button>}
             <ComparisonInfo label="Date inspector" icon={faCalendarDays} rows={[
               ["Inspect a date", "Drag the ring or point at either chart."],
               ["Intervention markers", "Hover or focus a diamond for details. Select it to inspect that step."],
-              ["Grouped steps (+)", "Open the group to choose a recorded date."],
-              ["Between recorded dates", "Events appear at the next recorded step; their actual dates remain in the details."],
+              ["Introduction", "The violet Intro marker shares the seed date used by both scenarios."],
+              ["Grouped steps", "A glowing rail spans nearby event dates. The badge counts recorded steps; open it to choose a date."],
+              ["Between recorded dates", "Introduction and interventions appear at the next recorded step; their actual dates remain in the details."],
             ]} footer="The main replay date stays fixed." />
           </span>
         </div>
-        <div className={`comparison-timeline-slider${interventionEvents.length ? " has-events" : ""}`} style={{ "--timeline-progress": `${timelineProgress * 100}%` }}>
+        <div className={`comparison-timeline-slider${interventionEvents.length ? " has-events" : ""}${introduction ? " has-introduction" : ""}`} style={{ "--timeline-progress": `${timelineProgress * 100}%` }}>
           <div className="comparison-timeline-track" aria-hidden="true"><span /></div>
           <input id={rangeId} type="range" min="0" max={data.dates.length - 1} step="1" value={dateIndex} disabled={data.dates.length < 2} aria-valuetext={dateLabel(date)} onChange={(event) => setInspectedDate(data.dates[Number(event.target.value)])} />
-          <div ref={eventTrackRef} className="comparison-timeline-events" style={{ "--event-marker-width": `${comparisonEventMarkerWidth}px` }}>
-            {eventClusters.map((cluster) => (
-              <InterventionMarker
-                key={cluster.steps[0].date}
-                cluster={cluster}
-                onInspect={setInspectedDate}
-              />
-            ))}
+          <div ref={eventTrackRef} className="comparison-timeline-events" role="group" aria-label="Timeline events" style={{ "--event-marker-width": `${comparisonEventMarkerWidth}px` }}>
+            <InterventionTrack clusters={eventClusters} onInspect={setInspectedDate} />
+            {introduction && <IntroductionMarker introduction={introduction}
+              position={dates.length > 1 ? introduction.index / (dates.length - 1) : 0} onInspect={setInspectedDate} />}
           </div>
         </div>
         <div className="comparison-timeline__ends"><span>{dateLabel(data.dates[0])}</span><span>{dateLabel(data.dates.at(-1))}</span></div>
@@ -436,7 +481,7 @@ function ComparisonContent({ data, animate }) {
   );
 }
 
-export function ComparisonOverlay({ open, data, recomputing = false, onClose, onModeChange, scenarioSlots = [null, null, null], activePresetId, activeScenarioSlot = null, scenarioError, scenarioNotice, onLoadPreset, onSaveScenario, onLoadScenario }) {
+export function ComparisonOverlay({ open, data, recomputing = false, onClose, onModeChange, scenarioSlots = [null, null, null], activePresetId, activeScenarioSlot = null, scenarioError, scenarioNotice, onLoadPreset, onChangePresetSettings, onSaveScenario, onLoadScenario }) {
   const dialogRef = useRef(null);
   const closeRef = useRef(null);
   const scenariosToggleRef = useRef(null);
@@ -527,6 +572,7 @@ export function ComparisonOverlay({ open, data, recomputing = false, onClose, on
         </div>
         {scenariosOpen && <button type="button" className="comparison-custom-backdrop" aria-label="Close custom scenarios" tabIndex={-1} onClick={closeScenarios} />}
         <ScenarioLibrary id={libraryId} panelRef={libraryRef} open={scenariosOpen} context={context} slots={scenarioSlots} activeSlot={activeScenarioSlot}
+          onChangePresetSettings={onChangePresetSettings}
           onSaveScenario={onSaveScenario}
           onLoadScenario={(index) => { closeScenarios(); onLoadScenario(index); }} Info={ComparisonInfo} />
         {busy && displayedData?.status === "ready" && <div className="comparison-recomputing" aria-hidden="true">

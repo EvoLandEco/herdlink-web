@@ -13,9 +13,18 @@
           const simulationRegionIdsByDataset = new WeakMap();
           const tradeRecordsByDataset = new WeakMap();
           const originalLedgerStatsByDataset = new WeakMap();
+          let presetDailyData = null;
+          let presetDailyDates = [];
+          let presetDailyDataPromise = null;
+          let presetDailyDataError = null;
+          let presetTargetBudget = 3;
+          let presetResponseDays = 7;
+          let presetStandstillDays = 14;
+          let simulationIntroductionDate = null;
+          let simulationPresetHoldings = null;
           let tradeCommunityTimeline = null;
           let communityScale = "finer";
-          let communityView = "heatmap";
+          let communityView = "flow";
           let communityFlowGeometry = null;
           let communityFlowLayoutId = 0;
           let uniqueDates = [];
@@ -697,6 +706,10 @@
                     <option value="CR35">CR35</option>
                   </select>
                 </label>
+                <label class="simulation-introduction-date">
+                  Introduction date
+                  <input id="simulationIntroductionDate" type="date" aria-label="Simulation introduction date" title="Infection starts on this date. Load a preset to build its response schedule from this date.">
+                </label>
                 <label>
                   Initial %
                   <input id="simulationInitialPct" type="number" min="0.05" max="20" step="0.05" value="1">
@@ -926,6 +939,7 @@
 
           function readSimulationSettings() {
             ensureSimulationControls();
+            syncSimulationIntroductionControl();
             const regionSelect = document.getElementById("simulationSeedRegion");
             const seedRegion = regionSelect.value;
             d3.select(regionSelect).selectAll("option")
@@ -934,6 +948,8 @@
               .text((id) => `${id} · ${getStatnaam(id)}`);
             regionSelect.value = seedRegion;
             return {
+              introductionDate: getPresetSettings().introductionDate,
+              ...(simulationPresetHoldings ? { holdings: { ...simulationPresetHoldings } } : {}),
               model: document.getElementById("simulationModel")?.value || "SEIR",
               seedRegion,
               initialPct: clampNumber(
@@ -1005,7 +1021,7 @@
 
             const items = [
               ["ledger", "Scanning trade ledger"],
-              ["holdings", "Estimating holdings"],
+              ["holdings", "Preparing model population"],
               ["contacts", "Building movement contacts"],
               ["states", "Integrating compartments"],
               ["frames", "Building replay ledger"],
@@ -1186,13 +1202,13 @@
             data.forEach((row) => {
               const source = row.COROP_LEV;
               const target = row.COROP_AFN;
-              const weight = Math.max(0, +row.AANTAL || 0);
+              const weight = +row.AANTAL;
               if (
                 !source ||
                 !target ||
                 source.toUpperCase() === "NA" ||
                 target.toUpperCase() === "NA" ||
-                !weight
+                !Number.isFinite(weight) || weight <= 0
               ) {
                 return;
               }
@@ -1257,22 +1273,22 @@
               ids,
               dates,
             );
-            const holdings = estimateSimulationHoldings(ids, totals);
+            const holdings = settings.holdings
+              ? new Map(ids.map((id) => [id, settings.holdings[id]]))
+              : estimateSimulationHoldings(ids, totals);
             const seedIds = [settings.seedRegion];
             let current = new Map();
 
             ids.forEach((id) => {
-              const N = holdings.get(id) || 450;
+              const N = holdings.get(id);
+              if (!Number.isFinite(N) || N <= 0) {
+                throw new Error(`Model population for ${id} must be a positive finite number.`);
+              }
               current.set(id, { S: N, E: 0, I: 0, R: 0, N });
             });
 
-            seedIds.forEach((id) => {
-              const state = current.get(id);
-              if (!state) return;
-              const seeded = Math.max(1, (settings.initialPct / 100) * state.N);
-              state.I = Math.min(state.N, seeded);
-              state.S = Math.max(0, state.N - state.I);
-            });
+            const introductionTime = settings.introductionDate ? Date.parse(settings.introductionDate) : dates[0].getTime();
+            let introduced = false;
 
             const frameByKey = {};
             const frames = [];
@@ -1285,6 +1301,16 @@
             let previousDisabledKeys = new Set();
 
             dates.forEach((date, frameIndex) => {
+              if (!introduced && date.getTime() >= introductionTime) {
+                seedIds.forEach((id) => {
+                  const state = current.get(id);
+                  if (!state) return;
+                  const seeded = Math.min(state.N, Math.max(1, settings.initialPct / 100 * state.N));
+                  state.I = seeded;
+                  state.S = state.N - seeded;
+                });
+                introduced = true;
+              }
               let permissionsChanged = false;
               while (interventionIndex < nodeEvents.length && nodeEvents[interventionIndex][0] <= date.getTime()) {
                 const [time, changes] = nodeEvents[interventionIndex++];
@@ -1353,7 +1379,7 @@
               const next = new Map();
               ids.forEach((id) => {
                 const state = current.get(id);
-                const N = state.N || 1;
+                const N = state.N;
                 const prevalence = state.I / N;
                 const localForce = availability?.has(getLinkKey(id, id))
                   ? 0
@@ -1516,13 +1542,13 @@
             const metric = (key, label, format, description) => ({ key, label, format, description });
             if (mode === "simulation") {
               const compartments = [
-                metric("S", "Susceptible", "decimal", "Animals susceptible at the end of the recorded step."),
-                metric("E", "Exposed", "decimal", "Animals in the latent stage between exposure and infectiousness at the end of the recorded step."),
-                metric("I", "Infectious", "decimal", "Infectious animals at the end of the recorded step."),
-                metric("R", "Recovered", "decimal", "Recovered animals at the end of the recorded step."),
-                metric("N", "Holding", "count", "Estimated animal population, identical in both scenarios."),
-                metric("prevalence", "Prevalence", "percent", "Infectious animals divided by the holding at the end of the recorded step."),
-                metric("newInfections", "New infections", "decimal", "Animals newly infected during the recorded step, including those entering the exposed compartment."),
+                metric("S", "Susceptible", "decimal", "Susceptible model population units at the end of the recorded step."),
+                metric("E", "Exposed", "decimal", "Model population units in the latent stage between exposure and infectiousness at the end of the recorded step."),
+                metric("I", "Infectious", "decimal", "Infectious model population units at the end of the recorded step."),
+                metric("R", "Recovered", "decimal", "Recovered model population units at the end of the recorded step."),
+                metric("N", "Model population", "count", "Synthetic population units derived from trade activity and shared by both scenarios. CBS census counts provide separate map context."),
+                metric("prevalence", "Prevalence", "percent", "Infectious model population divided by total model population at the end of the recorded step."),
+                metric("newInfections", "New infections", "decimal", "Model population units newly infected during the recorded step, including those entering the exposed compartment."),
                 metric("cumulativeInfections", "Cumulative infections", "decimal", "New infection events summed across recorded steps, excluding the initial seed. Reinfections count again in SIS and SEIRS."),
               ];
               return {
@@ -1541,8 +1567,8 @@
                 metric("avgTradeEdge", "Movements per record", "decimal", "Total animal movements divided by enabled positive ledger records."),
                 metric("avgTradeNode", "Movements per region", "decimal", "Total animal movements divided by regions with enabled positive records."),
                 metric("numComponents", "Connected components", "count", "Components with direction ignored, including isolated regions present in this date's ledger."),
-                metric("numPartitions", "Communities", "count", "Number of fixed trade communities across the full loaded period, with scheduled restrictions applied."),
-                metric("modularity", "Modularity", "decimal", "Agreement of this date's allowed trade with the fixed full-period communities, using the selected scale's strength penalty. Compare scores at the same community scale."),
+                metric("numPartitions", "Communities", "count", "Number of fixed communities from interregional trade across the full loaded period, with scheduled restrictions applied."),
+                metric("modularity", "Modularity", "decimal", "Agreement of this date's allowed interregional trade with the fixed full-period communities, using the selected scale's strength penalty. Compare scores at the same community scale."),
                 metric("spectralRadius", "Spectral radius", "decimal", "The largest eigenvalue magnitude of the directed movement matrix for this date, describing amplification through trade connections."),
               ],
               nodeMetrics: [
@@ -1596,51 +1622,182 @@
               !!document.getElementById("mainContainer")?.closest("[inert]");
           }
 
+          function ensurePresetDailyData() {
+            const cached = Boolean(presetDailyData);
+            const initialize = (data) => {
+              let changed = !cached || presetDailyDataError !== null;
+              if (data && loadedCSVData && uniqueDates.length && simulationIntroductionDate === null) {
+                const introductionDate = getPresetSettings().introductionDate;
+                const holdings = getSimulationPopulationForDate(introductionDate);
+                simulationIntroductionDate = introductionDate;
+                simulationPresetHoldings = holdings;
+                changed = true;
+              }
+              presetDailyDataError = null;
+              if (changed) {
+                syncSimulationIntroductionControl();
+                window.herdlinkComparison?.refresh();
+              }
+              return data;
+            };
+            const failed = (error) => {
+              presetDailyDataError = `${presetDailyData ? "Simulation settings could not be initialized" : "Daily history could not be loaded"}: ${error.message}`;
+              presetDailyDataPromise = null;
+              window.herdlinkComparison?.refresh();
+              return null;
+            };
+            if (presetDailyData) return Promise.resolve(presetDailyData).then(initialize).catch(failed);
+            if (presetDailyDataPromise) return presetDailyDataPromise;
+            presetDailyDataError = null;
+            presetDailyDataPromise = fetchAsset("assets/data/daily_aggregation.csv", "text").then((csv) => {
+              const data = d3.csvParse(csv, (row) => ({ ...row, time: new Date(row.time), AANTAL: +row.AANTAL }));
+              const times = [...new Set(data.map((row) => row.time.getTime()))].sort((a, b) => a - b);
+              if (!times.length || times.some((time, index) => !Number.isFinite(time) ||
+                (index > 0 && time - times[index - 1] !== 86400000))) {
+                throw new Error("Daily history needs a complete calendar with one recorded date per day.");
+              }
+              presetDailyData = data;
+              presetDailyDates = times;
+              return data;
+            }).then(initialize).catch(failed);
+            return presetDailyDataPromise;
+          }
+
+          function getPresetSettings() {
+            const first = uniqueDates[0]?.getTime() ?? 0;
+            const last = uniqueDates.at(-1)?.getTime() ?? first;
+            const dateLabel = (time) => new Date(time).toISOString().slice(0, 10);
+            const defaultTime = Math.max(first, Math.min((presetDailyDates[0] ?? first) + 365 * 86400000, last));
+            return {
+              introductionDate: simulationIntroductionDate || dateLabel(defaultTime),
+              minIntroductionDate: dateLabel(first), maxIntroductionDate: dateLabel(last),
+              targetBudget: presetTargetBudget, historyDays: 365,
+              responseDays: presetResponseDays, standstillDays: presetStandstillDays,
+              ready: Boolean(presetDailyData) && !presetDailyDataError,
+            };
+          }
+
+          function setPresetSettings(patch) {
+            if (areScenarioControlsDisabled()) throw new Error("Wait for the current network operation to finish.");
+            const current = getPresetSettings();
+            if (Object.keys(patch).some((key) => !["introductionDate", "targetBudget", "responseDays", "standstillDays"].includes(key))) {
+              throw new Error("Choose an introduction date, target count, response delay or standstill duration.");
+            }
+            if (patch.introductionDate !== undefined && (!/^\d{4}-\d{2}-\d{2}$/.test(patch.introductionDate) ||
+              !Number.isFinite(Date.parse(patch.introductionDate)) || new Date(patch.introductionDate).toISOString().slice(0, 10) !== patch.introductionDate ||
+              patch.introductionDate < current.minIntroductionDate || patch.introductionDate > current.maxIntroductionDate)) {
+              throw new Error("Choose an introduction date within the recorded period.");
+            }
+            const counts = { targetBudget: [1, 40, "target count"], responseDays: [0, 365, "response delay"], standstillDays: [1, 365, "standstill duration"] };
+            for (const [key, [min, max, label]] of Object.entries(counts)) {
+              if (patch[key] !== undefined && (!Number.isInteger(patch[key]) || patch[key] < min || patch[key] > max)) {
+                throw new Error(`Choose a ${label} between ${min} and ${max}.`);
+              }
+            }
+            const dateChanged = patch.introductionDate !== undefined && patch.introductionDate !== current.introductionDate;
+            if (dateChanged) {
+              if (!current.ready) throw new Error(presetDailyDataError || "Wait for daily movement history to load.");
+              const holdings = getSimulationPopulationForDate(patch.introductionDate);
+              simulationIntroductionDate = patch.introductionDate;
+              simulationPresetHoldings = holdings;
+              comparisonDataCache.delete("simulation");
+              syncSimulationIntroductionControl();
+            }
+            if (patch.targetBudget !== undefined) presetTargetBudget = patch.targetBudget;
+            if (patch.responseDays !== undefined) presetResponseDays = patch.responseDays;
+            if (patch.standstillDays !== undefined) presetStandstillDays = patch.standstillDays;
+            if (dateChanged && isSimulationModeActive()) scheduleSimulationRecompute("Applying introduction date");
+            window.herdlinkComparison?.refresh();
+          }
+
+          function syncSimulationIntroductionControl() {
+            const input = document.getElementById("simulationIntroductionDate");
+            if (!input) return;
+            const settings = getPresetSettings();
+            input.value = settings.introductionDate;
+            input.min = settings.minIntroductionDate;
+            input.max = settings.maxIntroductionDate;
+          }
+
+          function getSimulationPopulationForDate(introductionDate) {
+            const introduction = Date.parse(introductionDate);
+            const history = presetDailyData.filter((row) => row.time.getTime() >= introduction - 365 * 86400000 && row.time.getTime() < introduction);
+            const ids = collectSimulationRegionIds(loadedCSVData);
+            const { totals } = buildSimulationLedger(history, ids, []);
+            return Object.fromEntries(estimateSimulationHoldings(ids, totals));
+          }
+
+          function getNetworkPresetGraph(data = presetDailyData, introductionDate = getPresetSettings().introductionDate) {
+            const end = Date.parse(introductionDate);
+            return window.herdlinkPresetTools.getHistoricalPresetGraph(data, end - 365 * 86400000, end);
+          }
+
+          function getNetworkPresetSelection(id, graph, scale, seedRegion, budget = presetTargetBudget) {
+            if (id === "seed-community") {
+              const members = window.herdlinkPresetTools.getSeedCommunityMembers(graph, seedRegion,
+                scale === "broad" ? 1 : 1.5, computeModularity);
+              return { targets: [...members], members };
+            }
+            if (id === "hub-controls") return { targets: window.herdlinkPresetTools.selectHubTargets(graph, budget), budget };
+            if (id === "trade-bottlenecks") return { targets: window.herdlinkPresetTools.selectBridgeTargets(graph, budget), budget };
+            throw new Error("Choose a community, hub or bridge selector.");
+          }
+
           function getScenarioContext() {
             const settings = readSimulationSettings();
+            const presetSettings = getPresetSettings();
             const seedLabel = `${getStatnaam(settings.seedRegion)} (${settings.seedRegion})`;
-            const contactNote = "Local contact spread continues under movement restrictions. Movement beta controls how strongly trade contributes to spread; at zero, spread follows local contacts.";
-            const timingNote = "Response delays use calendar days. Measures begin at the first recorded date on or after the deadline. Trade stays open when the deadline falls beyond the dataset.";
+            const start = Date.parse(presetSettings.introductionDate);
+            const readyReason = presetDailyDataError || (!presetDailyData ? "Loading daily movement history."
+              : presetSettings.introductionDate < presetSettings.minIntroductionDate || presetSettings.introductionDate > presetSettings.maxIntroductionDate
+                ? "Choose an introduction date within this resolution's recorded period." : null);
+            const historyReason = readyReason || (start - 365 * 86400000 < presetDailyDates[0]
+              ? "Choose an introduction date with 365 preceding days of movement history." : null);
+            const communityMembers = historyReason ? null : getNetworkPresetSelection("seed-community",
+              getNetworkPresetGraph(presetDailyData, presetSettings.introductionDate), communityScale, settings.seedRegion).targets;
+            const { responseDays, standstillDays } = presetSettings;
+            const responseDate = new Date(start + responseDays * 86400000).toISOString().slice(0, 10);
+            const timing = responseDays === 0 ? `On the introduction date (${responseDate}).`
+              : `${responseDays} calendar day${responseDays === 1 ? "" : "s"} after introduction (${responseDate}).`;
+            const common = { delayDays: responseDays, timing, duration: "Through the remaining timeline.", disabledReason: readyReason };
+            const rankedScope = `Up to ${presetSettings.targetBudget} regions with outgoing historical trade. Targets stay fixed.`;
             return {
               datasetKey: currentTimeSpan,
               datasetLabel: currentTimeSpan ? `${currentTimeSpan[0].toUpperCase()}${currentTimeSpan.slice(1)} trade` : "Animal trade network",
-              settings, seedLabel, contactNote, timingNote, disabled: areScenarioControlsDisabled(),
+              settings, seedLabel, presetSettings, communityScale, mode: appDataMode, disabled: areScenarioControlsDisabled() || !presetSettings.ready,
               nodeInterventions: Array.from(simulationNodeInterventions, ([time, changes]) =>
                 [time, Array.from(changes, ([id, directions]) => [id, { ...directions }])]),
               linkInterventions: Array.from(simulationLinkInterventions, ([time, changes]) => [time, Array.from(changes)]),
-              note: "Containing seed exports can be enough to keep infection local. Broader closures also reduce trade among other regions.",
               presets: [
-                { id: "open-trade", label: "Open trade", delayDays: 0, summary: "All routes available",
-                  description: "Clear all route edits and regional import/export restrictions.",
-                  scope: "The full recorded trade network.",
-                  timing: "Immediate; open trade across every recorded date.",
-                  detail: "All recorded routes and regional trade permissions are open." },
-                { id: "seed-containment", label: "Seed containment", delayDays: 3, summary: "Seed exports · 3-day response",
-                  description: "Block exports from the seed region.",
-                  scope: seedLabel,
-                  timing: "3 calendar days after the first recorded date.",
-                  detail: timingNote },
-                { id: "delayed-response", label: "Delayed response", delayDays: 14, summary: "5% prevalence + 14-day response",
-                  description: "Block exports from the seed region.",
-                  scope: seedLabel,
-                  timing: "14 calendar days after seed prevalence entering a step first reaches 5% in the original simulation. The check uses the initial seed state, then the preceding step's result. Trade stays open while prevalence remains below 5%.",
-                  detail: `The threshold uses the initial seed state, then each preceding step's result. Trade stays open while prevalence remains below 5%. ${timingNote}` },
-                { id: "partner-ring", label: "Partner ring", delayDays: 7, summary: "Seed and partners · 7-day response",
-                  description: "Block exports from the seed and its direct trading partners.",
-                  scope: "Seed plus incoming and outgoing partners with positive cross-region movements in the first recorded step. Targets stay fixed.",
-                  timing: "7 calendar days after the first recorded date.",
-                  detail: `Targets are the seed's trading partners in the first recorded step and stay fixed throughout the scenario. ${timingNote}` },
-                { id: "hub-controls", label: "Hub controls", delayDays: 7, summary: "Top exporters · 7-day response",
-                  description: "Block exports from the largest exporters.",
-                  scope: "Up to three regions with the largest positive cross-region export totals across the dataset. Ties use region ID; targets stay fixed.",
-                  timing: "7 calendar days after the first recorded date.",
-                  detail: `Targets use the full recorded dataset and stay fixed. ${timingNote}` },
-                { id: "temporary-standstill", label: "Temporary standstill", delayDays: 7, summary: "National pause · 7-day response",
-                  description: "Temporarily close cross-region exports.",
-                  scope: "All regions; local routes stay open.",
-                  timing: "7 calendar days after the first recorded date.",
-                  duration: "SIR/SIS: ceil(1/recovery) recorded steps. SEIR/SEIRS: ceil(1/recovery + 1/latency). Count from closure; a required zero rate keeps exports closed through the dataset.",
-                  detail: `The closure duration counts recorded steps. Reopening requires a later step in the dataset. ${timingNote}` },
+                { ...common, id: "open-trade", label: "Open trade", delayDays: 0,
+                  description: "Keep all regional movements open.", scope: "The full network.",
+                  timing: "Unrestricted reference with the selected introduction date.",
+                  detail: "Uses the same introduction and model population as the restricted scenarios." },
+                { ...common, id: "seed-containment", label: "Seed containment",
+                  description: "Close exports from the seed region.", scope: seedLabel,
+                  detail: "The known introduction region is the sole target." },
+                { ...common, id: "partner-ring", label: "Trace Ring",
+                  description: "Close exports from the seed and its direct outgoing recipients.",
+                  scope: responseDays === 0 ? "Seed region at introduction."
+                    : "Recipients observed between introduction and response, using daily movement dates.",
+                  detail: responseDays === 0 ? "Immediate response targets the seed region."
+                    : `Forward tracing includes positive seed exports during the ${responseDays} calendar day${responseDays === 1 ? "" : "s"} from introduction up to response. Targets stay fixed at response.` },
+                { ...common, id: "seed-community", label: "Community Cordon", disabledReason: historyReason,
+                  description: "Close routes leaving the seed's historical trade community.",
+                  scope: `${communityScale === "broad" ? "Broad" : "Finer"} historical community${communityMembers
+                    ? `: ${communityMembers.length} region${communityMembers.length === 1 ? "" : "s"} (${communityMembers.join(", ")}).`
+                    : " from the preceding year's interregional trade."}`,
+                  detail: "Internal movements, inbound routes and local contacts continue. Membership stays fixed throughout the scenario." },
+                { ...common, id: "hub-controls", label: "Hubs", disabledReason: historyReason,
+                  description: "Close exports from regions with the most outgoing trading partners.", scope: rankedScope,
+                  detail: "Rank the preceding year's out-degree, then outgoing volume and region ID. Target count is independent of community scale." },
+                { ...common, id: "trade-bottlenecks", label: "Bridges", disabledReason: historyReason,
+                  description: "Close exports from regions connecting directed trade paths.", scope: rankedScope,
+                  detail: "Rank directed hop-count betweenness in the preceding year, then out-degree and region ID. Target count is independent of community scale." },
+                { ...common, id: "temporary-standstill", label: "Standstill",
+                  description: "Pause cross-region movements throughout the country.", scope: "All regions; local movements and contacts continue.",
+                  duration: `${standstillDays} calendar day${standstillDays === 1 ? "" : "s"} from response, followed by reopening.`,
+                  detail: "A national reference for temporary movement restrictions." },
               ],
             };
           }
@@ -1658,13 +1815,23 @@
             const ids = collectSimulationRegionIds(loadedCSVData);
             const settings = snapshot.settings;
             const ranges = { initialPct: [0.05, 20], beta: [0, 2], movementBeta: [0, 2], sigma: [0, 1], gamma: [0, 1] };
-            if (!keysAre(settings, ["model", "seedRegion", ...Object.keys(ranges)]) || Object.keys(settings).length !== 7 ||
+            if (!keysAre(settings, ["model", "seedRegion", "introductionDate", "holdings", ...Object.keys(ranges)]) || ![7, 8, 9].includes(Object.keys(settings).length) ||
               !["SIR", "SIS", "SEIR", "SEIRS"].includes(settings.model) || !ids.includes(settings.seedRegion)) {
               fail("The scenario model or seed region is invalid.");
             }
             for (const [key, [min, max]] of Object.entries(ranges)) {
               if (!Number.isFinite(settings[key]) || settings[key] < min || settings[key] > max) {
                 fail(`The scenario setting ${key} must be between ${min} and ${max}.`);
+              }
+            }
+            if (settings.introductionDate !== undefined || settings.holdings !== undefined) {
+              const time = Date.parse(settings.introductionDate);
+              if (typeof settings.introductionDate !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(settings.introductionDate) ||
+                !Number.isFinite(time) || new Date(time).toISOString().slice(0, 10) !== settings.introductionDate ||
+                time < uniqueDates[0].getTime() || time > uniqueDates.at(-1).getTime() ||
+                (settings.holdings !== undefined && (!object(settings.holdings) || Object.keys(settings.holdings).length !== ids.length ||
+                !ids.every((id) => Number.isFinite(settings.holdings[id]) && settings.holdings[id] >= 450 && settings.holdings[id] <= 10000)))) {
+                fail("The scenario introduction date or model population is invalid.");
               }
             }
             const linkKeys = new Set(ids.flatMap((source) => ids.map((target) => getLinkKey(source, target))));
@@ -1697,7 +1864,9 @@
               }
               schedules[kind] = schedule;
             }
-            return { settings: { ...settings }, ...schedules };
+            return { settings: { ...settings,
+              introductionDate: settings.introductionDate || uniqueDates[0].toISOString().slice(0, 10),
+              ...(settings.holdings ? { holdings: { ...settings.holdings } } : {}) }, ...schedules };
           }
 
           function captureScenario() {
@@ -1717,7 +1886,15 @@
             let settingsChanged = false;
             if (settings) {
               const currentSettings = readSimulationSettings();
-              settingsChanged = Object.keys(settings).some((key) => settings[key] !== currentSettings[key]);
+              settingsChanged = Object.keys({ ...settings, ...currentSettings }).some((key) => {
+                const next = settings[key], previous = currentSettings[key];
+                return key === "holdings" && next && previous
+                  ? Object.keys(next).length !== Object.keys(previous).length || Object.keys(next).some((id) => next[id] !== previous[id])
+                  : next !== previous;
+              });
+              simulationIntroductionDate = settings.introductionDate || uniqueDates[0].toISOString().slice(0, 10);
+              simulationPresetHoldings = settings.holdings ? { ...settings.holdings } : null;
+              syncSimulationIntroductionControl();
               const controls = { model: "Model", seedRegion: "SeedRegion", initialPct: "InitialPct", beta: "Beta", movementBeta: "MovementBeta", sigma: "Sigma", gamma: "Gamma" };
               for (const [key, suffix] of Object.entries(controls)) {
                 document.getElementById(`simulation${suffix}`).value = settings[key];
@@ -1762,82 +1939,54 @@
             if (areScenarioControlsDisabled()) throw new Error("Wait for the current network operation to finish before loading a preset.");
             const context = getScenarioContext();
             const preset = context.presets.find((item) => item.id === id);
-            if (!preset) throw new Error("This scenario preset does not exist.");
-            const { settings } = context;
+            if (!preset) throw new Error("Choose one of the seven intervention presets.");
+            if (preset.disabledReason) throw new Error(preset.disabledReason);
+            const { introductionDate, targetBudget, responseDays, standstillDays } = context.presetSettings;
+            const introduction = Date.parse(introductionDate);
+            const response = introduction + responseDays * 86400000;
             const ids = collectSimulationRegionIds(loadedCSVData);
-            const nodes = new Map();
-            const exportsAt = (date, targets, allowed) => nodes.set(date.getTime(),
-              new Map(targets.map((region) => [region, { exports: allowed }])));
-            let detail = preset.detail;
-            let triggerStep = 0;
-            if (id === "delayed-response") {
-              const original = getOriginalSimulationSeries(settings).nodes[settings.seedRegion];
-              const holding = original[0].N;
-              const initialPrevalence = Math.min(holding, Math.max(1, (settings.initialPct / 100) * holding)) / holding;
-              triggerStep = uniqueDates.findIndex((date, index) => (index ? original[index - 1].prevalence : initialPrevalence) >= 0.05);
+            const roster = new Set(ids);
+            const holdings = getSimulationPopulationForDate(introductionDate);
+            const settings = { ...context.settings, introductionDate, holdings };
+            const nodes = new Map(), links = new Map();
+            let targets = [], members;
+            if (id === "seed-containment") targets = [settings.seedRegion];
+            if (id === "partner-ring") targets = window.herdlinkPresetTools.selectTraceRingTargets(
+              presetDailyData, settings.seedRegion, introduction, response).filter((region) => roster.has(region));
+            if (["seed-community", "hub-controls", "trade-bottlenecks"].includes(id)) {
+              const selection = getNetworkPresetSelection(id, getNetworkPresetGraph(presetDailyData, introductionDate),
+                communityScale, settings.seedRegion, targetBudget);
+              targets = selection.targets.filter((region) => roster.has(region));
+              members = selection.members;
             }
-            const responseTime = triggerStep < 0 ? Infinity : uniqueDates[triggerStep].getTime() + preset.delayDays * 86400000;
-            const startStep = uniqueDates.findIndex((date) => date.getTime() >= responseTime);
-            const startDate = uniqueDates[startStep];
-            const startLabel = startDate?.toISOString().slice(0, 10);
-            if (startDate && id === "seed-containment") {
-              exportsAt(startDate, [settings.seedRegion], false);
-              detail = `Exports from ${context.seedLabel} close on ${startLabel}, the first recorded date after the 3-day response delay.`;
-            }
-            if (startDate && id === "delayed-response") {
-              exportsAt(startDate, [settings.seedRegion], false);
-              detail = `The 5% trigger is reached entering ${uniqueDates[triggerStep].toISOString().slice(0, 10)}. Seed exports close on ${startLabel}, after the additional 14-day response delay.`;
-            }
-            if (startDate && id === "partner-ring") {
-              const targets = new Set([settings.seedRegion]);
-              for (const row of getTradeRecordsByDate(loadedCSVData).get(uniqueDates[0].getTime()) || []) {
-                if (!(+row.AANTAL > 0) || row.COROP_LEV === row.COROP_AFN) continue;
-                if (row.COROP_LEV === settings.seedRegion && ids.includes(row.COROP_AFN)) targets.add(row.COROP_AFN);
-                if (row.COROP_AFN === settings.seedRegion && ids.includes(row.COROP_LEV)) targets.add(row.COROP_LEV);
-              }
-              exportsAt(startDate, Array.from(targets), false);
-              detail = `Exports close on ${startLabel} after the 7-day response delay, covering the seed and its ${targets.size - 1} trading partners from the first step. Timeline markers list every target.`;
-            }
-            if (startDate && id === "hub-controls") {
-              const totals = new Map(ids.map((region) => [region, 0]));
+            if (id === "temporary-standstill") targets = ids;
+            const startDate = uniqueDates.find((date) => date.getTime() >= response);
+            let detail = "All movements stay open.";
+            if (startDate && members) {
               for (const row of loadedCSVData) {
-                if (+row.AANTAL > 0 && row.COROP_LEV !== row.COROP_AFN && totals.has(row.COROP_LEV) && totals.has(row.COROP_AFN)) {
-                  totals.set(row.COROP_LEV, totals.get(row.COROP_LEV) + +row.AANTAL);
-                }
+                const time = row.time.getTime();
+                if (time < response || !(+row.AANTAL > 0) || !roster.has(row.COROP_LEV) || !roster.has(row.COROP_AFN) ||
+                  !window.herdlinkPresetTools.isCommunityCordonRoute(members, row.COROP_LEV, row.COROP_AFN)) continue;
+                if (!links.has(time)) links.set(time, new Map());
+                links.get(time).set(getLinkKey(row.COROP_LEV, row.COROP_AFN), true);
               }
-              const targets = Array.from(totals).filter(([, volume]) => volume > 0)
-                .sort(([a, av], [b, bv]) => bv - av || (a < b ? -1 : a > b ? 1 : 0)).slice(0, 3).map(([region]) => region);
-              if (targets.length) exportsAt(startDate, targets, false);
-              detail = targets.length
-                ? `Exports close on ${startLabel} after the 7-day response delay for ${targets.join(", ")}, the ${targets.length} largest cross-region exporters across the full dataset.`
-                : "This dataset has no positive cross-region exports. No restrictions are applied.";
+              detail = `Outgoing boundary routes close from ${new Date(response).toISOString().slice(0, 10)}. Historical community: ${targets.join(", ")}. Internal and inbound trade continue.`;
+            } else if (targets.length && !members) {
+              nodes.set(response, new Map(targets.map((region) => [region, { exports: false }])));
+              if (id === "temporary-standstill") nodes.set(response + standstillDays * 86400000,
+                new Map(targets.map((region) => [region, { exports: true }])));
+              detail = `Exports close on ${new Date(response).toISOString().slice(0, 10)} for ${targets.length} region${targets.length === 1 ? "" : "s"}: ${targets.join(", ")}.`;
+              if (id === "temporary-standstill") detail += ` Reopening: ${new Date(response + standstillDays * 86400000).toISOString().slice(0, 10)}.`;
             }
-            if (startDate && id === "temporary-standstill") {
-              const latent = settings.model === "SEIR" || settings.model === "SEIRS";
-              const steps = Math.ceil(1 / settings.gamma + (latent ? 1 / settings.sigma : 0));
-              const reopeningStep = startStep + steps;
-              exportsAt(startDate, ids, false);
-              if (reopeningStep < uniqueDates.length) {
-                exportsAt(uniqueDates[reopeningStep], ids, true);
-                detail = `All regional exports close on ${startLabel} after the 7-day response delay, remain closed for ${steps} recorded steps, and reopen on ${uniqueDates[reopeningStep].toISOString().slice(0, 10)}. Local contact continues.`;
-              } else {
-                detail = Number.isFinite(steps)
-                  ? `All regional exports close on ${startLabel} after the 7-day response delay. Reopening ${steps} recorded steps later falls outside this dataset. Local contact continues.`
-                  : `All regional exports close on ${startLabel} after the 7-day response delay and stay closed because a required recovery or latency rate is zero. Local contact continues.`;
-              }
-            }
-            if (id !== "open-trade" && !startDate) {
-              detail = triggerStep < 0
-                ? "Original seed prevalence stays below 5% entering every recorded step, so trade stays open throughout the dataset."
-                : `The ${preset.delayDays}-day response delay ends beyond the recorded dates, so trade stays open throughout the dataset.`;
-            }
-            applyScenario(nodes, new Map(), null, preset.label);
-            return { label: preset.label, detail, scenario: {
-              datasetKey: currentTimeSpan, dates: uniqueDates.map((date) => date.toISOString()), settings,
-              nodeInterventions: Array.from(nodes, ([time, changes]) =>
-                [time, Array.from(changes, ([id, directions]) => [id, { ...directions }])]),
-              linkInterventions: [],
-            } };
+            if (id !== "open-trade" && !startDate) detail = "The response falls beyond the displayed timeline; recorded trade stays open.";
+            applyScenario(nodes, links, settings, preset.label);
+            return { label: preset.label, detail, communityScale: id === "seed-community" ? communityScale : null,
+              presetKey: window.herdlinkPresetTools.presetSettingsKey(id, context.presetSettings),
+              scenario: { datasetKey: currentTimeSpan, dates: uniqueDates.map((date) => date.toISOString()), settings,
+                nodeInterventions: Array.from(nodes, ([time, changes]) =>
+                  [time, Array.from(changes, ([region, directions]) => [region, { ...directions }])]),
+                linkInterventions: Array.from(links, ([time, changes]) => [time, Array.from(changes)]),
+              } };
           }
 
           function getComparisonData() {
@@ -2011,7 +2160,7 @@
               (item) => item.summary.prevalence,
             );
             const rows = [
-              ["fa-solid fa-users", "Holding", formatCount(summary.N)],
+              ["fa-solid fa-users", "Model units", formatCount(summary.N)],
               ["fa-solid fa-virus", "Infectious", formatCount(summary.I)],
               ["fa-solid fa-temperature-high", "Prevalence", formatPct(summary.prevalence)],
               ["fa-solid fa-arrow-trend-up", "New infections", formatCount(summary.newInfections)],
@@ -3504,7 +3653,7 @@
               <div style="opacity:0.85;">
                 S: ${formatCount(state.S)}
                 &nbsp; R: ${formatCount(state.R)}
-                &nbsp; Holding: ${formatCount(state.N)}
+                &nbsp; Model units: ${formatCount(state.N)}
               </div>
             `;
           }
@@ -4355,13 +4504,14 @@
             ensureSimulationControls()
               .querySelectorAll("input, select")
               .forEach((element) => {
-                element.disabled = disabled;
+                element.disabled = disabled || (element.id === "simulationIntroductionDate" && !getPresetSettings().ready);
               });
             setModeSwitcherDisabled(disabled);
           }
 
           function configureSimulationModeUi(active) {
             const controls = ensureSimulationControls();
+            syncSimulationIntroductionControl();
             controls.hidden = !active;
             controls.style.display = active && !selectedNodeData ? "block" : "none";
             ensureSimulationNodeControls().hidden = !selectedNodeData || simulationControlView !== "nodes";
@@ -4467,9 +4617,12 @@
             if (!(await stage(6, "ledger", reason))) return;
             let settings, trajectory;
             try {
+              const history = await ensurePresetDailyData();
+              if (runId !== simulationRunId) return;
+              if (!history) throw new Error(presetDailyDataError || "Daily movement history is unavailable.");
               refreshNetworkControlStats();
               settings = readSimulationSettings();
-              if (!(await stage(18, "holdings", "Estimating regional holdings"))) return;
+              if (!(await stage(18, "holdings", "Preparing regional model population"))) return;
               if (!(await stage(34, "contacts", "Building movement contacts"))) return;
               if (!(await stage(48, "states", "Integrating compartment states"))) return;
               trajectory = buildSimulationTrajectory(settings);
@@ -4611,6 +4764,25 @@
             if (!panel.dataset.bound) {
               panel.dataset.bound = "true";
               panel.querySelectorAll("input, select").forEach((element) => {
+                if (element.id === "simulationIntroductionDate") {
+                  element.addEventListener("change", () => {
+                    const value = element.value;
+                    if (!value || !element.validity.valid) {
+                      syncSimulationIntroductionControl();
+                      return;
+                    }
+                    try {
+                      setPresetSettings({ introductionDate: value });
+                      element.setCustomValidity("");
+                    } catch (error) {
+                      syncSimulationIntroductionControl();
+                      element.setCustomValidity(error.message);
+                      element.reportValidity();
+                    }
+                  });
+                  element.addEventListener("input", () => element.setCustomValidity(""));
+                  return;
+                }
                 const handleSettingChange = () => {
                   scheduleSimulationRecompute("Recomputing simulation");
                 };
@@ -6225,8 +6397,11 @@
             let within = 0;
             const strengths = Object.create(null);
             for (const link of links) {
-              const source = partition[getNodeId(link.source)];
-              const target = partition[getNodeId(link.target)];
+              const sourceId = getNodeId(link.source);
+              const targetId = getNodeId(link.target);
+              if (sourceId === targetId) continue;
+              const source = partition[sourceId];
+              const target = partition[targetId];
               volume += link.weight;
               if (source === target) within += link.weight;
               strengths[source] = (strengths[source] || 0) + link.weight;
@@ -6257,7 +6432,7 @@
                 const source = row.COROP_LEV;
                 const target = row.COROP_AFN;
                 const weight = +row.AANTAL;
-                if (!source || !target || source.toUpperCase() === "NA" || target.toUpperCase() === "NA" ||
+                if (!source || !target || source === target || source.toUpperCase() === "NA" || target.toUpperCase() === "NA" ||
                     !(weight > 0) || !Number.isFinite(weight) || disabled.has(`${source}-${target}`)) continue;
                 links.push({ source, target, weight });
                 const a = source < target ? source : target;
@@ -6270,7 +6445,7 @@
               graphs.set(time, links);
             }
             const edges = [...aggregate.values()];
-            // Regions without allowed volume have no evidence for a trade community.
+            // Interregional movements provide the evidence for community membership.
             const nodes = [...new Set(edges.flatMap((edge) => [edge.source, edge.target]))]
               .map((id) => ({ id }));
             const byScale = Object.fromEntries([["broad", 1], ["finer", 1.5]].map(([scale, resolution]) => {
@@ -6372,8 +6547,7 @@
               }
             });
     
-            // 2) Weighted Betweenness Centrality
-            //    (Simplified Brandes approach)
+            // 2) Directed weighted Brandes betweenness.
             // A simple binary min-heap implementation for the priority queue.
             class MinHeap {
               constructor() {
@@ -6440,17 +6614,34 @@
               }
             }
     
-            // Build adjacency list for a weighted directed graph (using only enabled links).
+            // Scale inverse weights to exact integer lengths so equal paths share credit.
+            const gcd = (a, b) => { while (b) [a, b] = [b, a % b]; return a; };
+            const bits = new DataView(new ArrayBuffer(8));
+            const rationalWeights = enabledLinks.map(({ weight }) => {
+              if (Number.isInteger(weight)) return [BigInt(weight), 1n];
+              bits.setFloat64(0, weight);
+              const value = bits.getBigUint64(0);
+              const exponent = Number((value >> 52n) & 2047n);
+              let numerator = (value & ((1n << 52n) - 1n)) + (exponent ? 1n << 52n : 0n);
+              const power = exponent ? exponent - 1075 : -1074;
+              let denominator = 1n;
+              if (power >= 0) numerator <<= BigInt(power);
+              else denominator <<= BigInt(-power);
+              const divisor = gcd(numerator, denominator);
+              return [numerator / divisor, denominator / divisor];
+            });
+            const common = rationalWeights.reduce((scale, [numerator]) => scale / gcd(scale, numerator) * numerator, 1n);
+            const integerCosts = rationalWeights.map(([numerator, denominator]) => common / numerator * denominator);
+
+            // Build adjacency for the available directed routes.
             const adj = {};
             allNodes.forEach((n) => {
               adj[n.id] = [];
             });
-            enabledLinks.forEach((e) => {
+            enabledLinks.forEach((e, index) => {
               const s = typeof e.source === "object" ? e.source.id : e.source;
               const t = typeof e.target === "object" ? e.target.id : e.target;
-              const w = e.weight;
-              // For cost, use 1/weight.
-              adj[s].push({ target: t, cost: 1 / w });
+              adj[s].push({ target: t, cost: integerCosts[index] });
             });
     
             /**
@@ -6488,11 +6679,11 @@
                   delta[n.id] = 0;
                 });
                 sigma[s] = 1;
-                dist[s] = 0;
+                dist[s] = 0n;
     
                 // Priority queue for Dijkstra's algorithm.
                 const Q = new MinHeap();
-                Q.push(s, 0);
+                Q.push(s, 0n);
     
                 // Dijkstra's algorithm: find shortest paths from s.
                 while (!Q.isEmpty()) {
@@ -7204,7 +7395,7 @@
               ? simulationState.currentFrame?.nodeStates[d.id]
               : null;
             const noteLabel = simState
-              ? `Holding: ${formatCount(simState.N)}\nSusceptible: ${formatCount(simState.S)}\nExposed: ${formatCount(simState.E)}\nInfectious: ${formatCount(simState.I)} (${formatPct(simState.prevalence)})\nRecovered: ${formatCount(simState.R)}\nIncoming Exposure: ${formatSmall(simState.incomingExposure)}\nOutgoing Pressure: ${formatSmall(simState.outgoingPressure)}`
+              ? `Model population units: ${formatCount(simState.N)}\nSusceptible: ${formatCount(simState.S)}\nExposed: ${formatCount(simState.E)}\nInfectious: ${formatCount(simState.I)} (${formatPct(simState.prevalence)})\nRecovered: ${formatCount(simState.R)}\nIncoming Exposure: ${formatSmall(simState.incomingExposure)}\nOutgoing Pressure: ${formatSmall(simState.outgoingPressure)}`
               : `Community ID: ${communityID}\nIncoming Trade: ${incomingTrade}\nOutgoing Trade: ${outgoingTrade}\nLocal Trade: ${selfTrade}\nSelf-Trade Ratio: ${selfTradeRatio}${selfTradeRatio !== "NA" ? "%" : ""}`;
     
             const annotations = [
@@ -7812,7 +8003,7 @@
               },
               {
                 metric: "pageRank", code: "I", name: "Infectious Burden", role: "Infectious Burden", icon: "fa-magnet",
-                text: "The number of infectious animals in the region at the end of this step.",
+                text: "The infectious model population in the region at the end of this step, measured in synthetic population units.",
                 method: "Infectious compartment count",
               },
               {
@@ -12958,8 +13149,8 @@
 
             const communities = new Map();
             const nodeCommunity = new Map();
-            Object.entries(partition).forEach(([id, communityId]) => {
-              const key = String(communityId);
+            collectSimulationRegionIds(loadedCSVData).forEach((id) => {
+              const key = partition[id] == null ? "NA" : String(partition[id]);
               nodeCommunity.set(id, key);
               if (!communities.has(key)) {
                 communities.set(key, {
@@ -14141,6 +14332,7 @@
     
                   // Store the loaded data for later use.
                   loadedCSVData = data;
+                  if (presetDailyData && simulationIntroductionDate === null) ensurePresetDailyData();
                   computeTemporalNetworkStats();
                   computeMaxTemporalNetworkStats();
     
@@ -15016,10 +15208,11 @@
               modeSwitchDisabled: !canSwitchAppDataMode(),
               scenarioContext: getScenarioContext(),
             }),
-            loadPreset, captureScenario, loadScenario,
+            loadPreset, captureScenario, loadScenario, setPresetSettings,
             getMode: () => appDataMode,
             setMode: setAppDataMode,
             prepare: () => {
+              ensurePresetDailyData();
               if (window.isPlaying) setTimeReplayState(false);
             },
             refresh: () => {

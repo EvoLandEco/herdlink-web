@@ -38,6 +38,7 @@ for (const name of ['daily', 'weekly', 'monthly', 'yearly']) {
     if (!ids.includes(source) || !ids.includes(target) || !Number.isFinite(weight) || weight <= 0) continue;
     if (!dates.has(date)) dates.set(date, []);
     dates.get(date).push({ source, target, weight });
+    if (source === target) continue;
     const key = JSON.stringify([source, target]);
     const edge = aggregate.get(key);
     if (edge) edge.weight += weight;

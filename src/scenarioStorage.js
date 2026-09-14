@@ -16,8 +16,10 @@ export function scenarioSignature(scenario) {
     }).sort(([a], [b]) => a.localeCompare(b))];
   }).sort(([a], [b]) => a - b);
   try {
+    const settings = { introductionDate: scenario.dates[0]?.slice(0, 10), ...scenario.settings };
     return JSON.stringify([
-      scenario.datasetKey, scenario.dates, objectEntries(scenario.settings),
+      scenario.datasetKey, scenario.dates, objectEntries(settings).map(([key, value]) =>
+        [key, key === "holdings" && value ? objectEntries(value) : value]),
       schedule(scenario.nodeInterventions, true), schedule(scenario.linkInterventions, false),
     ]);
   } catch {

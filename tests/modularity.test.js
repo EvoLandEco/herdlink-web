@@ -116,7 +116,7 @@ test("Louvain handles empty graphs and validates resolution", () => {
     assert.throws(() => context.jLouvain().resolution(resolution), /finite positive number/);
 });
 
-test("bundled Broad and Finer memberships match the native Leiden reference", () => {
+test("the bundled graph including local trade preserves its native Leiden reference", () => {
   const rows = readFileSync(new URL("../src/assets/data/yearly_aggregation.csv", import.meta.url), "utf8")
     .trim().split(/\r?\n/).slice(1);
   const routes = new Map();

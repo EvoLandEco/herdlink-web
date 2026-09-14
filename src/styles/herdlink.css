@@ -1686,6 +1686,7 @@ body.focus-mode-active .simulation-progress-item.is-done {
 }
 
 .simulation-controls-panel {
+  container-type: inline-size;
   position: absolute;
   top: var(--space-3);
   left: var(--space-3);
@@ -1755,8 +1756,41 @@ body.focus-mode-active .simulation-progress-item.is-done {
   font-weight: 600;
 }
 
-.simulation-control-grid .simulation-seed-region {
+.simulation-control-grid .simulation-seed-region,
+.simulation-control-grid .simulation-introduction-date {
   grid-column: span 2;
+}
+
+.simulation-control-grid .simulation-seed-region { grid-row: 1; grid-column: 1 / span 2; }
+.simulation-control-grid .simulation-introduction-date { grid-row: 1; grid-column: 3 / span 2; }
+
+@container (max-width: 320px) {
+  .simulation-control-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .simulation-control-grid .simulation-introduction-date {
+    grid-row: 2;
+    grid-column: 1 / span 2;
+  }
+}
+
+@container (min-width: 500px) {
+  .simulation-control-grid {
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+  }
+
+  .simulation-control-grid .simulation-seed-region {
+    grid-column: 2 / span 2;
+  }
+
+  .simulation-control-grid .simulation-introduction-date {
+    grid-column: 4 / span 2;
+  }
+}
+
+.simulation-control-grid input[type="date"] {
+  color-scheme: dark;
 }
 
 .simulation-control-grid input,
@@ -2900,8 +2934,30 @@ body.simulation-mode-active:not(.focus-mode-active) #tradeInfo {
 }
 
 @container (max-width: 310px) {
-  .community-view-switch__label {
+  .community-scale-control label {
+    white-space: normal;
+  }
+
+  .community-view-switch {
+    justify-content: center;
+    min-width: 32px;
+    min-height: 28px;
+  }
+
+  .community-view-switch__label,
+  .community-view-switch[aria-checked="false"] .community-view-switch__flow,
+  .community-view-switch[aria-checked="true"] .community-view-switch__heatmap {
     display: none;
+  }
+}
+
+@container (max-width: 185px) {
+  .community-scale-control label {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
   }
 }
 
@@ -4895,9 +4951,6 @@ select:focus-visible,
     white-space: nowrap;
   }
 
-  .simulation-control-grid {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
 }
 
 @media (max-width: 900px) {

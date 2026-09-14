@@ -3,18 +3,20 @@
 Community granularity and display time resolution are different choices.
 The bundled daily, weekly, monthly, and yearly tables contain exactly the same
 aggregate weights for every valid directed route: 40 regions, 920 directed
-routes, and 215,533,481 animals. They therefore give the same aggregate partition:
-four temporal representations of one graph.
+routes, and 215,533,481 animals, including local shipments. Their cross-region
+weights also agree, giving the same display partition across four temporal
+representations of one graph.
 
 ## What the data support
 
-At standard undirected modularity, both the runtime Louvain implementation and
+With original local-trade loops included, both the runtime Louvain implementation and
 the reference Leiden implementation find groups of 30, 6, and 4 regions.
 Leiden recovered that same partition in all 30 random seeds tested. This
 establishes agreement among the tested fits under the trade modularity objective.
 
-Local trade is 33.80% of the volume. Fitting runtime Louvain to interregional
-trade gives two groups, of 30 and 10 regions: a coarser division in this dataset.
+Local trade is 33.80% of the volume. The display partition fits interregional
+trade, yielding Broad groups of 30 and 10 regions and Finer groups of 16, 11, 7,
+3, and 3. Local shipments remain visible in the heatmap and circular flows.
 
 Direction contains information lost by combining reciprocal routes. Of 534
 region pairs with interregional trade, 185 have volume in only one direction.
@@ -24,7 +26,8 @@ interregional volume. This supports testing a directed community objective.
 ## Reference implementation comparison
 
 The analysis uses Python 3.14, igraph 1.0.0, and leidenalg 0.12.0 on an Apple
-M4 Max. Every method uses the whole unrestricted dataset. Each method and
+M4 Max. Every method uses the whole unrestricted dataset. Original local-trade
+loops are included except where the table specifies their removal. Each method and
 resolution has three warmups and 30 measured random seeds; the table describes
 the partition with the best objective among those seeds. Louvain experiments
 with 101 node orders independently reproduced the undirected counts below.
@@ -128,12 +131,14 @@ further work.
 The Broad/Finer control selects generalized modularity at γ = 1 or γ = 1.5.
 The browser uses Louvain with γ in its objective and move calculation; each
 move considers rejoining the source group, neighboring groups, and a singleton
-group. Its canonical node order matches the best native Leiden membership and
-objective from 30 seeds at both offered scales: 0.298660 for Broad and
-0.192417 for Finer. Tests preserve these reference memberships.
+group. Display communities use cross-region weights at both scales. The native
+reference table describes the separate objective that includes local-trade
+loops; mathematical tests preserve that reference alongside tests for the
+interregional display graph.
 
-Across 101 node orders, Louvain reached that best result 94 times for Broad
-and 99 times for Finer. The browser uses one canonical order. Louvain communities
+Across 101 node orders on the graph including local trade, Louvain reached the
+table's best result 94 times for Broad and 99 times for Finer. The browser uses
+one canonical order. Louvain communities
 can be disconnected, and these finite experiments leave global optimality and
 uniqueness open. Directed modularity remains a useful alternative for
 studying the information in trade direction.

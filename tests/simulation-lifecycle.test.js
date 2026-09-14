@@ -18,6 +18,7 @@ function runtime() {
     clearTimeout: (id) => timers.delete(id),
     delaySimulationStage: async () => {},
     readSimulationSettings: () => ({}),
+    ensurePresetDailyData: async () => [{}], presetDailyDataError: null,
     buildSimulationTrajectory: () => { calls.push("trajectory"); return {}; },
     refreshNetworkControlStats: () => calls.push("statistics"),
     refreshCurrentNetworkFrame: () => calls.push("frame"),
@@ -89,4 +90,43 @@ test("a failed replay render releases simulation controls and allows a retry", a
   await context.recomputeSimulationTrajectory();
   assert.equal(context.simulationState.status, "ready");
   assert.equal(context.comparisonDataError, null);
+});
+
+test("cancellation during history loading prevents integration with stale inputs", async () => {
+  const { context, calls } = runtime();
+  let releaseHistory, requestedHistory;
+  const requested = new Promise((resolve) => { requestedHistory = resolve; });
+  context.ensurePresetDailyData = () => {
+    requestedHistory();
+    return new Promise((resolve) => { releaseHistory = resolve; });
+  };
+  const run = context.recomputeSimulationTrajectory();
+  await requested;
+  context.cancelSimulationRecompute();
+  context.loadedCSVData = [{ dataset: "replacement" }];
+  releaseHistory([{}]);
+  await run;
+  assert.deepEqual(calls, []);
+  context.ensurePresetDailyData = async () => [{}];
+  await context.recomputeSimulationTrajectory();
+  assert.deepEqual(calls, ["statistics", "trajectory", "frame"]);
+});
+
+test("history loading failures release simulation controls and support retry", async () => {
+  const { context, calls } = runtime();
+  const disabled = [];
+  context.setSimulationInputsDisabled = (value) => disabled.push(value);
+  context.ensurePresetDailyData = async () => null;
+  context.presetDailyDataError = "Daily history request failed";
+  await context.recomputeSimulationTrajectory();
+  assert.equal(context.simulationState.status, "error");
+  assert.match(context.comparisonDataError, /Daily history request failed/);
+  assert.deepEqual(disabled, [true, false]);
+  assert.deepEqual(calls, []);
+  context.ensurePresetDailyData = async () => [{}];
+  context.presetDailyDataError = null;
+  await context.recomputeSimulationTrajectory();
+  assert.equal(context.simulationState.status, "ready");
+  assert.equal(context.comparisonDataError, null);
+  assert.deepEqual(calls, ["statistics", "trajectory", "frame"]);
 });
