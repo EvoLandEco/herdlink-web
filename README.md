@@ -67,6 +67,12 @@ Trade communities use an undirected network with the allowed volumes in both
 directions added together. Modularity measures the returned partition on that
 same network. The trade matrix retains the direction of each movement.
 
+Trade vs Distance plots recorded route volume against distance in kilometres.
+Its fitted curve uses the untruncated Lévy-walk shape to describe typical trade
+volume, with separate curves for imports and exports in focus mode. The
+[methods and profiling notes](docs/distance-trade-fit.md) explain the fit,
+its connection to the literature, and its limits.
+
 Ledger hotspot scores use allowed routes between regions and exclude local
 trades. Rings mark up to three positive eligible scores per metric at the
 displayed date. Blocking exports removes a region's Seeding and Bottleneck

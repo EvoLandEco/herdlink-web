@@ -1079,9 +1079,9 @@
               : {
                   distribution:
                     {
-                      html: '<i class="fa-regular fa-chart-scatter-bubble"></i> Gravity Model:',
+                      html: '<i class="fa-regular fa-chart-scatter-bubble"></i> Trade vs Distance:',
                       tipKey: "gravityModel",
-                      label: "Gravity model guide",
+                      label: "Trade and distance guide",
                       placement: "right",
                     },
                   clusters:
@@ -1093,9 +1093,9 @@
                     },
                   nodeDistribution:
                     {
-                      html: '<i class="fa-regular fa-chart-scatter-bubble"></i> Gravity Model (Node):',
+                      html: '<i class="fa-regular fa-chart-scatter-bubble"></i> Trade vs Distance:',
                       tipKey: "nodeGravityModel",
-                      label: "Node gravity model guide",
+                      label: "Regional trade and distance guide",
                       placement: "right",
                     },
                   nodeInsight:
@@ -7966,10 +7966,10 @@
             d3.select("#nodeStats").style("visibility", "hidden");
             d3.select("#nodeStatsControls").style("display", "none");
     
-            // Hide the network level gravity model and metadata groups.
+            // Hide the network trade panel and metadata groups.
             d3.select("#tradeDistribution").style("display", "none");
             d3.select("#tradeClusters").style("display", "none");
-            // Show the node level gravity model and metadata groups.
+            // Show the regional trade panel and metadata groups.
             d3.select("#tradeNodeDistribution").style("visibility", "visible");
             d3.select("#tradeNodeInsight").style("visibility", "visible");
 
@@ -8262,11 +8262,11 @@
                 isSimulationModeActive() ? "none" : "flex",
               );
 
-              // Show the network level gravity model and metadata groups.
+              // Show the network trade panel and metadata groups.
               d3.select("#tradeDistribution").style("display", "block");
               d3.select("#tradeClusters").style("display", "block");
 
-              // Hide the node level gravity model and metadata groups.
+              // Hide the regional trade panel and metadata groups.
               d3.select("#tradeNodeDistribution").style("visibility", "hidden");
               d3.select("#tradeNodeInsight").style("visibility", "hidden");
             }
@@ -9993,28 +9993,474 @@
             }
           }
     
-          function computeGravityRegression(data) {
+          function computeDistanceTradeFit(data) {
             const points = data.filter((point) =>
               Number.isFinite(point.distance) && point.distance > 0 &&
-              Number.isFinite(point.weight) && point.weight > 0 &&
-              Number.isFinite(point.massProduct) && point.massProduct > 0,
+              Number.isFinite(point.weight) && point.weight > 0,
             );
-            if (new Set(points.map((point) => point.distance)).size < 2) return null;
-            const logs = points.map((point) => ({
-              x: Math.log(point.distance), y: Math.log(point.weight), w: point.massProduct,
+            const n = points.length;
+            if (new Set(points.map((point) => point.distance)).size < 3) {
+              return { status: "insufficient-data", n };
+            }
+            const logDistances = points.map((point) => Math.log(point.distance));
+            const logWeights = points.map((point) => Math.log(point.weight));
+            const logMin = logDistances.reduce((min, value) => Math.min(min, value), Infinity);
+            const logMax = logDistances.reduce((max, value) => Math.max(max, value), -Infinity);
+            if (logMin === logMax) return { status: "unidentifiable", n };
+            const center = (logMin + logMax) / 2;
+            const yMean = logWeights.reduce((sum, value) => sum + value, 0) / n;
+            const ys = logWeights.map((value) => value - yMean);
+            const ssTotal = ys.reduce((sum, value) => sum + value * value, 0);
+            const yScale = logWeights.reduce((max, value) => Math.max(max, Math.abs(value)), 1);
+            const roundingNoise = n * (Number.EPSILON * yScale) ** 2;
+            if (ssTotal <= roundingNoise) return { status: "no-decay", n };
+            const differences = logDistances.map((value) =>
+              value === logMin ? -Infinity : value + Math.log(-Math.expm1(logMin - value)),
+            );
+            const normalized = differences.map((value) => Math.exp(value - logMax));
+            const maxDifference = logMax + Math.log(-Math.expm1(logMin - logMax));
+            const maxNormalized = Math.exp(maxDifference - logMax);
+            const softplus = (value) => value > 0
+              ? value + Math.log1p(Math.exp(-value)) : Math.log1p(Math.exp(value));
+            const log1pRatio = (value) => value === 0 ? 1 : Math.log1p(value) / value;
+            const xs = new Float64Array(n);
+
+            // Variable projection solves amplitude and decay for each distance scale.
+            function profile(theta) {
+              const logSigma = center + Math.tan(theta);
+              const denominator = logMin + softplus(logSigma - logMin);
+              let range;
+              if (theta === -Math.PI / 2) {
+                range = logMax - logMin;
+                for (let i = 0; i < n; i++) xs[i] = (logDistances[i] - logMin) / range;
+              } else if (theta === Math.PI / 2) {
+                range = 0;
+                for (let i = 0; i < n; i++) xs[i] = normalized[i] / maxNormalized;
+              } else if (denominator < logMax) {
+                range = softplus(maxDifference - denominator);
+                for (let i = 0; i < n; i++) xs[i] = softplus(differences[i] - denominator) / range;
+              } else {
+                const ratio = Math.exp(logMax - denominator);
+                const scaledRange = maxNormalized * log1pRatio(ratio * maxNormalized);
+                range = ratio * scaledRange;
+                for (let i = 0; i < n; i++) {
+                  xs[i] = normalized[i] * log1pRatio(ratio * normalized[i]) / scaledRange;
+                }
+              }
+              let xMean = 0;
+              for (let i = 0; i < n; i++) xMean += xs[i];
+              xMean /= n;
+              let covariance = 0;
+              let variance = 0;
+              for (let i = 0; i < n; i++) {
+                const dx = xs[i] - xMean;
+                covariance += dx * ys[i];
+                variance += dx * dx;
+              }
+              const slope = Math.min(0, covariance / variance);
+              let error = 0;
+              for (let i = 0; i < n; i++) {
+                const residual = ys[i] - slope * (xs[i] - xMean);
+                error += residual * residual;
+              }
+              return { error, slope, xMean, range, logSigma };
+            }
+
+            // Brent's bounded minimizer uses atan(log sigma) to cover positive scales.
+            let a = -Math.PI / 2;
+            let b = Math.PI / 2;
+            const power = profile(a);
+            const exponential = profile(b);
+            let x = 0;
+            let w = x;
+            let v = x;
+            let current = profile(x);
+            let fw = current.error;
+            let fv = fw;
+            let step = 0;
+            let previousStep = 0;
+            let converged = false;
+            const golden = (3 - Math.sqrt(5)) / 2;
+            for (let iteration = 0; iteration < 128; iteration++) {
+              const midpoint = (a + b) / 2;
+              const tolerance = 1e-9 * Math.abs(x) + 1e-11;
+              if (Math.abs(x - midpoint) <= 2 * tolerance - (b - a) / 2) {
+                converged = true;
+                break;
+              }
+              let parabolic = false;
+              if (Math.abs(previousStep) > tolerance) {
+                const r = (x - w) * (current.error - fv);
+                const q = (x - v) * (current.error - fw);
+                let numerator = (x - v) * q - (x - w) * r;
+                let denominator = 2 * (q - r);
+                if (denominator > 0) numerator = -numerator;
+                denominator = Math.abs(denominator);
+                const savedStep = previousStep;
+                previousStep = step;
+                if (Math.abs(numerator) < Math.abs(denominator * savedStep / 2) &&
+                    numerator > denominator * (a - x) && numerator < denominator * (b - x)) {
+                  step = numerator / denominator;
+                  const candidate = x + step;
+                  if (candidate - a < 2 * tolerance || b - candidate < 2 * tolerance) {
+                    step = x < midpoint ? tolerance : -tolerance;
+                  }
+                  parabolic = true;
+                }
+              }
+              if (!parabolic) {
+                previousStep = x < midpoint ? b - x : a - x;
+                step = golden * previousStep;
+              }
+              const u = x + (Math.abs(step) >= tolerance ? step : step > 0 ? tolerance : -tolerance);
+              const candidate = profile(u);
+              if (!Number.isFinite(candidate.error)) return { status: "optimization-failed", n };
+              if (candidate.error <= current.error) {
+                if (u < x) b = x;
+                else a = x;
+                v = w;
+                fv = fw;
+                w = x;
+                fw = current.error;
+                x = u;
+                current = candidate;
+              } else {
+                if (u < x) a = u;
+                else b = u;
+                if (candidate.error <= fw || w === x) {
+                  v = w;
+                  fv = fw;
+                  w = u;
+                  fw = candidate.error;
+                } else if (candidate.error <= fv || v === x || v === w) {
+                  v = u;
+                  fv = candidate.error;
+                }
+              }
+            }
+            if (!converged) return { status: "optimization-failed", n };
+            if (current.slope === 0 && power.slope === 0 && exponential.slope === 0) {
+              return { status: "no-decay", n };
+            }
+            let status = "fit";
+            const errorTolerance = 64 * (Number.EPSILON * ssTotal + roundingNoise);
+            if (Math.min(power.error, exponential.error) <= current.error + errorTolerance) {
+              const usePower = power.error <= exponential.error;
+              current = usePower ? power : exponential;
+              status = usePower ? "power-law-limit" : "exponential-limit";
+            }
+            if (current.slope === 0) return { status: "no-decay", n };
+            const result = {
+              status, n, slope: current.slope,
+              logReferenceVolume: yMean - current.slope * current.xMean,
+              logRmse: Math.sqrt(current.error / n),
+              distanceMin: points.reduce((min, point) => Math.min(min, point.distance), Infinity),
+              distanceMax: points.reduce((max, point) => Math.max(max, point.distance), -Infinity),
+            };
+            if (status !== "fit") return result;
+            const sigma = Math.exp(current.logSigma);
+            const nu = -current.slope / current.range;
+            const logAmplitude = result.logReferenceVolume + nu * softplus(logMin - current.logSigma);
+            if (!(sigma > 0) || !Number.isFinite(sigma) || !Number.isFinite(nu) || !Number.isFinite(logAmplitude)) {
+              return { status: "unidentifiable", n };
+            }
+            return {
+              ...result, sigma, nu, logSigma: current.logSigma, logAmplitude,
+            };
+          }
+
+          function evaluateDistanceTradeLog(fit, distance) {
+            const logMin = Math.log(fit.distanceMin);
+            const logMax = Math.log(fit.distanceMax);
+            const logDistance = Math.log(distance);
+            let position;
+            if (fit.status === "power-law-limit") {
+              position = (logDistance - logMin) / (logMax - logMin);
+            } else if (fit.status === "exponential-limit") {
+              position = (distance - fit.distanceMin) / (fit.distanceMax - fit.distanceMin);
+            } else if (fit.status === "fit") {
+              const softplus = (value) => value > 0
+                ? value + Math.log1p(Math.exp(-value)) : Math.log1p(Math.exp(value));
+              const denominator = logMin + softplus(fit.logSigma - logMin);
+              if (denominator < logMax) {
+                const difference = logDistance + Math.log(-Math.expm1(logMin - logDistance));
+                const maxDifference = logMax + Math.log(-Math.expm1(logMin - logMax));
+                position = softplus(difference - denominator) / softplus(maxDifference - denominator);
+              } else {
+                const ratio = Math.exp(logMax - denominator);
+                const scaled = Math.exp(logDistance - logMax) * -Math.expm1(logMin - logDistance);
+                const maxScaled = -Math.expm1(logMin - logMax);
+                const log1pRatio = (value) => value === 0 ? 1 : Math.log1p(value) / value;
+                position = scaled * log1pRatio(ratio * scaled) / (maxScaled * log1pRatio(ratio * maxScaled));
+              }
+            } else {
+              return NaN;
+            }
+            return fit.logReferenceVolume + fit.slope * position;
+          }
+
+          function computeDistanceTradeConfidence(data, fit, distances) {
+            const finite = fit.status === "fit";
+            const hasCurve = finite || fit.status === "power-law-limit" || fit.status === "exponential-limit";
+            const points = data.filter((point) =>
+              Number.isFinite(point.distance) && point.distance > 0 &&
+              Number.isFinite(point.weight) && point.weight > 0,
+            );
+            const regions = new Map();
+            const unavailable = (reason) => ({ status: "unavailable", reason, regions: regions.size });
+            if (!hasCurve) return unavailable("no-fit");
+            const validId = (id) => (typeof id === "string" && id.length > 0) ||
+              (typeof id === "number" && Number.isFinite(id));
+            for (const point of points) {
+              if (!validId(point.sourceId) || !validId(point.targetId) || point.sourceId === point.targetId) {
+                return unavailable("missing-region-ids");
+              }
+              for (const id of [point.sourceId, point.targetId]) {
+                if (!regions.has(id)) regions.set(id, regions.size);
+              }
+            }
+            const p = finite ? 3 : 2;
+            if (points.length <= p || regions.size <= p) return unavailable("insufficient-data");
+            if (!distances.length || distances.some((distance) => !Number.isFinite(distance) || distance <= 0)) {
+              return unavailable("invalid-distance");
+            }
+            const logMin = Math.log(fit.distanceMin);
+            const logRange = Math.log(fit.distanceMax) - logMin;
+            function derivatives(distance) {
+              if (!finite) {
+                const position = fit.status === "power-law-limit"
+                  ? (Math.log(distance) - logMin) / logRange
+                  : (distance - fit.distanceMin) / (fit.distanceMax - fit.distanceMin);
+                return { j: [1, position] };
+              }
+              const q = Math.log(distance) - fit.logSigma;
+              const value = q > 0 ? q + Math.log1p(Math.exp(-q)) : Math.log1p(Math.exp(q));
+              const w = q >= 0 ? 1 / (1 + Math.exp(-q)) : Math.exp(q) / (1 + Math.exp(q));
+              return { j: [1, -value, fit.nu * w], w };
+            }
+            const rows = points.map((point) => ({
+              ...derivatives(point.distance),
+              residual: Math.log(point.weight) - evaluateDistanceTradeLog(fit, point.distance),
+              source: regions.get(point.sourceId), target: regions.get(point.targetId),
             }));
-            const sumW = logs.reduce((sum, point) => sum + point.w, 0);
-            const xBar = logs.reduce((sum, point) => sum + point.w * point.x, 0) / sumW;
-            const yBar = logs.reduce((sum, point) => sum + point.w * point.y, 0) / sumW;
-            const covariance = logs.reduce((sum, point) => sum + point.w * (point.x - xBar) * (point.y - yBar), 0);
-            const variance = logs.reduce((sum, point) => sum + point.w * (point.x - xBar) ** 2, 0);
-            const slope = covariance / variance;
-            const intercept = yBar - slope * xBar;
-            const ssTot = logs.reduce((sum, point) => sum + point.w * (point.y - yBar) ** 2, 0);
-            const ssRes = logs.reduce((sum, point) => sum + point.w * (point.y - intercept - slope * point.x) ** 2, 0);
-            const rSquared = new Set(points.map((point) => point.weight)).size > 1
-              ? 1 - ssRes / ssTot : null;
-            return { slope, intercept, rSquared };
+            if (rows.some((row) => !Number.isFinite(row.residual) || row.j.some((value) => !Number.isFinite(value)))) {
+              return unavailable("singular");
+            }
+            const scales = Array(p).fill(0);
+            for (const row of rows) {
+              for (let i = 0; i < p; i++) scales[i] = Math.hypot(scales[i], row.j[i]);
+            }
+            if (scales.some((value) => !(value > 0) || !Number.isFinite(value))) return unavailable("singular");
+            const matrix = () => Array.from({ length: p }, () => Array(p).fill(0));
+            const bread = matrix();
+            const meat = matrix();
+            const regionScores = Array.from({ length: regions.size }, () => Array(p).fill(0));
+            const pairScores = new Map();
+            for (const row of rows) {
+              const j = row.j.map((value, i) => value / scales[i]);
+              for (let i = 0; i < p; i++) {
+                for (let k = 0; k < p; k++) bread[i][k] += j[i] * j[k];
+              }
+              if (finite) {
+                const cross = row.residual * (row.w / scales[1] / scales[2]);
+                bread[1][2] -= cross;
+                bread[2][1] -= cross;
+                bread[2][2] += row.residual * (fit.nu * row.w * (1 - row.w) / scales[2] / scales[2]);
+              }
+              const first = Math.min(row.source, row.target);
+              const second = Math.max(row.source, row.target);
+              if (!pairScores.has(first)) pairScores.set(first, new Map());
+              const pairs = pairScores.get(first);
+              if (!pairs.has(second)) pairs.set(second, Array(p).fill(0));
+              const pair = pairs.get(second);
+              for (let i = 0; i < p; i++) {
+                const score = row.residual * j[i];
+                regionScores[row.source][i] += score;
+                regionScores[row.target][i] += score;
+                pair[i] += score;
+              }
+            }
+            function addOuter(score, sign) {
+              for (let i = 0; i < p; i++) {
+                for (let k = 0; k < p; k++) meat[i][k] += sign * score[i] * score[k];
+              }
+            }
+            for (const score of regionScores) addOuter(score, 1);
+            for (const pairs of pairScores.values()) {
+              for (const score of pairs.values()) addOuter(score, -1);
+            }
+            // Column scaling and partial pivoting expose rank loss without changing the model.
+            const inverse = matrix();
+            for (let i = 0; i < p; i++) inverse[i][i] = 1;
+            const norm = Math.max(...bread.map((row) => row.reduce((sum, value) => sum + Math.abs(value), 0)));
+            const tolerance = Number.EPSILON * p * norm;
+            for (let column = 0; column < p; column++) {
+              let pivot = column;
+              for (let row = column + 1; row < p; row++) {
+                if (Math.abs(bread[row][column]) > Math.abs(bread[pivot][column])) pivot = row;
+              }
+              if (!Number.isFinite(bread[pivot][column]) || Math.abs(bread[pivot][column]) <= tolerance) {
+                return unavailable("singular");
+              }
+              [bread[column], bread[pivot]] = [bread[pivot], bread[column]];
+              [inverse[column], inverse[pivot]] = [inverse[pivot], inverse[column]];
+              const divisor = bread[column][column];
+              for (let k = 0; k < p; k++) {
+                bread[column][k] /= divisor;
+                inverse[column][k] /= divisor;
+              }
+              for (let row = 0; row < p; row++) {
+                if (row === column) continue;
+                const factor = bread[row][column];
+                for (let k = 0; k < p; k++) {
+                  bread[row][k] -= factor * bread[column][k];
+                  inverse[row][k] -= factor * inverse[column][k];
+                }
+              }
+            }
+            const band = [];
+            for (const distance of distances) {
+              const j = derivatives(distance).j.map((value, i) => value / scales[i]);
+              const influence = Array(p).fill(0);
+              for (let i = 0; i < p; i++) {
+                for (let k = 0; k < p; k++) influence[i] += inverse[k][i] * j[k];
+              }
+              let variance = 0;
+              for (let i = 0; i < p; i++) {
+                for (let k = 0; k < p; k++) variance += influence[i] * meat[i][k] * influence[k];
+              }
+              const predicted = evaluateDistanceTradeLog(fit, distance);
+              if (!(variance >= 0) || !Number.isFinite(variance) || !Number.isFinite(predicted)) {
+                return unavailable("invalid-variance");
+              }
+              const halfWidth = 1.959963984540054 * Math.sqrt(variance);
+              band.push({ distance, logLower: predicted - halfWidth, logUpper: predicted + halfWidth });
+            }
+            return { status: "available", regions: regions.size, points: band };
+          }
+
+          function renderDistanceTradeCurve(g, data, className, color, dash, x, y, network = false) {
+            const fit = computeDistanceTradeFit(data);
+            const hasCurve = ["fit", "power-law-limit", "exponential-limit"].includes(fit.status);
+            const curves = g.selectAll(`path.${className}-outline, path.${className}`)
+              .data(hasCurve ? network ? ["outline", "line"] : ["line"] : []);
+            const logY = d3.scaleLinear().domain(y.domain().map(Math.log)).range(y.range());
+            let path = null;
+            let distances = [];
+            if (hasCurve) {
+              const logMin = Math.log(fit.distanceMin);
+              const logRange = Math.log(fit.distanceMax) - logMin;
+              distances = Array.from({ length: 65 }, (_, i) =>
+                i === 0 ? fit.distanceMin : i === 64 ? fit.distanceMax
+                  : Math.exp(logMin + logRange * i / 64),
+              );
+              path = d3.line()(distances.map((distance) =>
+                [x(distance), logY(evaluateDistanceTradeLog(fit, distance))],
+              ));
+            }
+            const clipId = `${className}-clip`;
+            g.selectAll(`clipPath.${className}`).data([null]).join("clipPath")
+              .attr("class", className).attr("id", clipId)
+              .selectAll("rect").data([null]).join("rect")
+              .attr("width", x.range()[1]).attr("height", y.range()[0]);
+            if (network) {
+              fit.confidence = computeDistanceTradeConfidence(data, fit, distances);
+              g.selectAll("path.distance-trade-confidence")
+                .data(fit.confidence.status === "available" ? [fit.confidence.points] : [])
+                .join("path")
+                .attr("class", "distance-trade-confidence")
+                .attr("fill", color).attr("fill-opacity", 0.18)
+                .attr("pointer-events", "none")
+                .attr("clip-path", `url(#${clipId})`)
+                .lower()
+                .transition().duration(750)
+                .attr("d", d3.area()
+                  .x((point) => x(point.distance))
+                  .y0((point) => logY(point.logLower))
+                  .y1((point) => logY(point.logUpper)));
+            }
+            curves.join("path")
+              .attr("class", (layer) => layer === "outline" ? `${className}-outline` : className)
+              .attr("fill", "none")
+              .attr("stroke", (layer) => layer === "outline" ? theme.surface : color)
+              .attr("stroke-width", (layer) => layer === "outline" ? 7 : network ? 3 : 2)
+              .attr("stroke-dasharray", (layer) => layer === "outline" ? null : dash)
+              .attr("stroke-linecap", "round")
+              .attr("stroke-linejoin", "round")
+              .attr("pointer-events", "none")
+              .attr("clip-path", `url(#${clipId})`)
+              .raise()
+              .transition().duration(750)
+              .attr("d", path);
+            return fit;
+          }
+
+          function renderDistanceTradeSummary(g, fits, width, network = false) {
+            const rows = [];
+            for (const { label, color, model } of fits) {
+              const prefix = network ? "" : `${label}: `;
+              let detail = `${model.n} routes`;
+              if (Number.isFinite(model.slope)) {
+                const drop = d3.format(".0%")(-Math.expm1(model.slope));
+                const range = `${d3.format(".0f")(model.distanceMin)}–${d3.format(".0f")(model.distanceMax)} km`;
+                if (network) {
+                  rows.push({ text: `${detail} · ${model.confidence.regions} regions`, color });
+                  detail = `${drop} fitted drop · ${range}`;
+                } else {
+                  detail += ` · ${drop} drop (${range})`;
+                }
+              }
+              rows.push({ text: prefix + detail, color,
+                title: Number.isFinite(model.slope)
+                  ? "Fitted decline from the shortest to the longest observed route. This is a descriptive association with distance."
+                  : "Number of recorded routes with positive volume and a known positive distance." });
+              if (network && Number.isFinite(model.slope)) {
+                const available = model.confidence.status === "available";
+                rows.push({ text: available ? "Approx. 95% CI" : "CI unavailable", color: theme.muted,
+                  title: available
+                    ? "Approximate pointwise confidence intervals for the fitted typical volume, allowing routes that share a region to be correlated. The displayed curve form is treated as fixed; uncertainty from choosing that form is excluded. This is not a range for individual trade volumes."
+                    : "The data do not support an estimable confidence band for this fitted curve." });
+              }
+            }
+            const summaries = g.selectAll("text.distance-fit-summary").data(rows).join("text")
+              .attr("class", "distance-fit-summary")
+              .attr("text-anchor", "end")
+              .attr("x", width - 4).attr("y", (_, i) => (network ? 30 : 15) + i * 15)
+              .attr("fill", (row) => row.color)
+              .style("font", `10px ${theme.font}`)
+              .text((row) => row.text)
+              .raise();
+            summaries.append("title").text((row) => row.title || "Recorded routes and their participating regions.");
+          }
+
+          function distanceTradeFitLabel(fit) {
+            if (fit.status === "fit") return "Distance curve";
+            if (fit.status === "power-law-limit") return "Power-law limit";
+            if (fit.status === "exponential-limit") return "Exponential limit";
+            if (fit.status === "insufficient-data") return "Too few distances";
+            if (fit.status === "no-decay") return "No decreasing fit";
+            return "No finite curve fit";
+          }
+
+          function distanceTradeFitColor(fit) {
+            if (fit.status === "fit") return "#39ff14";
+            if (fit.status === "exponential-limit") return "#00e5ff";
+            if (fit.status === "power-law-limit") return "#fff200";
+            return "#ff1744";
+          }
+
+          function distanceTradeFitDescription(fit) {
+            if (fit.status === "fit") {
+              return `V(d) = A (1 + d/σ)^−ν; σ = ${fit.sigma.toPrecision(3)} km; ν = ${fit.nu.toPrecision(3)}. Log RMSE = ${fit.logRmse.toFixed(3)} across ${fit.n} routes. The curve describes typical trade volume on recorded routes, not infection probability.`;
+            }
+            if (fit.status === "insufficient-data") return "A curve needs at least three distinct positive distances and positive trade volumes.";
+            if (fit.status === "no-decay") return "These routes do not support a decreasing distance curve.";
+            if (fit.status === "power-law-limit" || fit.status === "exponential-limit") {
+              const name = fit.status === "power-law-limit" ? "power-law" : "exponential";
+              return `The distance kernel approaches its ${name} limit for these routes; its scale and shape have no finite joint estimate. Log RMSE = ${fit.logRmse.toFixed(3)} across ${fit.n} routes. This describes recorded trade volume, not infection probability.`;
+            }
+            if (fit.status === "unidentifiable") return "These routes do not resolve the curve's distance scale and shape separately.";
+            return "The curve fit did not converge.";
           }
 
           function updateTradeDistribution() {
@@ -10083,7 +10529,7 @@
               g.selectAll("*").remove();
               g.append("text")
                 .attr("class", "no-trade-data")
-                .text("No trade data available for gravity model analysis.")
+                .text("No trade routes with known distance.")
                 .attr("x", width / 2)
                 .attr("y", height / 2)
                 .attr("text-anchor", "middle");
@@ -10189,46 +10635,6 @@
               .text((d) => tickFormat(d));
             yGridLabels.exit().remove();
     
-            // Contour Plot Background
-            // Compute density contours weighted by massProduct.
-            const densityData = d3
-              .contourDensity()
-              .x((d) => xScale(d.distance))
-              .y((d) => yScale(d.weight))
-              .size([width, height])
-              .bandwidth(30) // bandwith for kernel density estimation
-              .thresholds(5) // threshold levels for contour lines
-              .weight((d) => d.massProduct)(tradeData);
-    
-            // Create a sequential color scale for the density values.
-            const maxDensity = d3.max(densityData, (d) => d.value);
-            const colorScale = d3.scaleSequential(
-              [0, maxDensity],
-              d3.interpolateGreys,
-            );
-    
-            // Insert or update the contour layer behind other elements.
-            let contourLayer = g.select(".contour-layer");
-            if (contourLayer.empty()) {
-              contourLayer = g
-                .insert("g", ":first-child")
-                .attr("class", "contour-layer");
-            }
-            const contours = contourLayer.selectAll("path").data(densityData);
-            contours
-              .enter()
-              .append("path")
-              .merge(contours)
-              .transition()
-              .duration(750)
-              .attr("d", d3.geoPath())
-              .attr("fill", (d) => colorScale(d.value))
-              .attr("stroke", theme.muted)
-              .attr("opacity", 0.12);
-            contours.exit().remove();
-    
-            contourLayer.lower(); // move to the bottom of the group
-    
             // Update scatter points using the D3 update pattern
             const circles = g
               .selectAll(".trade-circle")
@@ -10256,25 +10662,8 @@
               .duration(750)
               .attr("r", (d) => sizeScale(d.massProduct));
     
-            // Add tooltip on mouseover
-            // Not working, placeholder here
-    
-            const regression = computeGravityRegression(tradeData);
-            const xTrendMin = xScale.domain()[0] + 4;
-            const xTrendMax = xScale.domain()[1] - 50;
-            const trendLine = g.selectAll(".trend-line").data(regression ? [regression] : []);
-            trendLine.exit().remove();
-            trendLine.enter().append("line")
-              .attr("class", "trend-line")
-              .attr("stroke", theme.accent)
-              .attr("stroke-width", 2)
-              .attr("stroke-dasharray", "5,5")
-              .merge(trendLine)
-              .transition().duration(750)
-              .attr("x1", xScale(xTrendMin))
-              .attr("y1", (fit) => yScale(Math.exp(fit.intercept + fit.slope * Math.log(xTrendMin))))
-              .attr("x2", xScale(xTrendMax))
-              .attr("y2", (fit) => yScale(Math.exp(fit.intercept + fit.slope * Math.log(xTrendMax))));
+            const fit = renderDistanceTradeCurve(g, tradeData, "distance-curve-network", theme.accent, "5,5", xScale, yScale, true);
+            renderDistanceTradeSummary(g, [{ model: fit, color: theme.text }], width, true);
 
             // Axis Labeling
             let topLabel = svg.select(".top-label");
@@ -10286,7 +10675,7 @@
                 .attr("text-anchor", "middle")
                 .attr("fill", theme.text)
                 .style("font", `12px ${theme.font}`)
-                .text("Distance →");
+                .text("Distance (km) →");
             }
             topLabel.attr(
               "transform",
@@ -10294,19 +10683,21 @@
             );
             topLabel.select(".distance-label").attr("y", 20);
     
-            const rSquaredText = `R² = ${regression?.rSquared == null ? "NA" : regression.rSquared.toFixed(3)}`;
-
-            // Create or update the text element.
-            let r2Label = g.select(".r2-label");
-            if (r2Label.empty()) {
-              r2Label = g
-                .append("text")
-                .attr("class", "r2-label")
-                .attr("text-anchor", "end")
-                .attr("fill", theme.text)
-                .style("font", `11px ${theme.font}`);
-            }
-            r2Label.attr("x", width).attr("y", -10).text(rSquaredText);
+            const fitLabel = g.selectAll("text.distance-fit-label").data([fit]).join("text")
+              .raise()
+              .attr("class", "distance-fit-label")
+              .attr("text-anchor", "end")
+              .attr("fill", theme.text)
+              .style("font", `11px ${theme.font}`)
+              .attr("x", width - 4).attr("y", 15)
+              .text(null);
+            fitLabel.append("tspan")
+              .attr("class", "distance-fit-dot")
+              .attr("color", distanceTradeFitColor)
+              .attr("aria-hidden", "true")
+              .text("● ");
+            fitLabel.append("tspan").text(distanceTradeFitLabel);
+            fitLabel.append("title").text(distanceTradeFitDescription);
     
             let rightLabel = svg.select(".right-label");
             if (rightLabel.empty()) {
@@ -10483,42 +10874,6 @@
               .text((d) => tickFormat(d));
             yGridLabels.exit().remove();
     
-            // Contour Density Layers
-            function updateContourLayer(data, groupClass, fillColor) {
-              const densityData = d3
-                .contourDensity()
-                .x((d) => xScale(d.distance))
-                .y((d) => yScale(d.weight))
-                .size([width, height])
-                .bandwidth(30)
-                .thresholds(5)
-                .weight((d) => d.massProduct)(data);
-              let contourLayer = g.select(`.${groupClass}`);
-              if (contourLayer.empty()) {
-                contourLayer = g
-                  .insert("g", ":first-child")
-                  .attr("class", groupClass);
-              }
-              const paths = contourLayer.selectAll("path").data(densityData);
-              paths
-                .enter()
-                .append("path")
-                .merge(paths)
-                .transition()
-                .duration(750)
-                .attr("d", d3.geoPath())
-                .attr("fill", fillColor)
-                .attr("stroke", theme.text)
-                .attr("opacity", 0.12);
-              paths.exit().remove();
-              contourLayer.lower();
-            }
-    
-            // Overall contour with incoming and outgoing routes.
-            updateContourLayer(tradeDataAll, "contour-all", "fuchsia");
-            updateContourLayer(outgoingData, "contour-outgoing", outgoingColor);
-            updateContourLayer(incomingData, "contour-incoming", incomingColor);
-    
             // Update Scatter Points
             const sampledData =
               tradeDataAll.length > 200
@@ -10552,68 +10907,29 @@
               .duration(750)
               .attr("r", (d) => sizeScale(d.massProduct));
     
-            function updateRegression(data, className, color, dash) {
-              const fit = computeGravityRegression(data);
-              const lines = g.selectAll(`.${className}`).data(fit ? [fit] : []);
-              lines.exit().remove();
-              const xMin = xScale.domain()[0] + 4;
-              const xMax = xScale.domain()[1] - 50;
-              lines.enter().append("line")
-                .attr("class", className)
-                .attr("stroke", color)
-                .attr("stroke-width", 2)
-                .attr("stroke-dasharray", dash)
-                .merge(lines)
-                .transition().duration(750)
-                .attr("x1", xScale(xMin))
-                .attr("y1", (reg) => yScale(Math.exp(reg.intercept + reg.slope * Math.log(xMin))))
-                .attr("x2", xScale(xMax))
-                .attr("y2", (reg) => yScale(Math.exp(reg.intercept + reg.slope * Math.log(xMax))));
-              return fit?.rSquared ?? null;
-            }
-            const overallRSq = updateRegression(tradeDataAll, "regression-all", "fuchsia", "5,5");
-            const outgoingRSq = updateRegression(outgoingData, "regression-outgoing", outgoingColor, "4,4");
-            const incomingRSq = updateRegression(incomingData, "regression-incoming", incomingColor, "4,4");
+            const fits = [
+              { label: "All", color: "fuchsia", model: renderDistanceTradeCurve(g, tradeDataAll, "distance-curve-all", "fuchsia", "5,5", xScale, yScale) },
+              { label: "Out", color: outgoingColor, model: renderDistanceTradeCurve(g, outgoingData, "distance-curve-outgoing", outgoingColor, "4,4", xScale, yScale) },
+              { label: "In", color: incomingColor, model: renderDistanceTradeCurve(g, incomingData, "distance-curve-incoming", incomingColor, "4,4", xScale, yScale) },
+            ];
+            const fitLabels = g.selectAll("text.distance-fit-label").data(fits).join("text")
+              .raise()
+              .attr("class", "distance-fit-label")
+              .attr("text-anchor", "end")
+              .attr("fill", (d) => d.color)
+              .style("font", `11px ${theme.font}`)
+              .attr("x", width).attr("y", (_, i) => height - 50 + i * 14)
+              .text(null);
+            fitLabels.append("tspan").text((d) => `${d.label}: `);
+            fitLabels.append("tspan")
+              .attr("class", "distance-fit-dot")
+              .attr("color", (d) => distanceTradeFitColor(d.model))
+              .attr("aria-hidden", "true")
+              .text("● ");
+            fitLabels.append("tspan").text((d) => distanceTradeFitLabel(d.model));
+            fitLabels.append("title").text((d) => distanceTradeFitDescription(d.model));
+            renderDistanceTradeSummary(g, fits, width);
 
-            // R² Display at Top Right
-            // Use a single text element with three tspans.
-            let r2Label = g.select(".r2-label");
-            if (r2Label.empty()) {
-              r2Label = g
-                .append("text")
-                .attr("class", "r2-label")
-                .attr("text-anchor", "end")
-                .attr("fill", theme.text)
-                .style("font", `11px ${theme.font}`);
-            }
-            // Clear previous content.
-            r2Label.html("");
-            r2Label.attr("x", width).attr("y", height - 50);
-            r2Label
-              .append("tspan")
-              .attr("x", width)
-              .attr("dy", "0em")
-              .attr("fill", "fuchsia")
-              .text("All: R² = " + (overallRSq === null ? "NA" : overallRSq.toFixed(3)));
-            r2Label
-              .append("tspan")
-              .attr("x", width)
-              .attr("dy", "1.2em")
-              .attr("fill", outgoingColor)
-              .text(
-                "Out: R² = " +
-                  (outgoingRSq !== null ? outgoingRSq.toFixed(3) : "NA"),
-              );
-            r2Label
-              .append("tspan")
-              .attr("x", width)
-              .attr("dy", "1.2em")
-              .attr("fill", incomingColor)
-              .text(
-                "In: R² = " +
-                  (incomingRSq !== null ? incomingRSq.toFixed(3) : "NA"),
-              );
-    
             // Axis Labeling
             let topLabel = svg.select(".top-label");
             if (topLabel.empty()) {
@@ -10624,7 +10940,7 @@
                 .attr("text-anchor", "middle")
                 .attr("fill", theme.text)
                 .style("font", `12px ${theme.font}`)
-                .text("Distance →");
+                .text("Distance (km) →");
             }
             topLabel.attr(
               "transform",

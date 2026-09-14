@@ -257,6 +257,15 @@ textarea:focus-visible {
   line-height: 1.28;
 }
 
+.tip-equation {
+  padding: 10px 0;
+  color: var(--color-text);
+  font-family: math;
+  font-size: 1.15rem;
+  font-weight: 400;
+  line-height: normal;
+}
+
 .tip-options {
   grid-template-columns: repeat(2, minmax(0, 1fr));
 }
@@ -3578,6 +3587,22 @@ g.node:hover {
 #tradeNodeDistribution,
 #tradeNodeInsight {
   visibility: hidden;
+}
+
+.distance-fit-dot {
+  fill: #fff;
+  stroke: currentColor;
+  stroke-width: 0.8px;
+  paint-order: stroke fill;
+  text-shadow: 0 0 2px currentColor, 0 0 4px currentColor, 0 0 6px currentColor;
+}
+
+#tradeDistribution .distance-fit-label,
+.distance-fit-summary {
+  stroke: var(--color-surface);
+  stroke-width: 3px;
+  stroke-linejoin: round;
+  paint-order: stroke fill;
 }
 
 .trade-clusters-label,

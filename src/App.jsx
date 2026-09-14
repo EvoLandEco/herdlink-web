@@ -41,6 +41,23 @@ const oppositePlacements = {
   left: "right",
 };
 
+const distanceTradeEquation = `
+  <math xmlns="http://www.w3.org/1998/Math/MathML" display="block"
+    aria-label="V of d equals A times one plus d over sigma, raised to the power negative nu">
+    <mrow>
+      <mrow><mi>V</mi><mo>(</mo><mi>d</mi><mo>)</mo></mrow>
+      <mo>=</mo><mi>A</mi><mo>⁢</mo>
+      <msup>
+        <mrow>
+          <mo>(</mo><mn>1</mn><mo>+</mo>
+          <mfrac><mi>d</mi><mi>σ</mi></mfrac><mo>)</mo>
+        </mrow>
+        <mrow><mo>−</mo><mi>ν</mi></mrow>
+      </msup>
+    </mrow>
+  </math>
+`;
+
 const importsExportsGuide = {
   title: "Imports & Exports",
   iconClass: "fa-solid fa-arrow-right-arrow-left",
@@ -114,28 +131,35 @@ const richTips = {
     ],
   },
   gravityModel: {
-    title: "Gravity Model",
+    title: "Trade vs Distance",
     iconClass: "fa-regular fa-chart-scatter-bubble",
     intro:
-      "Read this as distance versus trade volume for the full network.",
+      "See how recorded trade volume varies with distance across the network.",
     sections: [
       {
         iconClass: "fa-solid fa-circle",
         title: "Dots",
         text:
-          "Each dot is a trade route. The horizontal axis is distance, and the vertical axis is volume on a log scale.",
+          "Each dot is an allowed route at the displayed date. Log axes show distance between regional reference points in kilometres and animals traded.",
       },
       {
         iconClass: "fa-solid fa-chart-line",
-        title: "Trend",
+        title: "Distance curve",
+        equation: distanceTradeEquation,
         text:
-          "The dashed line shows the distance volume pattern. R2 shows how much of the volume pattern is explained by distance.",
+          "The dashed curve fits typical volume with equal weight per route in log-volume space, using the untruncated Lévy-walk form from Boender and Hagenaars (2023). Labels identify finite, exponential, or power-law fits.",
+      },
+      {
+        iconClass: "fa-solid fa-chart-area",
+        title: "Confidence band",
+        text:
+          "The shading gives approximate 95% pointwise intervals for typical volume, accounting for routes that share a region. It holds the displayed curve form fixed and excludes uncertainty from choosing that form. It does not predict individual route volumes.",
       },
       {
         iconClass: "fa-solid fa-magnifying-glass-chart",
         title: "What to look for",
         text:
-          "Routes high above the line are heavier than expected for their distance. Far right routes show long range trade ties.",
+          "The summary shows route and region counts and fitted decline across the observed distance range. Dots above the curve carry more animals than the fitted volume. The plot describes trade, not infection probability or route occurrence.",
       },
     ],
   },
@@ -195,28 +219,29 @@ const richTips = {
     ],
   },
   nodeGravityModel: {
-    title: "Gravity Model (Node)",
+    title: "Trade vs Distance",
     iconClass: "fa-regular fa-chart-scatter-bubble",
     intro:
-      "This is the distance volume pattern for the selected region.",
+      "See how the selected region's recorded trade volume varies with distance.",
     sections: [
       {
         iconClass: "fa-solid fa-route",
         title: "Focused routes",
         text:
-          "Dots represent incoming and outgoing trades tied to the selected region.",
+          "Dots represent allowed incoming and outgoing routes at the displayed date. Both axes use log scales. Distance is in kilometres between regional reference points; volume is the number of animals traded.",
       },
       {
         iconClass: "fa-solid fa-ruler-horizontal",
-        title: "Distance reading",
+        title: "Distance curves",
+        equation: distanceTradeEquation,
         text:
-          "Short distance routes show local dependency. Long distance routes show wider exposure reach.",
+          "All, Out and In fit this curve separately to all routes, exports and imports. This is the untruncated Lévy-walk shape used by Boender and Hagenaars (2023), with equal weight per route in log-volume space. Labels identify exponential or power-law limits when a finite distance scale cannot be fitted.",
       },
       {
         iconClass: "fa-solid fa-weight-hanging",
         title: "Volume reading",
         text:
-          "High dots point to the routes that dominate the region's trade pressure.",
+          "The summaries show route counts and fitted declines across each direction's observed distance range. High dots show routes carrying more animals. Curves describe typical recorded trade volume, not infection probability. The data may not support a decreasing curve for every direction or date.",
       },
     ],
   },
@@ -659,12 +684,19 @@ function createRichTooltipContent(tip) {
       appendIcon(iconWrap, section.iconClass);
       item.append(iconWrap);
 
-      const copy = document.createElement("span");
+      const copy = document.createElement("div");
       copy.className = "tip-section-copy";
 
       const sectionTitle = document.createElement("strong");
       sectionTitle.textContent = section.title;
       copy.append(sectionTitle);
+
+      if (section.equation) {
+        const equation = document.createElement("div");
+        equation.className = "tip-equation";
+        equation.innerHTML = section.equation;
+        copy.append(equation);
+      }
 
       const text = document.createElement("span");
       text.textContent = section.text;
