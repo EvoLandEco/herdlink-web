@@ -1,5 +1,5 @@
 import { memo, useEffect, useId, useState } from "react";
-import { faBullseye, faCircleInfo, faClock, faCircleNodes, faFlask, faHourglassHalf, faLayerGroup, faLocationDot, faLockOpen, faNetworkWired, faPause, faShieldHalved, faSliders } from "@fortawesome/free-solid-svg-icons";
+import { faBullseye, faCheck, faCircleInfo, faClock, faCircleNodes, faFlask, faHourglassHalf, faLayerGroup, faLocationDot, faLockOpen, faNetworkWired, faPause, faShieldHalved, faSliders } from "@fortawesome/free-solid-svg-icons";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 
 const presetIcons = {
@@ -21,7 +21,7 @@ const presetLabels = {
 const savedDateFormatter = new Intl.DateTimeFormat("en-GB", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" });
 const datasetLabel = (key) => `${key[0].toUpperCase()}${key.slice(1)} trade`;
 
-function ScenarioSlot({ slot, index, context, onSave, onLoad }) {
+function ScenarioSlot({ slot, index, context, active, onSave, onLoad }) {
   const [name, setName] = useState(slot?.name || "");
   const inputId = useId();
   const hintId = useId();
@@ -31,9 +31,9 @@ function ScenarioSlot({ slot, index, context, onSave, onLoad }) {
   const label = `Scenario ${index + 1}`;
 
   return (
-    <article className={`scenario-slot${slot ? " is-saved" : ""}`}>
+    <article className={`scenario-slot${slot ? " is-saved" : ""}${active ? " is-active" : ""}`}>
       <div className="scenario-slot__heading">
-        <label htmlFor={inputId}><span>{String(index + 1).padStart(2, "0")}</span> {slot ? "Saved scenario" : "Empty slot"}</label>
+        <label htmlFor={inputId}><span>{String(index + 1).padStart(2, "0")}</span> {active && <FontAwesomeIcon icon={faCheck} aria-hidden="true" />} {slot ? active ? "Active scenario" : "Saved scenario" : "Empty slot"}</label>
         {slot && <time dateTime={slot.savedAt}>{savedDateFormatter.format(new Date(slot.savedAt))}</time>}
       </div>
       <input id={inputId} type="text" maxLength={48} value={name} placeholder={label} aria-label={`${label} name`} disabled={disabled} onChange={(event) => setName(event.target.value)} />
@@ -92,16 +92,17 @@ function PresetHelp({ preset, context }) {
   );
 }
 
-export const ScenarioPresets = memo(function ScenarioPresets({ context, onLoadPreset, Info }) {
+export const ScenarioPresets = memo(function ScenarioPresets({ context, activePresetId, onLoadPreset, Info }) {
   const disabled = !context || context.disabled;
   return (
     <div className="scenario-presets" role="group" aria-label="Intervention presets">
       <span className="scenario-presets__heading" aria-hidden="true">Presets</span>
       {(context?.presets || []).map((preset) => (
-        <div key={preset.id} className="scenario-preset">
-          <button type="button" disabled={disabled} onClick={() => onLoadPreset(preset.id)} aria-label={`Load ${preset.label} preset`}>
+        <div key={preset.id} className={`scenario-preset${preset.id === activePresetId ? " is-active" : ""}`}>
+          <button type="button" disabled={disabled} aria-pressed={preset.id === activePresetId} onClick={() => onLoadPreset(preset.id)} aria-label={`Load ${preset.label} preset`}>
             <span className="scenario-preset__icon"><FontAwesomeIcon icon={presetIcons[preset.id]} aria-hidden="true" /></span>
             <span className="scenario-preset__label">{presetLabels[preset.id]}</span>
+            {preset.id === activePresetId && <FontAwesomeIcon className="scenario-preset__active" icon={faCheck} aria-hidden="true" />}
           </button>
           <Info label={preset.label} rich><PresetHelp preset={preset} context={context} /></Info>
         </div>
@@ -110,7 +111,7 @@ export const ScenarioPresets = memo(function ScenarioPresets({ context, onLoadPr
   );
 });
 
-export const ScenarioLibrary = memo(function ScenarioLibrary({ id, panelRef, open, context, slots, onSaveScenario, onLoadScenario, Info }) {
+export const ScenarioLibrary = memo(function ScenarioLibrary({ id, panelRef, open, context, slots, activeSlot, onSaveScenario, onLoadScenario, Info }) {
   const headingId = useId();
   return (
     <section ref={panelRef} id={id} className="scenario-library" hidden={!open} aria-labelledby={headingId}>
@@ -123,7 +124,7 @@ export const ScenarioLibrary = memo(function ScenarioLibrary({ id, panelRef, ope
         ]} footer="Three slots · Saved in this browser">Keep complete scenarios to revisit and compare.</Info>
       </div>
       <div className="scenario-slot-grid">
-        {Array.from({ length: 3 }, (_, index) => <ScenarioSlot key={index} slot={slots[index]} index={index} context={context} onSave={onSaveScenario} onLoad={onLoadScenario} />)}
+        {Array.from({ length: 3 }, (_, index) => <ScenarioSlot key={index} slot={slots[index]} index={index} context={context} active={activeSlot === index} onSave={onSaveScenario} onLoad={onLoadScenario} />)}
       </div>
     </section>
   );

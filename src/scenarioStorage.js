@@ -1,5 +1,30 @@
 export const scenarioStorageKey = "herdlink.scenarios.v1";
 
+export function scenarioSignature(scenario) {
+  if (!scenario?.datasetKey || !Array.isArray(scenario.dates) || !scenario.settings ||
+    !Array.isArray(scenario.nodeInterventions) || !Array.isArray(scenario.linkInterventions)) return null;
+  const objectEntries = (value) => Object.entries(value).sort(([a], [b]) => a.localeCompare(b));
+  const pair = (entry) => {
+    if (!Array.isArray(entry) || entry.length !== 2) throw new Error("Invalid scenario entry.");
+    return entry;
+  };
+  const schedule = (entries, nodes) => entries.map((entry) => {
+    const [time, changes] = pair(entry);
+    return [time, changes.map((change) => {
+      const [id, value] = pair(change);
+      return [id, nodes ? objectEntries(value) : value];
+    }).sort(([a], [b]) => a.localeCompare(b))];
+  }).sort(([a], [b]) => a - b);
+  try {
+    return JSON.stringify([
+      scenario.datasetKey, scenario.dates, objectEntries(scenario.settings),
+      schedule(scenario.nodeInterventions, true), schedule(scenario.linkInterventions, false),
+    ]);
+  } catch {
+    return null;
+  }
+}
+
 export function readScenarioSlots(storage) {
   const stored = storage.getItem(scenarioStorageKey);
   if (stored === null) return [null, null, null];

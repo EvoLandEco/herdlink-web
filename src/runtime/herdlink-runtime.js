@@ -1600,6 +1600,9 @@
               datasetKey: currentTimeSpan,
               datasetLabel: currentTimeSpan ? `${currentTimeSpan[0].toUpperCase()}${currentTimeSpan.slice(1)} trade` : "Animal trade network",
               settings, seedLabel, contactNote, timingNote, disabled: areScenarioControlsDisabled(),
+              nodeInterventions: Array.from(simulationNodeInterventions, ([time, changes]) =>
+                [time, Array.from(changes, ([id, directions]) => [id, { ...directions }])]),
+              linkInterventions: Array.from(simulationLinkInterventions, ([time, changes]) => [time, Array.from(changes)]),
               note: "Broader closures can block more trade without further reducing infection when seed exports are already contained.",
               presets: [
                 { id: "open-trade", label: "Open trade", delayDays: 0, summary: "All routes available",
@@ -1715,10 +1718,18 @@
                 document.getElementById(`simulation${suffix}`).value = settings[key];
               }
             }
-            const serialize = (_, value) => value instanceof Map ? Array.from(value) : value;
+            const sameSchedule = (next, current) => next.size === current.size && Array.from(next).every(([time, changes]) => {
+              const existing = current.get(time);
+              return existing?.size === changes.size && Array.from(changes).every(([id, value]) => {
+                const previous = existing.get(id);
+                return typeof value === "boolean" ? value === previous : previous &&
+                  Object.keys(value).length === Object.keys(previous).length &&
+                  Object.keys(value).every((key) => value[key] === previous[key]);
+              });
+            });
             if (!settingsChanged && !comparisonDataError && !networkStatsDirtyDates.size && networkStatsDirtyFrom === null &&
-              JSON.stringify([nodeInterventions, linkInterventions], serialize) ===
-              JSON.stringify([simulationNodeInterventions, simulationLinkInterventions], serialize)) return;
+              sameSchedule(nodeInterventions, simulationNodeInterventions) &&
+              sameSchedule(linkInterventions, simulationLinkInterventions)) return;
             simulationNodeInterventions.clear();
             simulationLinkInterventions.clear();
             for (const [time, changes] of nodeInterventions) simulationNodeInterventions.set(time, changes);
@@ -1816,7 +1827,12 @@
                 : `The ${preset.delayDays}-day response delay ends beyond the recorded dates. No restrictions are applied; trade stays open.`;
             }
             applyScenario(nodes, new Map(), null, preset.label);
-            return { label: preset.label, detail };
+            return { label: preset.label, detail, scenario: {
+              datasetKey: currentTimeSpan, dates: uniqueDates.map((date) => date.toISOString()), settings,
+              nodeInterventions: Array.from(nodes, ([time, changes]) =>
+                [time, Array.from(changes, ([id, directions]) => [id, { ...directions }])]),
+              linkInterventions: [],
+            } };
           }
 
           function getComparisonData() {

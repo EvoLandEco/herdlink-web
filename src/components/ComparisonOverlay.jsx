@@ -436,7 +436,7 @@ function ComparisonContent({ data, animate }) {
   );
 }
 
-export function ComparisonOverlay({ open, data, recomputing = false, onClose, onModeChange, scenarioSlots = [null, null, null], scenarioError, scenarioNotice, onLoadPreset, onSaveScenario, onLoadScenario }) {
+export function ComparisonOverlay({ open, data, recomputing = false, onClose, onModeChange, scenarioSlots = [null, null, null], activePresetId, activeScenarioSlot = null, scenarioError, scenarioNotice, onLoadPreset, onSaveScenario, onLoadScenario }) {
   const dialogRef = useRef(null);
   const closeRef = useRef(null);
   const scenariosToggleRef = useRef(null);
@@ -495,10 +495,10 @@ export function ComparisonOverlay({ open, data, recomputing = false, onClose, on
         <h2 id={titleId} className="comparison-header__title"><FontAwesomeIcon icon={faCodeCompare} aria-hidden="true" />Compare Scenarios</h2>
         <div className="comparison-header__actions">
           <div className="comparison-scenario-actions">
-            <ScenarioPresets context={context} onLoadPreset={onLoadPreset} Info={ComparisonInfo} />
-            <button ref={scenariosToggleRef} type="button" className="comparison-scenarios-toggle" disabled={busy} aria-expanded={scenariosOpen} aria-controls={libraryId} onClick={() => setScenariosOpen((value) => !value)}>
+            <ScenarioPresets context={context} activePresetId={activePresetId} onLoadPreset={onLoadPreset} Info={ComparisonInfo} />
+            <button ref={scenariosToggleRef} type="button" className={`comparison-scenarios-toggle${activeScenarioSlot !== null ? " has-active-scenario" : ""}`} disabled={busy} aria-expanded={scenariosOpen} aria-controls={libraryId} onClick={() => setScenariosOpen((value) => !value)}>
               <FontAwesomeIcon icon={faLayerGroup} aria-hidden="true" />
-              Custom
+              Custom{activeScenarioSlot !== null ? ` ${String(activeScenarioSlot + 1).padStart(2, "0")}` : ""}
               <span aria-hidden="true">{scenariosOpen ? "−" : "+"}</span>
             </button>
           </div>
@@ -526,7 +526,7 @@ export function ComparisonOverlay({ open, data, recomputing = false, onClose, on
           <ComparisonContent data={displayedData} animate={open && !busy} />
         </div>
         {scenariosOpen && <button type="button" className="comparison-custom-backdrop" aria-label="Close custom scenarios" tabIndex={-1} onClick={closeScenarios} />}
-        <ScenarioLibrary id={libraryId} panelRef={libraryRef} open={scenariosOpen} context={context} slots={scenarioSlots}
+        <ScenarioLibrary id={libraryId} panelRef={libraryRef} open={scenariosOpen} context={context} slots={scenarioSlots} activeSlot={activeScenarioSlot}
           onSaveScenario={onSaveScenario}
           onLoadScenario={(index) => { closeScenarios(); onLoadScenario(index); }} Info={ComparisonInfo} />
         {busy && displayedData?.status === "ready" && <div className="comparison-recomputing" aria-hidden="true">

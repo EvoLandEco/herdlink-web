@@ -105,6 +105,8 @@ test("opening waits for runtime registration, respects capture and viewport lock
         return [value, (value) => { slot.value = value; }];
       },
       useCallback: (callback) => callback,
+      useMemo: (calculate) => calculate(),
+      scenarioSignature: () => null,
       useRef: (current) => ({ current }),
       useEffect() {},
       useLayoutEffect() {},

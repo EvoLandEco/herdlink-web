@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { readScenarioSlots, saveScenarioSlot, scenarioStorageKey } from "../src/scenarioStorage.js";
+import { readScenarioSlots, saveScenarioSlot, scenarioSignature, scenarioStorageKey } from "../src/scenarioStorage.js";
 
 const scenario = {
   schemaVersion: 1, datasetKey: "weekly", dates: ["2020-01-05T00:00:00.000Z"],
@@ -52,5 +52,55 @@ test("invalid records are reported without overwriting browser data", () => {
     assert.throws(() => readScenarioSlots(local));
     assert.throws(() => saveScenarioSlot(local, 1, "Saved", scenario));
     assert.equal(local.getItem(scenarioStorageKey), raw);
+  }
+});
+
+test("scenario signatures ignore entry order and slot labels while preserving the complete configuration", () => {
+  const value = {
+    ...scenario,
+    nodeInterventions: [[2, [["CR02", { imports: false, exports: true }], ["CR01", { exports: false }]]],
+      [1, [["CR03", { imports: false }]]]],
+    linkInterventions: [[2, [["CR01-CR02", true], ["CR02-CR01", true]]], [1, [["CR01-CR02", true]]]],
+  };
+  const before = JSON.stringify(value);
+  const reordered = {
+    ...value, settings: Object.fromEntries(Object.entries(value.settings).reverse()),
+    nodeInterventions: value.nodeInterventions.toReversed().map(([time, changes]) =>
+      [time, changes.toReversed().map(([id, directions]) => [id, Object.fromEntries(Object.entries(directions).reverse())])]),
+    linkInterventions: value.linkInterventions.toReversed().map(([time, changes]) => [time, changes.toReversed()]),
+  };
+  assert.equal(scenarioSignature(reordered), scenarioSignature(value));
+  assert.equal(JSON.stringify(value), before);
+  for (const changed of [
+    { ...value, datasetKey: "daily" },
+    { ...value, dates: [...value.dates, "2020-01-12T00:00:00.000Z"] },
+    ...Object.keys(value.settings).map((key) => ({ ...value, settings: { ...value.settings,
+      [key]: typeof value.settings[key] === "number" ? value.settings[key] + 0.1 : `${value.settings[key]} changed` } })),
+    { ...value, nodeInterventions: value.nodeInterventions.slice(1) },
+    { ...value, linkInterventions: value.linkInterventions.slice(1) },
+  ]) assert.notEqual(scenarioSignature(changed), scenarioSignature(value));
+  assert.equal(scenarioSignature(null), null);
+  assert.equal(scenarioSignature({ ...value, nodeInterventions: [null] }), null);
+});
+
+test("malformed date, region and route tuples cannot match a valid scenario signature", () => {
+  const valid = {
+    ...scenario,
+    nodeInterventions: [[1578182400000, [["CR35", { exports: false }]]]],
+    linkInterventions: [[1578182400000, [["CR35-CR02", true]]]],
+  };
+  for (const kind of ["nodeInterventions", "linkInterventions"]) {
+    for (const location of ["date", "change"]) {
+      const malformed = structuredClone(valid);
+      const entry = location === "date" ? malformed[kind][0] : malformed[kind][0][1][0];
+      entry.push("invalid field");
+      const local = storage();
+      local.setItem(scenarioStorageKey, JSON.stringify({ version: 1, slots: [
+        { name: "Broken entry", savedAt: "2026-09-14T00:00:00.000Z", scenario: malformed }, null, null,
+      ] }));
+      const loaded = readScenarioSlots(local)[0].scenario;
+      assert.equal(scenarioSignature(loaded), null);
+      assert.notEqual(scenarioSignature(loaded), scenarioSignature(valid));
+    }
   }
 });

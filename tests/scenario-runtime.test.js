@@ -75,6 +75,21 @@ test("scenario context reads live ledger settings without running simulations an
   assert.equal(value.disabled, true);
 });
 
+test("scenario context and preset results retain independent intervention snapshots", () => {
+  const { context } = runtime();
+  const result = context.loadPreset("seed-containment");
+  const snapshot = context.getScenarioContext();
+  const before = plain(result.scenario);
+  assert.deepEqual(plain(snapshot.nodeInterventions), before.nodeInterventions);
+  assert.deepEqual(plain(result.scenario.dates), context.uniqueDates.map((date) => date.toISOString()));
+  context.simulationNodeInterventions.get(context.uniqueDates[1].getTime()).get("CR01").exports = true;
+  context.simulationNodeInterventions.clear();
+  context.simulationLinkInterventions.set(context.uniqueDates[0].getTime(), new Map([["CR01-CR02", true]]));
+  assert.deepEqual(plain(result.scenario), before);
+  assert.deepEqual(plain(snapshot.nodeInterventions), before.nodeInterventions);
+  assert.deepEqual(plain(snapshot.linkInterventions), []);
+});
+
 test("presets replace complete schedules once and preserve model controls and displayed mode", () => {
   for (const mode of ["trade", "simulation"]) {
     for (const id of ["open-trade", "seed-containment", "partner-ring", "hub-controls", "temporary-standstill", "delayed-response"]) {
@@ -134,6 +149,42 @@ test("scenario loading recalculates changed settings, pending statistics and fai
   context.loadPreset("open-trade");
   assert.equal(applied.length, 3);
   assert.equal(context.comparisonDataError, null);
+});
+
+test("scenario loads reuse matching schedules regardless of date, region, route and permission order", () => {
+  for (const mode of ["trade", "simulation"]) {
+    const { context, applied } = runtime();
+    context.appDataMode = mode;
+    context.simulationState.status = mode === "simulation" ? "ready" : "idle";
+    const [first, second] = context.uniqueDates.map((date) => date.getTime());
+    context.simulationNodeInterventions = new Map([
+      [first, new Map([["CR01", { exports: false, imports: true }], ["CR02", { imports: false }]])],
+      [second, new Map([["CR01", { exports: true }]])],
+    ]);
+    context.simulationLinkInterventions = new Map([
+      [first, new Map([["CR01-CR02", true], ["CR02-CR03", true]])],
+      [second, new Map([["CR03-CR01", true]])],
+    ]);
+    const saved = plain(context.captureScenario());
+    saved.nodeInterventions.reverse();
+    saved.linkInterventions.reverse();
+    for (const [, changes] of saved.nodeInterventions) {
+      changes.reverse();
+      for (const change of changes) change[1] = Object.fromEntries(Object.entries(change[1]).reverse());
+    }
+    for (const [, changes] of saved.linkInterventions) changes.reverse();
+    context.loadScenario(saved);
+    assert.equal(applied.length, 0);
+    const edited = structuredClone(saved);
+    edited.nodeInterventions[0][1][0][1].exports = false;
+    context.loadScenario(edited);
+    assert.equal(applied.length, 1);
+    context.networkStatsDirtyFrom = null;
+    const routeEdit = structuredClone(edited);
+    routeEdit.linkInterventions[0][1][0][0] = "CR01-CR03";
+    context.loadScenario(routeEdit);
+    assert.equal(applied.length, 2);
+  }
 });
 
 test("partner and hub targets use positive cross-region records with first-step partners and stable volume ties", () => {

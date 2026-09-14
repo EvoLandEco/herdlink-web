@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
-import { readScenarioSlots, saveScenarioSlot, scenarioStorageKey } from "./scenarioStorage";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { readScenarioSlots, saveScenarioSlot, scenarioSignature, scenarioStorageKey } from "./scenarioStorage";
 
 export function isComparisonShortcut(event) {
   return !event.defaultPrevented && !event.repeat && !event.isComposing &&
@@ -15,9 +15,22 @@ export function useComparison(hasSupportedScreen) {
   const [scenarioError, setScenarioError] = useState("");
   const [scenarioNotice, setScenarioNotice] = useState("");
   const [recomputing, setRecomputing] = useState(false);
+  const [loadedPresets, setLoadedPresets] = useState([]);
+  const [selectedScenario, setSelectedScenario] = useState(null);
   const openRef = useRef(false);
   const operationRef = useRef(null);
   const restoreFocusRef = useRef(null);
+  const pendingScenarioRef = useRef(null);
+  const currentSignature = useMemo(() => data?.status === "ready" && data.scenarioContext
+    ? scenarioSignature({ ...data.scenarioContext, dates: data.dates }) : null, [data]);
+  const slotSignatures = useMemo(() => scenarioSlots.map((slot) => scenarioSignature(slot?.scenario)), [scenarioSlots]);
+  const canMarkActive = !recomputing && currentSignature !== null;
+  const matchingPreset = loadedPresets.find((preset) => preset.signature === currentSignature);
+  const activePresetId = !canMarkActive ? null : matchingPreset
+    ? matchingPreset.id : !data.scenarioContext.nodeInterventions.length && !data.scenarioContext.linkInterventions.length
+      ? "open-trade" : null;
+  const activeScenarioSlot = canMarkActive && selectedScenario?.signature === currentSignature &&
+    slotSignatures[selectedScenario.index] === currentSignature ? selectedScenario.index : null;
 
   useLayoutEffect(() => {
     if (recomputing) return;
@@ -64,6 +77,7 @@ export function useComparison(hasSupportedScreen) {
     if (!openRef.current || operationRef.current) return;
     const operation = { frame: null, started: false };
     operationRef.current = operation;
+    pendingScenarioRef.current = null;
     restoreFocusRef.current = document.activeElement;
     setRecomputing(true);
     setScenarioError("");
@@ -86,6 +100,8 @@ export function useComparison(hasSupportedScreen) {
   const loadPreset = useCallback((id) => {
     runScenarioLoad(() => {
       const result = window.herdlinkComparison.loadPreset(id);
+      const signature = scenarioSignature(result.scenario);
+      pendingScenarioRef.current = signature ? { id, signature } : null;
       setScenarioNotice(`${result.label} loaded. ${result.detail || ""}`.trim());
     }, "The preset could not be loaded.");
   }, [runScenarioLoad]);
@@ -98,6 +114,8 @@ export function useComparison(hasSupportedScreen) {
       const scenario = window.herdlinkComparison.captureScenario();
       const slots = saveScenarioSlot(window.localStorage, index, name, scenario);
       setScenarioSlots(slots);
+      const signature = scenarioSignature(scenario);
+      setSelectedScenario(signature ? { index, signature } : null);
       setScenarioNotice(`${slots[index].name} saved in this browser.`);
     } catch (error) {
       setScenarioError(`Could not save the scenario. ${error.message}`);
@@ -111,6 +129,8 @@ export function useComparison(hasSupportedScreen) {
       const slot = slots[index];
       if (!slot) throw new Error("This scenario slot is empty.");
       window.herdlinkComparison.loadScenario(slot.scenario);
+      const signature = scenarioSignature(slot.scenario);
+      pendingScenarioRef.current = signature ? { index, signature } : null;
       setScenarioNotice(`${slot.name} loaded with its saved model settings and seed region.`);
     }, "The saved scenario could not be loaded.");
   }, [runScenarioLoad]);
@@ -144,6 +164,19 @@ export function useComparison(hasSupportedScreen) {
         try {
           const next = window.herdlinkComparison?.read() || null;
           setData(next);
+          if (pendingScenarioRef.current && ["ready", "error", "empty"].includes(next?.status)) {
+            if (next.status === "ready" && pendingScenarioRef.current.signature ===
+              scenarioSignature({ ...next.scenarioContext, dates: next.dates })) {
+              const scenario = pendingScenarioRef.current;
+              if (scenario.id !== undefined) {
+                setLoadedPresets((previous) => [scenario, ...previous.filter((entry) => entry.id !== scenario.id)]);
+                setSelectedScenario(null);
+              } else {
+                setSelectedScenario(scenario);
+              }
+            }
+            pendingScenarioRef.current = null;
+          }
           if (operationRef.current?.started && ["ready", "error", "empty"].includes(next?.status)) {
             operationRef.current = null;
             setRecomputing(false);
@@ -151,6 +184,7 @@ export function useComparison(hasSupportedScreen) {
         } catch (error) {
           console.error("Unable to calculate comparison:", error);
           setData({ status: "error" });
+          pendingScenarioRef.current = null;
           if (operationRef.current?.started) {
             operationRef.current = null;
             setRecomputing(false);
@@ -184,5 +218,6 @@ export function useComparison(hasSupportedScreen) {
   }, [hasSupportedScreen, toggle, changeMode]);
 
   return { open, data, recomputing, close, toggle, changeMode, scenarioSlots, scenarioError, scenarioNotice,
+    activePresetId, activeScenarioSlot,
     loadPreset, saveScenario, loadScenario };
 }

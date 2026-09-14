@@ -932,6 +932,8 @@ export default function App() {
           onClose={comparison.close}
           onModeChange={comparison.changeMode}
           scenarioSlots={comparison.scenarioSlots}
+          activePresetId={comparison.activePresetId}
+          activeScenarioSlot={comparison.activeScenarioSlot}
           scenarioError={comparison.scenarioError}
           scenarioNotice={comparison.scenarioNotice}
           onLoadPreset={comparison.loadPreset}
