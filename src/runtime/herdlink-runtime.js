@@ -4507,6 +4507,7 @@
                 element.disabled = disabled || (element.id === "simulationIntroductionDate" && !getPresetSettings().ready);
               });
             setModeSwitcherDisabled(disabled);
+            renderSimulationTimeline();
           }
 
           function configureSimulationModeUi(active) {
@@ -11759,7 +11760,50 @@
             window.isDoingTemporalUpdate = false;
           }
     
+          function renderSimulationTimeline() {
+            const lane = document.getElementById("simulationTimeline");
+            if (!lane) return;
+            const trajectory = simulationState.trajectory;
+            lane.hidden = !isSimulationModeActive() || window.isSwitchingCSV ||
+              simulationState.status !== "ready" || !trajectory?.frames.length;
+            const chart = d3.select(lane).select("svg");
+            if (lane.hidden) {
+              chart.datum(null).selectAll("path").datum(null);
+              return;
+            }
+
+            let geometry = chart.datum();
+            if (geometry?.trajectory !== trajectory) {
+              const frames = trajectory.frames;
+              const peak = d3.max(frames, (frame) => frame.summary.prevalence);
+              const x = (index) => frames.length === 1 ? 500 : index / (frames.length - 1) * 1000;
+              const y = (frame) => 32 - (peak > 0 ? frame.summary.prevalence / peak * 28 : 0);
+              const line = d3.line().x((frame, index) => x(index)).y(y);
+              const area = d3.area().x((frame, index) => x(index)).y0(32).y1(y);
+              chart.selectAll(".simulation-timeline-curve").attr("d", line(frames));
+              chart.selectAll(".simulation-timeline-area").attr("d", area(frames));
+
+              const introductionTime = trajectory.settings.introductionDate
+                ? Date.parse(trajectory.settings.introductionDate) : frames[0].date.getTime();
+              const index = frames.findIndex((frame) => frame.date.getTime() >= introductionTime);
+              const marker = lane.querySelector(".simulation-timeline-introduction");
+              marker.hidden = index < 0;
+              if (index >= 0) {
+                marker.style.left = `${x(index) / 10}%`;
+                marker.setAttribute("aria-label", `Simulation introduction: ${new Date(introductionTime).toISOString().slice(0, 10)}`);
+              }
+              geometry = { trajectory, x, y };
+              chart.datum(geometry);
+            }
+
+            const index = +document.getElementById("timeSlider").value;
+            const point = lane.querySelector(".simulation-timeline-current");
+            point.style.left = `${geometry.x(index) / 10}%`;
+            point.style.top = `${geometry.y(trajectory.frames[index])}px`;
+          }
+
           function updateCurrentDateDisplay(dateObj) {
+            renderSimulationTimeline();
             window.herdlinkComparison?.refresh();
             // Display the current date widget
             const currendDateWidget = document.querySelector(
@@ -14345,14 +14389,33 @@
                     '<i class="fa-solid fa-clock-rotate-left"></i>';
                   timeControls.appendChild(fromStartBtn);
     
-                  // Create a slider.
+                  const sliderLane = document.createElement("div");
+                  sliderLane.className = "time-slider-lane";
+                  sliderLane.innerHTML = `
+                    <div id="simulationTimeline" class="simulation-timeline" hidden>
+                      <svg viewBox="0 0 1000 36" preserveAspectRatio="none" role="img" aria-label="Simulated prevalence across the timeline">
+                        <defs>
+                          <linearGradient id="timelinePrevalenceFill" x1="0" y1="0" x2="0" y2="1">
+                            <stop offset="0%" stop-color="#f28b96" stop-opacity="0.26" />
+                            <stop offset="100%" stop-color="#f28b96" stop-opacity="0.02" />
+                          </linearGradient>
+                        </defs>
+                        <path class="simulation-timeline-area" />
+                        <path class="simulation-timeline-curve" />
+                      </svg>
+                      <span class="simulation-timeline-introduction" role="img" hidden></span>
+                      <span class="simulation-timeline-current" aria-hidden="true"></span>
+                    </div>`;
+                  timeControls.appendChild(sliderLane);
+
                   const slider = document.createElement("input");
                   slider.type = "range";
                   slider.id = "timeSlider";
+                  slider.setAttribute("aria-label", "Timeline");
                   slider.min = 0;
                   slider.max = uniqueDates.length - 1;
                   slider.value = 0;
-                  timeControls.appendChild(slider);
+                  sliderLane.appendChild(slider);
     
                   // Store the loaded data for later use.
                   loadedCSVData = data;

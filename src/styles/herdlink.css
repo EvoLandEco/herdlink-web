@@ -1430,10 +1430,19 @@ body.focus-mode-active .network-score-toolbar { max-width: calc(50% - 110px); }
   margin: 0;
 }
 
-#timeControlsContainer input[type="range"] {
+.time-slider-lane {
+  position: relative;
   flex: 1;
-  width: 100%;
+  min-width: 0;
+  height: 14px;
   margin: 0 5px;
+}
+
+#timeControlsContainer input[type="range"] {
+  display: block;
+  width: 100%;
+  height: 14px;
+  margin: 0;
   -webkit-appearance: none;
   background: transparent;
   cursor: var(--cursor-pointer);
@@ -1476,6 +1485,82 @@ body.focus-mode-active .network-score-toolbar { max-width: calc(50% - 110px); }
 
 #timeControlsContainer input[type="range"]::-moz-range-thumb:hover {
   transform: scale(1.1);
+}
+
+.simulation-timeline {
+  position: absolute;
+  left: 7px;
+  right: 7px;
+  bottom: 13px;
+  height: 36px;
+  pointer-events: none;
+}
+
+body:not(.simulation-mode-active) .simulation-timeline,
+.simulation-timeline[hidden] {
+  display: none;
+}
+
+.simulation-timeline svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+}
+
+.simulation-timeline-area {
+  fill: url(#timelinePrevalenceFill);
+}
+
+.simulation-timeline-curve {
+  fill: none;
+  stroke: #f28b96;
+  stroke-width: 1.5px;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  vector-effect: non-scaling-stroke;
+  filter: drop-shadow(0 0 3px rgb(242 139 150 / 28%));
+}
+
+.simulation-timeline-introduction {
+  position: absolute;
+  top: 0;
+  bottom: -10px;
+  width: 1px;
+  background: linear-gradient(transparent, #c8b6ff);
+  box-shadow: 0 0 5px rgb(200 182 255 / 35%);
+}
+
+.simulation-timeline-introduction::after {
+  content: "";
+  position: absolute;
+  left: -3px;
+  bottom: 1px;
+  width: 7px;
+  height: 7px;
+  border-radius: 1px;
+  background: #e5dbff;
+  transform: rotate(45deg);
+  box-shadow: 0 0 7px rgb(200 182 255 / 65%);
+}
+
+.simulation-timeline-current {
+  position: absolute;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: #fff0f2;
+  box-shadow: 0 0 6px rgb(242 139 150 / 65%);
+  transform: translate(-50%, -50%);
+}
+
+body.simulation-mode-active .current-date-widget {
+  top: calc(100% - var(--time-slider-center-bottom) + 10px);
+  bottom: auto;
+}
+
+body.simulation-mode-active .time-author-credit {
+  display: none !important;
 }
 
 #timeControlsContainer button:focus,
