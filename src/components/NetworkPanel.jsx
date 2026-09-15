@@ -144,7 +144,13 @@ export function NetworkPanel({ onOpenComparison }) {
           <i className="fa-solid fa-circle-info" aria-hidden="true"></i>
         </button>
       </div>
-      <svg id="mainFigureSVG"></svg>
+      <div id="networkFocusIndicator" className="network-focus-indicator" role="group" aria-label="Region focus" hidden>
+        <strong id="networkFocusRegion" role="status" aria-live="polite" aria-atomic="true"></strong>
+        <button id="exitFocusButton" type="button" aria-label="Exit focus mode" aria-keyshortcuts="Q">
+          Exit focus <kbd>Q</kbd>
+        </button>
+      </div>
+      <svg id="mainFigureSVG" tabIndex="-1"></svg>
       <div className="watermark">
         <span className="watermark-text"></span>
         <img

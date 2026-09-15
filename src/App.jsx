@@ -32,7 +32,7 @@ const runtimeScripts = [
 ];
 
 const scriptLoaders = new Map();
-const minimumViewportWidth = 720;
+const minimumViewportWidth = 1024;
 const minimumScreenEdge = 600;
 const tooltipGap = 10;
 const tooltipMargin = 8;
@@ -226,7 +226,7 @@ const richTips = {
       ["Total Volume", "Total livestock movement volume across all active routes."],
       ["Avg. Volume/Route", "Average volume carried by each active route."],
       ["Avg. Volume/Area", "Average volume associated with each active region."],
-      ["Communities", "Number of fixed communities across the full loaded period at the selected community scale."],
+      ["Risk Score", "Spectral radius relative to the highest unrestricted value across the loaded period at this temporal resolution. A score of 1 marks that reference peak."],
       ["Modularity", "Agreement of each date's trade with those fixed communities at the selected resolution. Compare values at the same community scale; scores can be negative."],
       ["Spectral Radius", "A network pressure score tied to amplification potential."],
     ],
@@ -980,7 +980,7 @@ export default function App() {
 
   return (
     <>
-      {!hasSupportedScreen && <ScreenSizeNotice reason={screenRequirement} />}
+      {!hasSupportedScreen && <ScreenSizeNotice reason={screenRequirement} minimumWidth={minimumViewportWidth} />}
       <div
         className={`screen-access-content${
           hasSupportedScreen ? "" : " is-screen-blocked"

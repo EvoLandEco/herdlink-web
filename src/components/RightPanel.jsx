@@ -4,7 +4,7 @@ const globalMetrics = [
   { value: "totalTradeVolume", label: "Total Volume" },
   { value: "avgTradeEdge", label: "Avg. Volume/Route" },
   { value: "avgTradeNode", label: "Avg. Volume/Area" },
-  { value: "numPartitions", label: "Communities" },
+  { value: "riskScore", label: "Risk Score" },
   { value: "modularity", label: "Modularity" },
   { value: "spectralRadius", label: "Spectral Radius" },
 ];

@@ -54,7 +54,7 @@ test("ledger node colors follow the current partition after a same-date network 
       },
     },
   });
-  vm.runInContext(extractFunction("updateNetworkStats"), context);
+  vm.runInContext(["getLedgerRiskScore", "updateNetworkStats"].map(extractFunction).join("\n"), context);
   context.updateNetworkStats();
   assert.deepEqual(Array.from(fills.values()), ["partition-1", "partition-2"]);
   assert.deepEqual(colorDomain, [1, 2]);
@@ -63,6 +63,51 @@ test("ledger node colors follow the current partition after a same-date network 
   context.updateNetworkStats();
   assert.deepEqual(Array.from(fills.values()), ["partition-3", "partition-3"]);
   assert.deepEqual(colorDomain, [3]);
+});
+
+test("risk score projects cached radii against the shared fixed baseline while preserving other metrics", () => {
+  const stats = Object.freeze({
+    "2020-01-15T00:00:00.000Z": Object.freeze({ spectralRadius: 0, totalTradeVolume: 100 }),
+    "2020-01-01T00:00:00.000Z": Object.freeze({ spectralRadius: 10, totalTradeVolume: 500 }),
+    "2020-01-08T00:00:00.000Z": Object.freeze({ spectralRadius: 8, totalTradeVolume: 300 }),
+  });
+  const context = vm.createContext({
+    window: { allTemporalStats: stats }, ledgerBaselineSpectralRadius: 20,
+    computeSpectralRadius() { assert.fail("Chart projection uses cached radii"); },
+  });
+  const chart = extractFunction("updateGlobalStatsChart");
+  const projection = chart.slice(chart.indexOf("const data = Object.keys(window.allTemporalStats)"), chart.indexOf("// Define scales."));
+  assert.match(projection, /const data =/);
+  vm.runInContext(`${extractFunction("getLedgerRiskScore")}\nfunction project(selectedStat) { ${projection}\nreturn data; }`, context);
+  const series = context.project("riskScore");
+  assert.deepEqual(Array.from(series, ({ date }) => date.toISOString()), Object.keys(stats).sort());
+  assert.deepEqual(Array.from(series, ({ value }) => value), [0.5, 0.4, 0]);
+  assert.equal(series[1].value, context.getLedgerRiskScore(stats["2020-01-08T00:00:00.000Z"].spectralRadius));
+  assert.equal(context.getLedgerRiskScore(40), 2);
+  for (const baseline of [20, 0]) {
+    context.ledgerBaselineSpectralRadius = baseline;
+    assert.deepEqual(Array.from(context.project("spectralRadius"), ({ value }) => value), [10, 8, 0]);
+    assert.deepEqual(Array.from(context.project("totalTradeVolume"), ({ value }) => value), [500, 300, 100]);
+  }
+  assert.deepEqual(Array.from(context.project("riskScore"), ({ value }) => value), [0, 0, 0]);
+  assert.equal(context.getLedgerRiskScore(0), 0);
+});
+
+test("zero-valued global series retain a visible axis range and ordinary series keep their padding", () => {
+  const chart = extractFunction("updateGlobalStatsChart");
+  const domain = chart.slice(chart.indexOf("const minValue ="), chart.indexOf("const y = d3.scaleLinear()"));
+  assert.match(domain, /let yDomain/);
+  const context = vm.createContext({
+    d3: {
+      min: (items, value) => Math.min(...items.map(value)),
+      max: (items, value) => Math.max(...items.map(value)),
+    },
+  });
+  vm.runInContext(`function getDomain(values) { const data = values.map(value => ({ value })); ${domain}\nreturn yDomain; }`, context);
+  assert.deepEqual(Array.from(context.getDomain([0, 0, 0])), [0, 1]);
+  assert.deepEqual(Array.from(context.getDomain([0, 10])), [0, 11]);
+  assert.deepEqual(Array.from(context.getDomain([2, 4])), [1.8, 4.4]);
+  assert.deepEqual(Array.from(context.getDomain([-2, 4])), [-2.2, 4.4]);
 });
 
 test("radar axes remain finite when restrictions remove a metric across all dates", () => {

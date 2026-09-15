@@ -6,7 +6,7 @@ import {
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import { useState } from "react";
 
-export function ScreenSizeNotice({ reason }) {
+export function ScreenSizeNotice({ reason, minimumWidth }) {
   const [copyLabel, setCopyLabel] = useState("Copy URL");
   const needsLandscape = reason === "landscape";
 
@@ -56,7 +56,7 @@ export function ScreenSizeNotice({ reason }) {
         <p className="screen-size-notice-copy">
           {needsLandscape
             ? "Rotate your tablet or widen this window to explore HerdLink. The network and its panels need a horizontal view."
-            : "HerdLink is designed for tablets, laptops, and desktop computers. Open this page on a larger screen to explore the livestock trade network."}
+            : `Widen this window to at least ${minimumWidth} pixels, or open HerdLink on a larger tablet, laptop, or desktop screen.`}
         </p>
 
         {needsLandscape ? (

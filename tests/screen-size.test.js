@@ -42,11 +42,13 @@ function layout(width, height, screenWidth = 1440, screenHeight = 900) {
 }
 
 test("layout requires a landscape viewport and keeps the screen size boundaries", () => {
-  assert.equal(layout(720, 719, 600, 800).requirement(), null);
-  assert.equal(layout(719, 600).requirement(), "larger-screen");
-  assert.equal(layout(720, 720).requirement(), "landscape");
+  assert.equal(layout(1024, 1023, 600, 1024).requirement(), null);
+  for (const width of [720, 900, 1023]) {
+    assert.equal(layout(width, 650).requirement(), "larger-screen", `${width}px window`);
+  }
+  assert.equal(layout(1024, 1024).requirement(), "landscape");
   assert.equal(layout(1200, 800, 599, 900).requirement(), "larger-screen");
-  assert.equal(layout(600, 900, 600, 960).requirement(), "landscape");
+  assert.equal(layout(600, 900, 600, 960).requirement(), "larger-screen");
   assert.equal(layout(900, 1200).requirement(), "landscape");
 });
 
@@ -58,16 +60,18 @@ test("phones require a larger screen in either orientation", () => {
 });
 
 test("rotating a tablet or widening a window restores access through resize", () => {
-  const tablet = layout(600, 900, 600, 960);
+  const tablet = layout(768, 1024, 768, 1024);
   assert.equal(tablet.requirement(), "landscape");
-  tablet.resize(900, 600);
+  tablet.resize(1024, 768);
   assert.equal(tablet.requirement(), null);
-  tablet.resize(600, 900);
+  tablet.resize(768, 1024);
   assert.equal(tablet.requirement(), "landscape");
-  tablet.resize(600, 650);
-  assert.equal(tablet.requirement(), "larger-screen");
-  tablet.resize(720, 650);
-  assert.equal(tablet.requirement(), null);
+  for (const width of [720, 900, 1023]) {
+    tablet.resize(width, 650);
+    assert.equal(tablet.requirement(), "larger-screen", `${width}px resize`);
+    tablet.resize(1024, 650);
+    assert.equal(tablet.requirement(), null);
+  }
   tablet.cleanup();
   assert.equal(tablet.listeners.size, 0);
 });

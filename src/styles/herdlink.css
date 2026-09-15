@@ -1013,9 +1013,68 @@ body.focus-mode-active .panel-info-button:focus-visible,
   border-color: var(--color-border);
 }
 
-#col2.glowing-border,
-#col2.glowing-border-instant {
-  background: var(--color-canvas) !important;
+#mainFigureSVG:focus { outline: none; }
+
+#mainFigureSVG .nodeGroup.is-focused > circle.primary,
+#mainFigureSVG .nodeGroup.is-focused > foreignObject.inactive-overlay {
+  filter: drop-shadow(0 0 3px rgba(156, 242, 229, 0.9)) drop-shadow(0 0 10px rgba(114, 228, 212, 0.65));
+}
+
+#mainFigureSVG .nodeGroup.is-focused > circle.primary {
+  stroke: #eafff8;
+  stroke-width: 2;
+  vector-effect: non-scaling-stroke;
+}
+
+#mainFigureSVG .nodeGroup.is-focused .inactive-overlay i { color: #eafff8; }
+
+.network-focus-indicator {
+  position: absolute;
+  z-index: 11;
+  top: calc(var(--space-6) + 1px);
+  left: 50%;
+  transform: translateX(-50%);
+  width: max-content;
+  max-width: calc(100% - 32px);
+  display: grid;
+  justify-items: center;
+  gap: 8px;
+  padding: 12px 18px;
+  border: 1px solid rgba(156, 242, 229, 0.6);
+  border-radius: 10px;
+  background: linear-gradient(135deg, rgba(34, 63, 68, 0.52), rgba(16, 28, 42, 0.32));
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  box-shadow: inset 0 1px 0 rgba(211, 255, 248, 0.2), 0 0 16px rgba(114, 228, 212, 0.18), 0 6px 20px rgba(0, 0, 0, 0.16);
+  pointer-events: none;
+}
+
+.network-focus-indicator[hidden] { display: none; }
+#networkFocusRegion { color: #d3fff8; font-size: 14px; line-height: 20px; text-shadow: 0 0 8px rgba(114, 228, 212, 0.35); }
+#exitFocusButton {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 5px 12px;
+  border: 1px solid rgba(114, 228, 212, 0.5);
+  border-radius: 5px;
+  background: var(--color-accent-soft);
+  color: var(--color-accent-strong);
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 18px;
+  white-space: nowrap;
+  pointer-events: auto;
+  cursor: pointer;
+}
+#exitFocusButton:hover { background: rgba(114, 228, 212, 0.2); border-color: var(--color-accent); }
+#exitFocusButton kbd { font: 10px/14px var(--font-data); padding: 0 4px; border: 1px solid rgba(114, 228, 212, 0.4); border-radius: 3px; }
+
+body.focus-mode-active .network-score-toolbar { max-width: calc(50% - 110px); }
+
+@media (max-width: 1440px) {
+  body.focus-mode-active #col2 .statsContainer { top: 144px; }
 }
 
 .watermark {

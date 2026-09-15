@@ -4519,9 +4519,8 @@
             restore.dataset.tip = "Restore all links and node permissions across all dates (R)";
             restore.setAttribute("aria-label", "Restore all links and node permissions (R)");
             document.body.classList.toggle("simulation-mode-active", active);
-            if (!active) {
-              document.body.classList.remove("focus-mode-active");
-            }
+            document.body.classList.toggle("focus-mode-active", !!selectedNodeData);
+            updateFocusIndicator();
             setSimulationPanelLabels(active);
             updateHotspotLegend();
             setTradeInsightOptionsForMode(active);
@@ -4553,7 +4552,7 @@
               return;
             }
             updateNetworkStats();
-            if (["numPartitions", "modularity"].includes(window.currentSelectedStat)) {
+            if (window.currentSelectedStat === "modularity") {
               updateGlobalStatsChart(window.currentSelectedStat);
             }
             updateNodeStatsChart(window.currentSelectedNodeStat);
@@ -5225,8 +5224,7 @@
               item.append("span").attr("class", "stat-value").text(itemData.value);
             });
     
-            const normalizedValue = ledgerBaselineSpectralRadius > 0
-              ? spectralRadius / ledgerBaselineSpectralRadius : 0;
+            const normalizedValue = getLedgerRiskScore(spectralRadius);
             const formattedNormal = normalizedValue.toFixed(3); // three decimal places
     
             // Color scale for normalized risk score.
@@ -5259,6 +5257,11 @@
             currentSpan.style.color = colorScale(normalizedValue);
           }
     
+          function getLedgerRiskScore(spectralRadius) {
+            return ledgerBaselineSpectralRadius > 0
+              ? spectralRadius / ledgerBaselineSpectralRadius : 0;
+          }
+
           function updateGlobalStatsChart(selectedStat) {
             if (isSimulationModeActive() && simulationState.trajectory) {
               renderSimulationGlobalStatsChart();
@@ -5292,7 +5295,9 @@
             // Each datum is { date: Date, value: <number> }.
             const data = Object.keys(window.allTemporalStats)
               .map((dateStr) => {
-                const statValue = window.allTemporalStats[dateStr][selectedStat];
+                const stats = window.allTemporalStats[dateStr];
+                const statValue = selectedStat === "riskScore"
+                  ? getLedgerRiskScore(stats.spectralRadius) : stats[selectedStat];
                 return {
                   date: new Date(dateStr),
                   value:
@@ -5312,7 +5317,7 @@
             const maxValue = d3.max(data, (d) => d.value);
             let yDomain;
             if (minValue === 0) {
-              yDomain = [0, maxValue * 1.1];
+              yDomain = [0, maxValue === 0 ? 1 : maxValue * 1.1];
             } else {
               // Otherwise, add a bit extra at both ends (10% below and above)
               yDomain = [minValue - Math.abs(minValue) * 0.1, maxValue + Math.abs(maxValue) * 0.1];
@@ -5424,8 +5429,6 @@
                 .call(xAxis);
             }
     
-            const yAxis = d3.axisLeft(y).tickFormat(d3.format("~s"));
-    
             // Select the y-grid group; if it doesn't exist, create it.
             let yGrid = svg.select("g.y-grid");
             if (yGrid.empty()) {
@@ -5440,7 +5443,8 @@
               .axisLeft(y)
               .ticks(5)
               .tickSize(-width)
-              .tickFormat((d) => (d === d3.min(y.domain()) ? "" : d));
+              .tickFormat((d) => d === d3.min(y.domain()) ? ""
+                : selectedStat === "riskScore" ? d.toFixed(3) : d);
     
             if (!preYDomainGlobalStats) {
               preYDomainGlobalStats = y.domain();
@@ -8259,6 +8263,27 @@
             (immediate = true),
           );
     
+          function updateFocusIndicator() {
+            const id = selectedNodeData?.id;
+            const indicator = document.getElementById("networkFocusIndicator");
+            indicator.hidden = !id;
+            if (id) {
+              const region = document.getElementById("networkFocusRegion");
+              const label = `Focus on ${id}`;
+              if (region.textContent !== label) region.textContent = label;
+            }
+            nodeGroup?.selectAll(".nodeGroup")
+              .classed("is-focused", (node) => node.id === id);
+          }
+
+          function exitNodeFocus() {
+            if (!selectedNodeData || window.isSwitchingCSV || window.isSwitchingAppMode || window.isDoingTemporalUpdate) return;
+            clearSelection(false);
+            const model = isSimulationModeActive() && document.getElementById("simulationModel");
+            document.getElementById(model && !model.disabled ? "simulationModel" : "mainFigureSVG")
+              ?.focus({ preventScroll: true });
+          }
+
           // Node Click Handler
           function onClickNode(event, d) {
             if (event.defaultPrevented) return;
@@ -8275,6 +8300,7 @@
             selectedNodeData = d;
             window.herdlinkComparison?.refresh();
             document.body.classList.add("focus-mode-active");
+            updateFocusIndicator();
 
 
     
@@ -8468,7 +8494,6 @@
               classStringC,
               true,
             );
-            d3.select("#col2").classed(classStringA, true);
             d3.select("#tradeNodeDistribution").classed(classStringA, true);
             d3.select("#tradeNodeInsight").classed(classStringA, true);
             d3.selectAll(".trade-section, .simulation-node-controls").classed(classStringA, true);
@@ -8490,6 +8515,7 @@
           function clearSelection(flag, keepFocusPanels = false) {
             clearHoveredLinkState();
             selectedNodeData = null;
+            if (!keepFocusPanels) updateFocusIndicator();
             window.herdlinkComparison?.refresh();
             if (!keepFocusPanels) document.body.classList.remove("focus-mode-active");
             if (!flag && !window.isDoingTemporalUpdate) {
@@ -8513,8 +8539,6 @@
                 "glowing-border-switcher-instant",
                 false,
               );
-              d3.select("#col2").classed("glowing-border", false);
-              d3.select("#col2").classed("glowing-border-instant", false);
               d3.select("#tradeNodeDistribution").classed("glowing-border", false);
               d3.select("#tradeNodeDistribution").classed(
                 "glowing-border-instant",
@@ -15059,20 +15083,19 @@
             nextInput.dispatchEvent(new Event("change", { bubbles: true }));
           });
 
-          // Shortcut: press "q" to exit focus mode.
-          // Clears node focus using clearSelection(false).
+          document.getElementById("exitFocusButton").addEventListener("click", exitNodeFocus);
+
+          // Shortcut: press Q to return to the network view.
           document.addEventListener("keydown", function (event) {
             if (!handlesAppShortcut(event)) return;
             if (
-              event.key === "q" &&
+              event.key.toLowerCase() === "q" && !event.repeat && !event.isComposing &&
               !window.isSwitchingCSV &&
               !window.isSwitchingAppMode &&
               !window.isDoingTemporalUpdate
             ) {
               event.preventDefault();
-              if (selectedNodeData) {
-                clearSelection(false);
-              }
+              exitNodeFocus();
             }
           });
 
