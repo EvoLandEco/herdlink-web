@@ -3,6 +3,7 @@
 :root {
   color-scheme: dark;
   --font-body: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --hotspot-ring-max-scale: 1.06;
   --font-data: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
   --color-page-bg: #080e17;
   --color-page-bg-alt: #080e17;
@@ -3683,7 +3684,7 @@ g.node:hover {
   }
 
   50% {
-    transform: scale(1.06);
+    transform: scale(var(--hotspot-ring-max-scale));
   }
 }
 
@@ -3853,6 +3854,10 @@ g.node:hover {
   color: var(--color-text);
 }
 
+#mainFigureSVG .links {
+  pointer-events: none;
+}
+
 .link {
   fill: none;
   stroke-width: 1.5px;
@@ -3930,6 +3935,15 @@ g.node:hover {
   position: relative;
 }
 
+#networkCalloutSVG {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  z-index: 10010;
+  pointer-events: none;
+}
+
 .current-date-annotation {
   font-size: 0.9rem;
   fill: var(--color-text);
@@ -3938,10 +3952,7 @@ g.node:hover {
 
 #globalStats .current-date-annotation rect.annotation-note-bg,
 #globalStats .simulation-compartment-callout-bg,
-#nodeStats .top-label-group rect.label-bg,
-.node-annotation rect.annotation-note-bg,
-.node-annotation svg.custom-radar rect.annotation-bg,
-.link-annotation rect.annotation-note-bg {
+#nodeStats .top-label-group rect.label-bg {
   fill: var(--color-surface-strong);
   fill-opacity: 0.96;
   stroke: var(--color-accent);
@@ -3957,16 +3968,6 @@ g.node:hover {
 .annotation-connector {
   stroke-dasharray: 4, 2;
   opacity: 0.9;
-}
-
-#radial-labels-container {
-  position: fixed;
-  top: 0;
-  left: 0;
-  width: 100%;
-  height: 100%;
-  pointer-events: none;
-  z-index: 9999;
 }
 
 #tradeClusters,
@@ -4101,98 +4102,111 @@ g.node:hover {
   font-size: 10px;
 }
 
-.node-annotation rect.annotation-note-bg {
-  fill: var(--color-surface-strong);
-  fill-opacity: 0.96;
-  rx: 4;
-  ry: 4;
+.network-hover-callout {
+  font-family: var(--font-body);
+  pointer-events: none;
 }
 
-.node-annotation svg.custom-radar {
-  overflow: visible;
+.network-callout-surface {
+  fill: url(#networkCalloutSurface);
+  fill-opacity: 0.97;
+  stroke: rgb(153 221 211 / 40%);
+  stroke-width: 1;
+  filter: drop-shadow(0 6px 12px rgb(0 0 0 / 30%));
 }
 
-.node-annotation .annotation-connector .connector {
-  stroke: var(--color-accent-strong);
+.network-callout-connector {
+  fill: none;
+  stroke: var(--color-accent);
+  stroke-width: 1;
+  stroke-opacity: 0.65;
 }
 
-.node-annotation .annotation-note .note-line {
-  stroke: var(--color-accent-strong);
-}
-
-.node-annotation .annotation-note text {
-  fill: white;
-}
-
-.node-annotation.selected rect.annotation-note-bg {
-  fill: var(--color-surface-strong);
-}
-
-.node-annotation.selected .annotation-connector .connector {
-  stroke: white;
-}
-
-.node-annotation.selected .annotation-note .note-line {
-  stroke: white;
-}
-
-.node-annotation.selected .annotation-note text {
-  fill: var(--color-text-muted);
-}
-
-svg.custom-radar rect.annotation-bg {
-  fill: var(--color-surface-strong);
-  fill-opacity: 0.96;
-  rx: 4;
-  ry: 4;
-}
-
-svg.custom-radar.selected rect.annotation-bg {
-  fill: var(--color-surface-strong);
-}
-
-svg.custom-radar path.node-radar {
-  fill: rgba(255, 255, 255, 0.2);
-  stroke: rgba(255, 255, 255, 1);
+.network-callout-accent {
+  stroke: var(--color-accent);
   stroke-width: 2;
+  stroke-linecap: round;
+  filter: drop-shadow(0 0 4px var(--color-glow));
 }
 
-svg.custom-radar.selected path.node-radar {
+.network-callout-code {
+  fill: var(--color-accent);
+  font: 600 13px var(--font-data);
+  letter-spacing: 0.5px;
+}
+
+.network-callout-tag {
+  fill: var(--color-text-muted);
+  font: 11px var(--font-data);
+}
+
+.network-callout-name {
+  color: var(--color-text);
+  font: 600 13px/18px var(--font-body);
+  overflow-wrap: anywhere;
+}
+
+.network-callout-label {
+  fill: var(--color-text-muted);
+  font-size: 11px;
+}
+
+.network-callout-value {
+  fill: var(--color-text);
+  font: 500 12px var(--font-data);
+  font-variant-numeric: tabular-nums;
+}
+
+.network-callout-hero {
+  fill: #e8fff9;
+  font: 500 23px var(--font-data);
+  letter-spacing: -0.8px;
+}
+
+.network-callout-caption {
+  fill: var(--color-text-muted);
+  font-size: 9px;
+  letter-spacing: 0.7px;
+  text-transform: uppercase;
+}
+
+.network-callout-divider {
+  stroke: rgb(161 187 199 / 16%);
+  stroke-width: 1;
+}
+
+.network-callout-row {
+  fill: rgb(170 202 217 / 4%);
+}
+
+.network-hover-callout .radar-ring {
+  fill: none;
+  stroke: rgb(167 204 208 / 22%);
+  stroke-width: 0.7;
+}
+
+.network-hover-callout .radar-axis {
+  stroke: rgb(167 204 208 / 22%);
+  stroke-width: 0.7;
+}
+
+.network-hover-callout .node-radar {
   fill: var(--color-accent-soft);
   stroke: var(--color-accent);
+  stroke-width: 1.5;
+  stroke-linejoin: round;
+  filter: drop-shadow(0 0 3px rgb(135 235 212 / 22%));
 }
 
-svg.custom-radar line {
-  stroke: rgba(255, 255, 255, 0.5);
+.network-hover-callout .vertex {
+  fill: #ddfff7;
+  stroke: var(--color-accent);
+  stroke-width: 0.75;
 }
 
-svg.custom-radar.selected line {
-  stroke: var(--color-border-strong);
-}
-
-svg.custom-radar path.radar-baseline {
-  stroke: rgba(255, 255, 255, 0.7);
-}
-
-svg.custom-radar.selected path.radar-baseline {
-  stroke: var(--color-text-muted);
-}
-
-circle.vertex {
-  fill: rgba(255, 255, 255, 1);
-}
-
-circle.vertex.selected {
-  fill: var(--color-accent);
-}
-
-.radial-axis-label {
-  color: white;
-  font-size: 10px;
-}
-
-.radial-axis-label.selected {
-  color: var(--color-text-muted);
+.network-hover-callout .radar-axis-label {
+  fill: #c7dadf;
+  font: 500 9px var(--font-data);
 }
 
 .line {
@@ -4255,7 +4269,7 @@ circle.vertex.selected {
   justify-content: center;
   align-items: center;
   background: rgba(4, 9, 16, 0.78);
-  z-index: 10000;
+  z-index: 10020;
   animation: overlayFadeIn var(--transition-base) forwards;
 }
 

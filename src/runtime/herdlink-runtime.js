@@ -56,11 +56,14 @@
           const tradeIntensity = d3.interpolateRgb(theme.accent, "#364f67");
           const exposureIntensity = d3.interpolateRgb("#634350", "#ffb599");
           const svg = d3.select("#col2 svg");
+          const calloutSvg = d3.select("#networkCalloutSVG");
           let containerCol2 = document.getElementById("col2");
           let w = containerCol2.clientWidth,
             h = containerCol2.clientHeight;
           svg.attr("viewBox", `0 0 ${w} ${h}`);
+          calloutSvg.attr("viewBox", `0 0 ${w} ${h}`);
           let currentMode = "map";
+          let isMovingToMap = false;
           const controlTips = {
             switchToMap: "Switch to map view (M)",
             switchToGraph: "Switch to graph view (M)",
@@ -108,15 +111,15 @@
             eigenvector: { color: "#cc79a7", dash: "3 5", pattern: "Short dash" },
           };
           const hotspotRingSpacing = 4;
+          const hotspotRingMaxScale = Number(themeStyles.getPropertyValue("--hotspot-ring-max-scale"));
+          const nodeAppearanceDuration = 200;
           let newSCCs;
-          const nodeAnnoType = d3.annotationCallout;
-          const linkAnnoType = d3.annotationCallout;
           const currentDateAnnoType = d3.annotationCalloutCircle;
           let hoveredNode = null;
           let hoveredLink = null;
           let hoveredLinkElement = null;
+          const linkHoverGeometry = new WeakMap();
           let annotationGroup = null;
-          let lastRadarData = null;
           const metricNames = [
             "inDegree",
             "outDegree",
@@ -152,13 +155,6 @@
             }
           }
 
-          function resetRadarRenderState() {
-            window.prevRadarPoints = {};
-            window.prevRadarVertices = {};
-            d3.selectAll(
-              "svg.custom-radar path, svg.custom-radar line, svg.custom-radar circle.vertex",
-            ).interrupt();
-          }
           const simulationPrevalenceScale = d3
             .scaleSequential(
               d3.interpolateRgbBasis([
@@ -4724,7 +4720,7 @@
             const wasSimulationRunning = simulationState.status === "running";
             setModePanelsRendering(true);
             appDataMode = nextMode;
-            resetRadarRenderState();
+            clearNetworkCallout();
             syncModeSwitcherRadios();
             configureSimulationModeUi(isSimulationModeActive());
 
@@ -6771,20 +6767,47 @@
             return metrics;
           }
     
-          // Adjust the arrow endpoint.
           function getAdjustedTarget(d) {
-            let dx = d.target.x - d.source.x,
-              dy = d.target.y - d.source.y,
-              dist = Math.sqrt(dx * dx + dy * dy);
-            const r =
-              d.target.r !== undefined && !isNaN(d.target.r) ? d.target.r : 0;
-            if (dist === 0) return { x: d.target.x, y: d.target.y };
-            return {
-              x: d.target.x - (dx / dist) * r,
-              y: d.target.y - (dy / dist) * r,
-            };
+            const dx = d.target.x - d.source.x, dy = d.target.y - d.source.y;
+            const distance = Math.hypot(dx, dy);
+            const boundary = d.target.linkBoundaryRadius ?? ((d.target.r || 0) + 1);
+            const clearance = boundary + 4;
+            if (distance <= clearance) return null;
+            return { x: d.target.x - dx / distance * clearance, y: d.target.y - dy / distance * clearance };
           }
-    
+
+          function getNetworkLinkPath(d) {
+            const end = getAdjustedTarget(d);
+            if (!end) return null;
+            const radius = Math.hypot(d.target.x - d.source.x, d.target.y - d.source.y);
+            return `M${d.source.x},${d.source.y}A${radius},${radius} 0 0,1 ${end.x},${end.y}`;
+          }
+
+          function updateNetworkLinkBoundaries(includeTransition = false) {
+            nodeEnter.each(function (d) {
+              const circle = this.querySelector("circle.primary");
+              let boundary = (circle ? +circle.getAttribute("r") : d.r) + 1;
+              for (const ring of this.querySelectorAll(".hotspotStroke")) {
+                const outer = +ring.getAttribute("r") + +ring.getAttribute("stroke-width") / 2 + 1;
+                boundary = Math.max(boundary, outer * hotspotRingMaxScale);
+              }
+              if (includeTransition) {
+                const count = metricNames.filter(metric => topNMetric[metric].includes(d.id)).length;
+                const destination = count ? (d.r + count * hotspotRingSpacing + 2.25) * hotspotRingMaxScale : d.r + 1;
+                // Cover both ends of the node and ring size transitions.
+                boundary = Math.max(boundary, destination);
+              }
+              d.linkBoundaryRadius = boundary;
+            });
+            linkSelection.attr("d", getNetworkLinkPath);
+            if (hoveredLink) updateAnnotationForLink(hoveredLink, annotationGroup);
+            if (includeTransition) {
+              nodeGroup.interrupt("link-boundary")
+                .transition("link-boundary").duration(nodeAppearanceDuration)
+                .on("end", () => updateNetworkLinkBoundaries());
+            }
+          }
+
           function getLinkBaseClass(d) {
             const srcId = typeof d.source === "object" ? d.source.id : d.source;
             const tgtId = typeof d.target === "object" ? d.target.id : d.target;
@@ -6815,7 +6838,11 @@
             d3.select(linkElement).attr("class", getLinkBaseClass(d));
           }
     
-          function clearHoveredLinkState() {
+          function clearNetworkCallout(group = annotationGroup) {
+            group?.selectAll("*").interrupt("radar").remove();
+          }
+
+          function clearHoveredLinkState(keepNodeCallout = false) {
             if (hoveredLinkElement) {
               const previousDatum = d3.select(hoveredLinkElement).datum();
               restoreLinkClass(hoveredLinkElement, previousDatum);
@@ -6824,43 +6851,117 @@
             hoveredLink = null;
             hoveredLinkElement = null;
     
-            if (annotationGroup) {
-              annotationGroup.selectAll("*").remove();
+            if (annotationGroup && (!keepNodeCallout || annotationGroup.select(".node-annotation").empty())) {
+              clearNetworkCallout();
             }
           }
-    
-          function handleLinkMouseEnter(event, d) {
-            if (hoveredLinkElement && hoveredLinkElement !== this) {
-              const previousDatum = d3.select(hoveredLinkElement).datum();
-              restoreLinkClass(hoveredLinkElement, previousDatum);
+
+          function getNetworkLinkArc(path) {
+            const values = path?.match(/[-+]?(?:\d*\.)?\d+(?:e[-+]?\d+)?/gi)?.map(Number);
+            if (!values || values.length !== 9 || !values.every(Number.isFinite)) return null;
+            const [x1, y1, rx, ry, , large, sweep, x2, y2] = values;
+            if (rx !== ry) return null;
+            const dx = x2 - x1, dy = y2 - y1;
+            const chord = Math.hypot(dx, dy);
+            if (!chord) return null;
+            if (rx === 0) return { x1, y1, x2, y2, radius: 0,
+              minX: Math.min(x1, x2), maxX: Math.max(x1, x2),
+              minY: Math.min(y1, y2), maxY: Math.max(y1, y2) };
+            const radius = Math.max(Math.abs(rx), chord / 2);
+            const offset = Math.sqrt(Math.max(0, radius * radius - chord * chord / 4));
+            const sign = large === sweep ? -1 : 1;
+            const cx = (x1 + x2) / 2 - sign * dy / chord * offset;
+            const cy = (y1 + y2) / 2 + sign * dx / chord * offset;
+            const start = Math.atan2(y1 - cy, x1 - cx);
+            const direction = sweep ? 1 : -1;
+            const turn = 2 * Math.PI;
+            const span = (direction * (Math.atan2(y2 - cy, x2 - cx) - start) + turn) % turn;
+            const arc = { x1, y1, x2, y2, cx, cy, radius, start, direction, span,
+              minX: Math.min(x1, x2), maxX: Math.max(x1, x2),
+              minY: Math.min(y1, y2), maxY: Math.max(y1, y2) };
+            // Include the circle extrema that lie on the rendered arc.
+            for (let i = 0; i < 4; i++) {
+              const angle = i * Math.PI / 2;
+              if ((direction * (angle - start) + turn * 2) % turn > span) continue;
+              const x = cx + radius * Math.cos(angle), y = cy + radius * Math.sin(angle);
+              arc.minX = Math.min(arc.minX, x); arc.maxX = Math.max(arc.maxX, x);
+              arc.minY = Math.min(arc.minY, y); arc.maxY = Math.max(arc.maxY, y);
             }
-    
+            return arc;
+          }
+
+          function distanceToNetworkLinkArc(arc, x, y) {
+            if (arc.radius === 0) {
+              const dx = arc.x2 - arc.x1, dy = arc.y2 - arc.y1;
+              const t = Math.max(0, Math.min(1, ((x - arc.x1) * dx + (y - arc.y1) * dy) / (dx * dx + dy * dy)));
+              return Math.hypot(x - arc.x1 - t * dx, y - arc.y1 - t * dy);
+            }
+            const angle = Math.atan2(y - arc.cy, x - arc.cx);
+            const turn = 2 * Math.PI;
+            const position = (arc.direction * (angle - arc.start) + turn) % turn;
+            if (position <= arc.span) return Math.abs(Math.hypot(x - arc.cx, y - arc.cy) - arc.radius);
+            return Math.min(Math.hypot(x - arc.x1, y - arc.y1), Math.hypot(x - arc.x2, y - arc.y2));
+          }
+
+          function isNetworkLinkHoverable(element, d) {
+            return d.weight > 0 && !d.disabled && element.getAttribute("display") !== "none" &&
+              element.style.opacity !== "0" && element.getAttribute("opacity") !== "0" &&
+              (!selectedNodeData || getNodeId(d.source) === selectedNodeData.id || getNodeId(d.target) === selectedNodeData.id);
+          }
+
+          function findNearestNetworkLink(x, y, radius) {
+            let nearest = null;
+            let distance = radius;
+            linkSelection?.each(function (d) {
+              if (!isNetworkLinkHoverable(this, d)) return;
+              const path = this.getAttribute("d");
+              let cached = linkHoverGeometry.get(this);
+              if (!cached || cached.path !== path) {
+                cached = { path, arc: getNetworkLinkArc(path) };
+                linkHoverGeometry.set(this, cached);
+              }
+              const arc = cached.arc;
+              if (!arc || x < arc.minX - distance || x > arc.maxX + distance ||
+                  y < arc.minY - distance || y > arc.maxY + distance) return;
+              const candidate = distanceToNetworkLinkArc(arc, x, y);
+              if (candidate < distance || (candidate === distance && (!nearest || this === hoveredLinkElement))) {
+                distance = candidate;
+                nearest = this;
+              }
+            });
+            return nearest;
+          }
+
+          function showNetworkLinkCallout(element, d) {
+            if (hoveredLinkElement === element && hoveredLink === d) return;
+            if (hoveredLinkElement) restoreLinkClass(hoveredLinkElement, hoveredLink);
             hoveredLink = d;
-            hoveredLinkElement = this;
-    
-            d3.select(this).interrupt().attr("class", getLinkHoverClass(d));
+            hoveredLinkElement = element;
+            d3.select(element).attr("class", getLinkHoverClass(d));
             updateAnnotationForLink(d, annotationGroup);
           }
-    
-          function handleLinkMouseMove(event, d) {
-            if (hoveredLinkElement === this && hoveredLink === d) {
-              updateAnnotationForLink(d, annotationGroup);
-            }
+
+          function handleNetworkLinkPointerMove(event) {
+            if (event.target.closest(".nodes")) return;
+            const root = svg.node();
+            const [x, y] = d3.pointer(event, root);
+            const matrix = root.getScreenCTM();
+            const scale = Math.hypot(matrix.a, matrix.b);
+            const element = findNearestNetworkLink(x, y, 6 / scale);
+            if (element) showNetworkLinkCallout(element, d3.select(element).datum());
+            else if (hoveredLink) clearHoveredLinkState();
           }
-    
-          function handleLinkMouseLeave(event, d) {
-            restoreLinkClass(this, d);
-    
-            if (hoveredLinkElement === this) {
-              hoveredLinkElement = null;
-              hoveredLink = null;
-            }
-    
-            if (annotationGroup) {
-              annotationGroup.selectAll("*").remove();
-            }
+
+          function handleNetworkLinkPointerLeave() {
+            if (hoveredLink) clearHoveredLinkState();
           }
-    
+
+          function restoreNetworkLinkCallout(id) {
+            linkSelection.each(function (d) {
+              if (d.id === id && isNetworkLinkHoverable(this, d)) showNetworkLinkCallout(this, d);
+            });
+          }
+
           function renderGraphPositions() {
             if (currentMode === "graph") {
               // Define boundary margins.
@@ -6868,68 +6969,6 @@
                 inactiveMarginY = Math.min(290, h / 2),
                 activeMarginX = Math.min(40, w / 2),
                 activeMarginY = Math.min(60, h / 2);
-
-              linkSelection.attr("d", function (d) {
-                // Use original positions.
-                let sX = d.source.x,
-                  sY = d.source.y;
-                let tX = d.target.x,
-                  tY = d.target.y;
-
-                // Clamp source coordinates.
-                if (!d.source.active) {
-                  sX = Math.max(
-                    inactiveMarginX,
-                    Math.min(w - inactiveMarginX, sX),
-                  );
-                  sY = Math.max(
-                    inactiveMarginY,
-                    Math.min(h - inactiveMarginY, sY),
-                  );
-                } else {
-                  sX = Math.max(activeMarginX, Math.min(w - activeMarginX, sX));
-                  sY = Math.max(activeMarginY, Math.min(h - activeMarginY, sY));
-                }
-
-                // Clamp target coordinates.
-                if (!d.target.active) {
-                  tX = Math.max(
-                    inactiveMarginX,
-                    Math.min(w - inactiveMarginX, tX),
-                  );
-                  tY = Math.max(
-                    inactiveMarginY,
-                    Math.min(h - inactiveMarginY, tY),
-                  );
-                } else {
-                  tX = Math.max(activeMarginX, Math.min(w - activeMarginX, tX));
-                  tY = Math.max(activeMarginY, Math.min(h - activeMarginY, tY));
-                }
-
-                const dx = tX - sX,
-                  dy = tY - sY,
-                  dr = Math.sqrt(dx * dx + dy * dy),
-                  // Use the clamped positions to compute the adjusted target.
-                  adj = getAdjustedTarget({
-                    source: { x: sX, y: sY, r: d.source.r },
-                    target: { x: tX, y: tY, r: d.target.r },
-                  });
-
-                return (
-                  "M" +
-                  sX +
-                  "," +
-                  sY +
-                  "A" +
-                  dr +
-                  "," +
-                  dr +
-                  " 0 0,1 " +
-                  adj.x +
-                  "," +
-                  adj.y
-                );
-              });
 
               // Update node positions. Clamp their positions to avoid going out of bounds.
               nodeEnter.attr("transform", (d) => {
@@ -6949,6 +6988,7 @@
 
                 return `translate(${d.x},${d.y})`;
               });
+              linkSelection.attr("d", getNetworkLinkPath);
               // Update text labels positions.
               labelSelection
                 .attr("x", (d) => d.x)
@@ -6963,8 +7003,11 @@
 
           // Create Network
           function initNetwork(isReplot = false) {
+            nodeGroup?.interrupt("link-boundary");
+            nodeGroup?.interrupt("map-position");
             // Create annotation group
-            annotationGroup = svg
+            clearNetworkCallout(calloutSvg);
+            annotationGroup = calloutSvg
               .append("g")
               .attr("class", "annotation-group")
               .style("pointer-events", "none");
@@ -7017,6 +7060,7 @@
               .call(drag(forceSim))
               .on("click", debouncedOnClickNode)
               .on("mouseover", function (event, d) {
+                if (hoveredLink) clearHoveredLinkState();
                 hoveredNode = d;
                 d3.select(this).select("circle.primary").attr("stroke", theme.text);
     
@@ -7034,10 +7078,8 @@
                   .attr("stroke", null)
                   .attr("stroke-width", null);
     
-                annotationGroup.selectAll("*").remove();
+                clearNetworkCallout();
     
-                // Remove content in #radial-labels-container
-                d3.select("#radial-labels-container").selectAll("*").remove();
               });
     
             // Append primary node shape (circle for active, FontAwesome icon for inactive).
@@ -7192,12 +7234,12 @@
               }
             });
     
+            updateNetworkLinkBoundaries();
             forceSim.on("tick", renderGraphPositions);
     
-            linkSelection
-              .on("mouseenter", handleLinkMouseEnter)
-              .on("mousemove", handleLinkMouseMove)
-              .on("mouseleave", handleLinkMouseLeave);
+            svg
+              .on("pointermove.link-callout", handleNetworkLinkPointerMove)
+              .on("pointerleave.link-callout", handleNetworkLinkPointerLeave);
     
             // Add Hotspot Stroke Legend
             if (!isReplot) {
@@ -7340,142 +7382,55 @@
               .range([5, 20]);
           }
     
+          function getNodeCalloutData(d) {
+            const state = isSimulationModeActive() ? simulationState.currentFrame?.nodeStates[d.id] : null;
+            const community = allNodes.find((node) => node.id === d.id)?.community;
+            const info = {
+              kind: "node", code: d.id, name: d.statnaam || getStatnaam(d.id),
+              tag: community == null || community < 0 ? "Unassigned" : `P${community}`,
+              values: getRadarValuesForNode(d),
+              labels: state ? ["S", "E", "I", "R", "XP"] : ["IN", "OUT", "BT", "PR", "EC"],
+              profile: state ? "State & pressure" : "Trade profile",
+            };
+            if (state) return { ...info,
+              heroLabel: "Prevalence", hero: formatPct(state.prevalence),
+              detailLabel: "Model population", detail: formatCount(state.N),
+              compartments: ["S", "E", "I", "R"].map((key) => ({
+                label: simulationCompartmentLabels[key], value: formatCount(state[key]), color: simulationCompartmentColors[key],
+              })),
+              rows: [
+                { label: "Incoming exposure", value: formatSmall(state.incomingExposure), color: theme.incoming },
+                { label: "Outgoing pressure", value: formatSmall(state.outgoingPressure), color: theme.outgoing },
+              ],
+            };
+            let incoming = 0, outgoing = 0, local = 0;
+            for (const link of allLinks) {
+              if (link.disabled) continue;
+              const source = getNodeId(link.source), target = getNodeId(link.target);
+              if (source === d.id && target === d.id) local += link.weight;
+              else if (target === d.id) incoming += link.weight;
+              else if (source === d.id) outgoing += link.weight;
+            }
+            return { ...info,
+              heroLabel: "Local share", hero: outgoing + local > 0 ? `${(100 * local / (outgoing + local)).toFixed(1)}%` : "—",
+              detailLabel: "of outgoing trade", detail: "",
+              rows: [
+                { label: "Incoming trade", value: formatCount(incoming), color: theme.incoming },
+                { label: "Outgoing trade", value: formatCount(outgoing), color: theme.outgoing },
+                { label: "Local trade", value: formatCount(local), color: theme.accent },
+              ],
+            };
+          }
+
           function updateAnnotationForNode(d, annotationGroup) {
             if (!d) {
-              annotationGroup.selectAll("*").remove();
+              clearNetworkCallout(annotationGroup);
               return;
             }
-    
-            // Use fixed coordinates in map mode if available.
-            const xPos = currentMode === "map" && d.x0 !== undefined ? d.x0 : d.x;
-            const yPos = currentMode === "map" && d.y0 !== undefined ? d.y0 : d.y;
-    
-            const offsets = getAnnotationOffset(xPos, yPos, w, h);
-    
-            // Compute trade volumes using only enabled links
-            const incomingTrade = d3.sum(
-              allLinks.filter((link) => {
-                const src =
-                  typeof link.source === "object" ? link.source.id : link.source;
-                const tgt =
-                  typeof link.target === "object" ? link.target.id : link.target;
-                return tgt === d.id && src !== d.id && !link.disabled;
-              }),
-              (link) => link.weight,
-            );
-    
-            const outgoingTrade = d3.sum(
-              allLinks.filter((link) => {
-                const src =
-                  typeof link.source === "object" ? link.source.id : link.source;
-                const tgt =
-                  typeof link.target === "object" ? link.target.id : link.target;
-                return src === d.id && tgt !== d.id && !link.disabled;
-              }),
-              (link) => link.weight,
-            );
-    
-            const selfTrade = d3.sum(
-              allLinks.filter((link) => {
-                const src =
-                  typeof link.source === "object" ? link.source.id : link.source;
-                const tgt =
-                  typeof link.target === "object" ? link.target.id : link.target;
-                return src === d.id && tgt === d.id && !link.disabled;
-              }),
-              (link) => link.weight,
-            );
-    
-            // Local trades count toward total outflow, alongside exports.
-            const selfTradeRatio =
-              outgoingTrade + selfTrade > 0
-                ? ((selfTrade / (outgoingTrade + selfTrade)) * 100).toFixed(1)
-                : "NA";
-    
-            const currentNode = allNodes.find((n) => n.id === d.id);
-            let communityID = currentNode ? currentNode.community : "NA";
-            if (communityID === undefined) communityID = "NA";
-
-            const simState = isSimulationModeActive()
-              ? simulationState.currentFrame?.nodeStates[d.id]
-              : null;
-            const noteLabel = simState
-              ? `Model population units: ${formatCount(simState.N)}\nSusceptible: ${formatCount(simState.S)}\nExposed: ${formatCount(simState.E)}\nInfectious: ${formatCount(simState.I)} (${formatPct(simState.prevalence)})\nRecovered: ${formatCount(simState.R)}\nIncoming Exposure: ${formatSmall(simState.incomingExposure)}\nOutgoing Pressure: ${formatSmall(simState.outgoingPressure)}`
-              : `Community ID: ${communityID}\nIncoming Trade: ${incomingTrade}\nOutgoing Trade: ${outgoingTrade}\nLocal Trade: ${selfTrade}\nSelf-Trade Ratio: ${selfTradeRatio}${selfTradeRatio !== "NA" ? "%" : ""}`;
-    
-            const annotations = [
-              {
-                note: {
-                  title: `[${d.id}] ${d.statnaam}`,
-                  label: noteLabel,
-                  wrapSplitter: /\n/,
-                  wrap: 200,
-                  bgPadding: { top: 6, left: 6, right: 4, bottom: 4 },
-                },
-                className: "node-annotation",
-                x: xPos,
-                y: yPos,
-                dx: offsets.dx,
-                dy: offsets.dy,
-              },
-            ];
-    
-            const makeAnnotations = d3
-              .annotation()
-              .type(nodeAnnoType)
-              .notePadding(10)
-              .annotations(annotations);
-    
-            annotationGroup.call(makeAnnotations).raise();
-    
-            // Style the annotation note background.
-            annotationGroup
-              .selectAll("rect.annotation-note-bg")
-              .classed("selected", !!selectedNodeData)
-              .attr("fill-opacity", 0.8)
-              .attr("rx", 4)
-              .attr("ry", 4);
-    
-            // Update connector and note-line colors.
-            annotationGroup
-              .selectAll(".node-annotation")
-              .classed("selected", !!selectedNodeData);
-    
-            // Draw the radar chart inside the annotation.
-            const noteContent = annotationGroup.select(".annotation-note-content");
-            drawRadarChart(noteContent, offsets, d);
-    
-            // Update radial axis labels.
-            const radarElem = noteContent.select("svg.custom-radar").node();
-            if (!radarElem) return;
-            const bbox = radarElem.getBoundingClientRect();
-            const centerX = bbox.x + bbox.width / 2;
-            const centerY = bbox.y + bbox.height / 2;
-    
-            // Define radar chart dimensions.
-            const radarChartWidth = 130;
-            const radarChartHeight = 130;
-            const radarChartPadding = 20;
-            const drawWidth = radarChartWidth - radarChartPadding * 2;
-            const drawHeight = radarChartHeight - radarChartPadding * 2;
-            const radarRadius = Math.min(drawWidth, drawHeight) / 2 - 10;
-    
-            const axisLabels = isSimulationModeActive()
-              ? ["S", "E", "I", "R", "XP"]
-              : ["ID", "OD", "BT", "PR", "EC"];
-            // First, clear the existing labels.
-            drawRadialAxisLabels(
-              centerX,
-              centerY + 5,
-              radarRadius,
-              axisLabels,
-              "#radial-labels-container",
-            );
+            const x = currentMode === "map" && d.x0 !== undefined ? d.x0 : d.x;
+            const y = currentMode === "map" && d.y0 !== undefined ? d.y0 : d.y;
+            renderNetworkCallout(annotationGroup, x, y, getNodeCalloutData(d));
           }
-    
-          // Global variable to store previous radar points for each node id.
-          if (!window.prevRadarPoints) window.prevRadarPoints = {};
-          if (!window.prevRadarVertices) window.prevRadarVertices = {};
 
           function getRadarValuesForNode(d) {
             if (isSimulationModeActive()) {
@@ -7503,427 +7458,165 @@
             ];
           }
     
-          function drawRadarChart(noteContent, offsets, d) {
-            // Define dimensions.
-            const radarChartWidth = 130;
-            const radarChartHeight = 130;
-            const radarChartGap = 10;
-            const radarChartPadding = 21;
-    
-            // Try to select the existing radar chart.
-            let radarSVG = noteContent.select("svg.custom-radar");
-    
-            // If it doesn’t exist, create it.
-            if (radarSVG.empty()) {
-              if (offsets.dy < 0) {
-                const titleElem = noteContent
-                  .select(".annotation-note-title")
-                  .node();
-                const bbox = titleElem.getBBox();
-                radarSVG = noteContent
-                  .insert("svg", ".annotation-note-title")
-                  .attr("class", "custom-radar")
-                  .classed("selected", !!selectedNodeData)
-                  .attr("width", radarChartWidth)
-                  .attr("height", radarChartHeight)
-                  .attr("x", 0)
-                  .attr("y", bbox.y - radarChartHeight - radarChartGap);
-              } else {
-                const labelElem = noteContent
-                  .select(".annotation-note-label")
-                  .node();
-                const bbox = labelElem.getBBox();
-                radarSVG = noteContent
-                  .insert("svg", ".annotation-note-title")
-                  .attr("class", "custom-radar")
-                  .classed("selected", !!selectedNodeData)
-                  .attr("width", radarChartWidth)
-                  .attr("height", radarChartHeight)
-                  .attr("x", 0)
-                  .attr("y", bbox.y + bbox.height + radarChartGap);
-              }
-              // Append background rectangle.
-              radarSVG
-                .append("rect")
-                .attr("class", "annotation-bg")
-                .attr("x", 0)
-                .attr("y", 0)
-                .attr("width", radarChartWidth)
-                .attr("height", radarChartHeight)
-                .attr("fill-opacity", 0.8)
-                .attr("rx", 4)
-                .attr("ry", 4);
-    
-              // Append a group for the radar drawing.
-              radarSVG
-                .append("g")
-                .attr("class", "radar-drawing")
-                .attr(
-                  "transform",
-                  `translate(${radarChartPadding},${radarChartPadding})`,
-                )
-                .append("path") // This is the radar polygon.
-                .attr("class", "node-radar");
-            } else {
-              // Update position if it already exists.
-              if (offsets.dy < 0) {
-                const titleElem = noteContent
-                  .select(".annotation-note-title")
-                  .node();
-                const bbox = titleElem.getBBox();
-                radarSVG
-                  .transition()
-                  .duration(400)
-                  .attr("y", bbox.y - radarChartHeight - radarChartGap);
-              } else {
-                const labelElem = noteContent
-                  .select(".annotation-note-label")
-                  .node();
-                const bbox = labelElem.getBBox();
-                radarSVG
-                  .transition()
-                  .duration(400)
-                  .attr("y", bbox.y + bbox.height + radarChartGap);
-              }
-              radarSVG.select("rect.annotation-bg").transition().duration(400);
-            }
-    
-            // Define drawing padding.
-            const padding = {
-              top: radarChartPadding - 4,
-              left: radarChartPadding,
-              right: radarChartPadding,
-              bottom: radarChartPadding - 4,
+          function getNetworkCalloutPosition(x, y, width, height, panelWidth, panelHeight) {
+            const left = x > panelWidth / 2;
+            const beside = Math.max(x, panelWidth - x) >= width + 42;
+            return {
+              x: Math.max(12, Math.min(panelWidth - width - 12,
+                beside ? (left ? x - width - 30 : x + 30) : x - width / 2)),
+              y: Math.max(12, Math.min(panelHeight - height - 12,
+                beside ? y - height / 2 : (y > panelHeight / 2 ? y - height - 30 : y + 30))),
             };
-            const drawWidth = radarChartWidth - padding.left - padding.right;
-            const drawHeight = radarChartHeight - padding.top - padding.bottom;
-    
-            // Get the drawing group.
-            const drawingGroup = radarSVG.select("g.radar-drawing");
-    
-            const values = getRadarValuesForNode(d);
-            if (!values) return;
-            const numAxes = values.length;
-            const radarCacheKey = [
-              isSimulationModeActive() ? "simulation" : "ledger",
-              d.id,
-              radarChartWidth,
-              radarChartHeight,
-              numAxes,
-            ].join(":");
-    
-            // Radar chart geometry
-            const radarRadius = Math.min(drawWidth, drawHeight) / 2;
-            const baseAngle = -Math.PI / 2; // starting at top.
-            const centerX = drawWidth / 2;
-            const centerY = drawHeight / 2;
-    
-            // Compute new points for the radar polygon.
-            const newPoints = values.map((val, i) => {
-              const angle = baseAngle + (2 * Math.PI * i) / numAxes;
-              return [
-                radarRadius * val * Math.cos(angle) + centerX,
-                radarRadius * val * Math.sin(angle) + centerY,
-              ];
-            });
-    
-            // Global storage: retrieve previous points for this node.
-            let previousPoints =
-              window.prevRadarPoints && window.prevRadarPoints[radarCacheKey]
-                ? window.prevRadarPoints[radarCacheKey]
-                : newPoints;
-            if (previousPoints.length !== newPoints.length) {
-              previousPoints = newPoints;
-            }
-            // Save new points for future transitions.
-            if (!window.prevRadarPoints) window.prevRadarPoints = {};
-            window.prevRadarPoints[radarCacheKey] = newPoints;
-    
-            // Global storage for previous vertices.
-            let previousVertices =
-              window.prevRadarVertices && window.prevRadarVertices[radarCacheKey]
-                ? window.prevRadarVertices[radarCacheKey]
-                : newPoints;
-            if (previousVertices.length !== newPoints.length) {
-              previousVertices = newPoints;
-            }
-            if (!window.prevRadarVertices) window.prevRadarVertices = {};
-            window.prevRadarVertices[radarCacheKey] = newPoints;
-    
-            // Create a line generator.
-            const radarLine = d3.line().curve(d3.curveLinearClosed);
-    
-            // Baseline points: each axis at maximum value.
-            const baselinePoints = [];
-            for (let i = 0; i < numAxes; i++) {
-              const angle = baseAngle + (2 * Math.PI * i) / numAxes;
-              baselinePoints.push([
-                radarRadius * 1.0 * Math.cos(angle) + centerX,
-                radarRadius * 1.0 * Math.sin(angle) + centerY,
-              ]);
-            }
-    
-            // Draw axis lines
-            for (let i = 0; i < numAxes; i++) {
-              const angle = baseAngle + (2 * Math.PI * i) / numAxes;
-              const x2 = radarRadius * Math.cos(angle) + centerX;
-              const y2 = radarRadius * Math.sin(angle) + centerY;
-              let axisLine = drawingGroup.select(`line.axis-${i}`);
-              if (axisLine.empty()) {
-                axisLine = drawingGroup
-                  .append("line")
-                  .attr("class", `axis-${i}`)
-                  .attr("x1", centerX)
-                  .attr("y1", centerY)
-                  .attr("x2", x2)
-                  .attr("y2", y2)
-                  .attr("stroke-dasharray", "2,2")
-                  .attr("stroke-width", 1);
-              } else {
-                axisLine.transition().duration(300).attr("x2", x2).attr("y2", y2);
-              }
-            }
-    
-            // Draw or update baseline radar polygon
-            let baselinePath = drawingGroup.select("path.radar-baseline");
-            if (baselinePath.empty()) {
-              baselinePath = drawingGroup
-                .append("path")
-                .attr("class", "radar-baseline")
-                .attr("fill", "none")
-                .attr("stroke-width", 1)
-                .attr("stroke-dasharray", "4,4");
-            }
-            baselinePath
-              .transition()
-              .duration(300)
-              .attr("d", radarLine(baselinePoints));
-    
-            // Get the radar polygon element.
-            const radarPath = drawingGroup.select("path.node-radar");
-    
-            // Transition the radar polygon via interpolation.
-            radarPath.attr("stroke-width", 2).interrupt(); // Stop any ongoing transitions.
-    
-            radarPath
-              .transition()
-              .duration(300)
-              .attrTween("d", function () {
-                const interpolator = d3.interpolateArray(previousPoints, newPoints);
-                return function (t) {
-                  return radarLine(interpolator(t));
-                };
-              });
-    
-            // Update vertices with interpolation using global previous positions
-            const vertexSelection = drawingGroup
-              .selectAll("circle.vertex")
-              .data(newPoints, (point, index) => index);
-    
-            // Transition existing vertices.
-            vertexSelection
-              .transition()
-              .duration(300)
-              .attrTween("cx", function (d, i) {
-                const prevX = previousVertices[i][0];
-                const currX = newPoints[i][0];
-                return d3.interpolateNumber(prevX, currX);
-              })
-              .attrTween("cy", function (d, i) {
-                const prevY = previousVertices[i][1];
-                const currY = newPoints[i][1];
-                return d3.interpolateNumber(prevY, currY);
-              });
-    
-            // Append new vertices.
-            vertexSelection
-              .enter()
-              .append("circle")
-              .attr("class", "vertex")
-              .classed("selected", !!selectedNodeData)
-              .attr("cx", (d, i) => previousVertices[i][0])
-              .attr("cy", (d, i) => previousVertices[i][1])
-              .attr("r", 2)
-              .classed("selected", !!selectedNodeData)
-              .transition()
-              .duration(400)
-              .attr("cx", (d, i) => newPoints[i][0])
-              .attr("cy", (d, i) => newPoints[i][1]);
-    
-            // Remove exiting vertices.
-            vertexSelection
-              .exit()
-              .transition()
-              .duration(300)
-              .style("opacity", 0)
-              .remove();
           }
-    
-          /**
-           * Draws radial axis labels as independent HTML elements.
-           * The labels are appended to a container that is taken out of the normal layout flow.
-           *
-           * @param {number} centerX - X-coordinate of the radar chart center.
-           * @param {number} centerY - Y-coordinate of the radar chart center.
-           * @param {number} radarRadius - The radar chart radius.
-           * @param {Array} labels - Array of five axis label strings.
-           * @param {string} containerSelector - Selector for the overlay container.
-           */
-          function drawRadialAxisLabels(
-            centerX,
-            centerY,
-            radarRadius,
-            labels,
-            containerSelector,
-          ) {
-            // Select or create the overlay container.
-            let container = d3.select(containerSelector);
-            if (container.empty()) {
-              container = d3
-                .select("body")
-                .append("div")
-                .attr("id", containerSelector.replace("#", ""))
-                .style("position", "fixed")
-                .style("top", "0px")
-                .style("left", "0px")
-                .style("width", "100%")
-                .style("height", "100%")
-                .style("pointer-events", "none")
-                .style("z-index", "9999");
-            }
-    
-            // Clear any previous labels.
-            container.selectAll(".radial-axis-label").remove();
-    
-            // Base angle: start at the top.
-            const baseAngle = -Math.PI / 2;
-            // Define offset (in pixels) beyond the radar radius.
-            const offset = 20;
-    
-            // For each label, compute its absolute (viewport) position.
-            labels.forEach((label, i) => {
-              const angle = baseAngle + (2 * Math.PI * i) / labels.length;
-              // Compute position relative to the provided center and radius.
-              const x = centerX + (radarRadius + offset) * Math.cos(angle);
-              const y = centerY + (radarRadius + offset) * Math.sin(angle);
-    
-              // Append an independent label element.
-              container
-                .append("div")
-                .attr("class", "radial-axis-label")
-                .classed("selected", !!selectedNodeData)
-                .style("position", "fixed")
-                .style("left", `${x}px`)
-                .style("top", `${y}px`)
-                .style("transform", "translate(-50%, -50%)")
-                .style("background", "rgba(0, 0, 0, 0)")
-                .style("padding", "2px 4px")
-                .style("border-radius", "3px")
-                .style("font-size", "10px")
-                .style("pointer-events", "none")
-                .text(label);
-            });
-          }
-    
-          function updateAnnotationForLink(d, annotationGroup) {
-            annotationGroup.selectAll("svg.custom-radar").remove();
-            d3.select("#radial-labels-container").selectAll(".radial-axis-label").remove();
 
-            // Determine source and target coordinates:
-            let sx, sy, tx, ty;
-            if (
-              currentMode === "map" &&
-              d.source.x0 !== undefined &&
-              d.source.y0 !== undefined &&
-              d.target.x0 !== undefined &&
-              d.target.y0 !== undefined
-            ) {
-              // Use fixed coordinates from the node objects when in map mode.
-              sx = d.source.x0;
-              sy = d.source.y0;
-              tx = d.target.x0;
-              ty = d.target.y0;
-            } else {
-              // Use dynamic positions.
-              sx = typeof d.source === "object" ? d.source.x : d.source;
-              sy = typeof d.source === "object" ? d.source.y : d.source;
-              const adj = getAdjustedTarget(d);
-              tx = adj.x;
-              ty = adj.y;
+          function renderNetworkCallout(group, x, y, info) {
+            if (!Number.isFinite(x) || !Number.isFinite(y)) {
+              clearNetworkCallout(group);
+              return;
             }
-    
-            // Compute the chord midpoint.
-            const midChordX = (sx + tx) / 2;
-            const midChordY = (sy + ty) / 2;
-    
-            // Compute chord vector and its length.
-            const dx = tx - sx;
-            const dy = ty - sy;
-            const L = Math.sqrt(dx * dx + dy * dy);
-            if (L === 0) return; // avoid division by zero
-    
-            // For an arc drawn as "A L,L,0,0,1,..." the subtended angle is 60° (π/3).
-            // The distance from the chord midpoint to the arc midpoint is:
-            // arcOffset = L * (1 - cos(θ/2))
-            const thetaOver2 = Math.asin(0.5); // 30° in radians.
-            const arcOffset = L * (1 - Math.cos(thetaOver2));
-    
-            // Compute a unit perpendicular vector to the chord (using -dy, dx).
-            const ux = -dy / L,
-              uy = dx / L;
-    
-            // Compute the arc midpoint by offsetting the chord midpoint by arcOffset along the perpendicular.
-            const midX = midChordX - ux * arcOffset;
-            const midY = midChordY - uy * arcOffset;
-    
-            const offsets = getAnnotationOffsetNoXDefault(midX, midY, w, h);
-    
-            const titleStringSource = getStatnaam(d.source.id);
-            const titleStringTarget = getStatnaam(d.target.id);
-            const noteLabel = isSimulationModeActive()
-              ? `Exposure load: ${formatSmall(d.weight)}\nLedger animals: ${formatSmall(d.simulation?.ledgerWeight || d.ledgerWeight || 0)}\nSource prevalence: ${formatPct(d.simulation?.sourcePrevalence || 0)}\nTarget prevalence: ${formatPct(d.simulation?.targetPrevalence || 0)}`
-              : `Trade volume: ${d.weight}`;
-            const annotations = [
-              {
-                note: {
-                  title: `${titleStringSource} → ${titleStringTarget}`,
-                  label: noteLabel,
-                  wrapSplitter: /\n/,
-                  wrap: 0.5 * w - 60,
-                  bgPadding: { top: 6, left: 6, right: 4, bottom: 4 },
-                },
-                className: "link-annotation",
-                x: midX,
-                y: midY,
-                dx: offsets.dx,
-                dy: offsets.dy,
-              },
-            ];
-    
-            const makeAnnotations = d3
-              .annotation()
-              .type(linkAnnoType)
-              .notePadding(10)
-              .annotations(annotations);
-    
-            annotationGroup.call(makeAnnotations).raise();
-            annotationGroup
-              .selectAll("rect.annotation-note-bg")
-              .attr("fill", theme.elevated)
-              .attr("fill-opacity", 0.8)
-              .attr("rx", 4)
-              .attr("ry", 4);
-            annotationGroup
-              .selectAll(".link-annotation .annotation-connector .connector")
-              .attr("stroke", selectedNodeData ? theme.text : theme.accent);
-            annotationGroup
-              .selectAll(".link-annotation .annotation-note .note-line")
-              .attr("stroke", selectedNodeData ? theme.text : theme.accent);
-            annotationGroup
-              .selectAll(".link-annotation .annotation-note text")
-              .attr("fill", theme.text);
+            const node = info.kind === "node";
+            const width = node ? 270 : 296;
+            const rowsTop = node ? (info.compartments ? 304 : 220) : 150;
+            const height = rowsTop + info.rows.length * 25 + 14;
+            const position = getNetworkCalloutPosition(x, y, width, height, w, h);
+            const edgeX = Math.max(position.x, Math.min(position.x + width, x));
+            const edgeY = Math.max(position.y, Math.min(position.y + height, y));
+            group.selectAll("path.network-callout-connector").data([null]).join("path")
+              .attr("class", "network-callout-connector")
+              .attr("d", `M${x},${y}L${(x + edgeX) / 2},${edgeY}L${edgeX},${edgeY}`);
+            let card = group.select("g.network-hover-callout");
+            if (card.empty()) card = group.append("g").attr("class", "network-hover-callout");
+            card.attr("transform", `translate(${position.x},${position.y})`)
+              .classed("node-annotation", node).classed("link-annotation", !node);
+            const signature = JSON.stringify(info);
+            if (card.datum() === signature) { group.raise(); return; }
+            card.datum(signature);
+            const content = card.selectAll("g.network-callout-content").data([null]).join("g")
+              .attr("class", "network-callout-content");
+            content.selectAll("*").remove();
+            const gradient = content.append("defs").append("linearGradient")
+              .attr("id", "networkCalloutSurface").attr("x2", "1").attr("y2", "1");
+            gradient.append("stop").attr("stop-color", "#24323f");
+            gradient.append("stop").attr("offset", "1").attr("stop-color", "#111b27");
+            content.append("rect").attr("class", "network-callout-surface")
+              .attr("width", width).attr("height", height).attr("rx", 12);
+            content.append("line").attr("class", "network-callout-accent")
+              .attr("x1", 16).attr("x2", 48).attr("y1", 1).attr("y2", 1);
+            const text = (label, x, y, className, color) => content.append("text")
+              .attr("x", x).attr("y", y).attr("class", className)
+              .style("fill", color || null).text(label);
+            const name = (label, x, y, nameWidth) => content.append("foreignObject")
+              .attr("x", x).attr("y", y).attr("width", nameWidth).attr("height", 38)
+              .append("xhtml:div").attr("class", "network-callout-name").text(label);
+            text(info.code, 16, 26, "network-callout-code");
+            drawRadarChart(card, info);
+            if (node) {
+              text(info.tag, width - 16, 26, "network-callout-tag").attr("text-anchor", "end");
+              name(info.name, 16, 35, width - 32);
+              text(info.heroLabel, 165, 119, "network-callout-label");
+              text(info.hero, 165, 148, "network-callout-hero");
+              text(info.detailLabel, 165, 169, "network-callout-label");
+              text(info.detail, 165, 188, "network-callout-value");
+              text(info.profile, 83, 211, "network-callout-caption").attr("text-anchor", "middle");
+              if (info.compartments) {
+                info.compartments.forEach((item, index) => {
+                  const col = index % 2, row = Math.floor(index / 2);
+                  const cx = 16 + col * 128, cy = 230 + row * 35;
+                  text(item.label, cx, cy, "network-callout-label", item.color);
+                  text(item.value, cx, cy + 17, "network-callout-value");
+                });
+              }
+            } else {
+              text("FROM", 16, 51, "network-callout-caption");
+              name(info.source, 60, 38, width - 76);
+              text("TO", 16, 90, "network-callout-caption");
+              name(info.target, 60, 77, width - 76);
+              text(info.heroLabel, 16, 130, "network-callout-label");
+              text(info.hero, width - 16, 133, "network-callout-hero").attr("text-anchor", "end");
+            }
+            content.append("line").attr("class", "network-callout-divider")
+              .attr("x1", 16).attr("x2", width - 16).attr("y1", rowsTop - 5).attr("y2", rowsTop - 5);
+            info.rows.forEach((item, index) => {
+              const cy = rowsTop + index * 25;
+              if (index % 2 === 0) content.append("rect").attr("class", "network-callout-row")
+                .attr("x", 9).attr("y", cy).attr("width", width - 18).attr("height", 25).attr("rx", 4);
+              text(item.label, 17, cy + 17, "network-callout-label");
+              text(item.value, width - 17, cy + 17, "network-callout-value", item.color).attr("text-anchor", "end");
+            });
+            group.raise();
           }
-    
+
+          function drawRadarChart(card, info) {
+            const radar = card.selectAll("svg.custom-radar")
+              .data(info.kind === "node" && info.values ? [info] : [], (d) => `${d.code}/${d.profile}`)
+              .join(
+                (enter) => enter.append("svg").attr("class", "custom-radar"),
+                (update) => update,
+                (exit) => { exit.selectAll("*").interrupt("radar"); exit.remove(); },
+              )
+              .attr("x", 13).attr("y", 71).attr("width", 140).attr("height", 140)
+              .attr("viewBox", "0 0 140 140").attr("role", "img")
+              .attr("aria-label", (d) => `${d.profile}: ${d.labels.join(", ")}`);
+            if (radar.empty()) return;
+            const duration = window.matchMedia("(prefers-reduced-motion: reduce)").matches ? 0 : 400;
+            const point = (value, index, radius = 44) => {
+              const angle = -Math.PI / 2 + index * Math.PI * 2 / info.values.length;
+              return [70 + Math.cos(angle) * radius * value, 70 + Math.sin(angle) * radius * value];
+            };
+            const line = d3.line().curve(d3.curveLinearClosed);
+            radar.selectAll("path.radar-ring").data([0.25, 0.5, 0.75, 1]).join("path")
+              .attr("class", "radar-ring").attr("d", level => line(info.values.map((_, i) => point(level, i))));
+            radar.selectAll("line.radar-axis").data(info.values).join("line")
+              .attr("class", "radar-axis").attr("x1", 70).attr("y1", 70)
+              .attr("x2", (_, i) => point(1, i)[0]).attr("y2", (_, i) => point(1, i)[1]);
+            const polygon = (values) => line(values.map((value, i) => point(value, i)));
+            radar.selectAll("path.node-radar").data([info.values]).join(
+              (enter) => enter.append("path").attr("class", "node-radar").attr("d", polygon),
+              (update) => {
+                update.interrupt("radar").transition("radar").duration(duration).attr("d", polygon);
+                return update;
+              },
+            );
+            radar.selectAll("circle.vertex").data(info.values).join(
+              (enter) => enter.append("circle").attr("class", "vertex").attr("r", 2.5)
+                .attr("cx", (value, i) => point(value, i)[0]).attr("cy", (value, i) => point(value, i)[1]),
+              (update) => {
+                update.interrupt("radar").transition("radar").duration(duration)
+                  .attr("cx", (value, i) => point(value, i)[0]).attr("cy", (value, i) => point(value, i)[1]);
+                return update;
+              },
+            );
+            radar.selectAll("text.radar-axis-label").data(info.labels).join("text")
+              .attr("class", "radar-axis-label").attr("text-anchor", "middle").attr("dominant-baseline", "middle")
+              .attr("x", (_, i) => point(1, i, 61)[0]).attr("y", (_, i) => point(1, i, 61)[1]).text(label => label);
+          }
+
+          function updateAnnotationForLink(d, annotationGroup) {
+            const path = hoveredLink === d && hoveredLinkElement
+              ? hoveredLinkElement.getAttribute("d") : getNetworkLinkPath(d);
+            const arc = getNetworkLinkArc(path);
+            if (!arc) {
+              clearNetworkCallout(annotationGroup);
+              return;
+            }
+            const angle = arc.start + arc.direction * arc.span / 2;
+            const midX = arc.cx + arc.radius * Math.cos(angle);
+            const midY = arc.cy + arc.radius * Math.sin(angle);
+
+            const simulation = isSimulationModeActive();
+            const info = {
+              kind: "link", code: `${getNodeId(d.source)} → ${getNodeId(d.target)}`,
+              source: getStatnaam(getNodeId(d.source)), target: getStatnaam(getNodeId(d.target)),
+              heroLabel: simulation ? "Exposure load" : "Trade volume", hero: simulation ? formatSmall(d.weight) : formatCount(d.weight),
+              rows: simulation ? [
+                { label: "Ledger animals", value: formatCount(d.simulation?.ledgerWeight ?? d.ledgerWeight ?? 0) },
+                { label: "Source prevalence", value: formatPct(d.simulation?.sourcePrevalence || 0), color: simulationCompartmentColors.I },
+                { label: "Target prevalence", value: formatPct(d.simulation?.targetPrevalence || 0), color: simulationCompartmentColors.I },
+              ] : [{ label: "Unit", value: "Animals" }],
+            };
+            renderNetworkCallout(annotationGroup, midX, midY, info);
+          }
+
           // Helper function: Adjust dx, dy based on node position relative to SVG bounds.
           function getAnnotationOffset(x, y, svgWidth, svgHeight, amount = 50) {
             let dx = amount; // default offset
@@ -7966,25 +7659,6 @@
     
             dx = x > svgWidth / 2 ? -amount : amount;
             dy = y > svgHeight / 2 ? -amount : amount;
-    
-            return { dx, dy };
-          }
-    
-          function getAnnotationOffsetNoXDefault(x, y, svgWidth, svgHeight) {
-            // Horizontal offset: if x is more than half the width, place annotation to the left (-50); otherwise, to the right (+50).
-            const dx = x > svgWidth / 2 ? -50 : 50;
-    
-            let dy;
-            if (y < svgHeight * 0.3) {
-              // Near the top edge: shift annotation downward.
-              dy = 50;
-            } else if (y > svgHeight * 0.7) {
-              // Near the bottom edge: shift annotation upward.
-              dy = -50;
-            } else {
-              // Default: place annotation above the point.
-              dy = -50;
-            }
     
             return { dx, dy };
           }
@@ -8288,7 +7962,7 @@
           // Node Click Handler
           function onClickNode(event, d) {
             if (event.defaultPrevented) return;
-            clearHoveredLinkState();
+            clearHoveredLinkState(window.isDoingTemporalUpdate);
             // Save previous selection before clearing
             let wasSelected = !!selectedNodeData;
             let wasSameNode = selectedNodeData && selectedNodeData.id === d.id;
@@ -8413,19 +8087,6 @@
                 }
               });
     
-            // Update annotation styling for the selected node
-            annotationGroup
-              .selectAll(".node-annotation")
-              .classed("selected", !!selectedNodeData);
-    
-            d3.select("svg.custom-radar").classed("selected", !!selectedNodeData);
-    
-            d3.selectAll("circle.vertex").classed("selected", !!selectedNodeData);
-    
-            d3.selectAll(".radial-axis-label").classed(
-              "selected",
-              !!selectedNodeData,
-            );
     
             // Add an overlay to gray out the background map.
             // Always interrupt and remove any existing overlay.
@@ -8514,7 +8175,7 @@
     
           // Clear Selection (If Clicking Again/Unclicked)
           function clearSelection(flag, keepFocusPanels = false) {
-            clearHoveredLinkState();
+            clearHoveredLinkState(keepFocusPanels);
             selectedNodeData = null;
             if (!keepFocusPanels) updateFocusIndicator();
             window.herdlinkComparison?.refresh();
@@ -8575,19 +8236,6 @@
               .attr("stroke", null)
               .attr("stroke-opacity", null);
     
-            // Update annotation styling for the selected node
-            annotationGroup
-              .selectAll(".node-annotation")
-              .classed("selected", !!selectedNodeData);
-    
-            d3.select("svg.custom-radar").classed("selected", !!selectedNodeData);
-    
-            d3.selectAll("circle.vertex").classed("selected", !!selectedNodeData);
-    
-            d3.selectAll(".radial-axis-label").classed(
-              "selected",
-              !!selectedNodeData,
-            );
     
             if (!keepFocusPanels) {
               // Display the global stats display.
@@ -10154,7 +9802,7 @@
             // Disable buttons and checkboxes during transitions.
             disableAllButtons();
             disableAllCheckboxes();
-            clearHoveredLinkState();
+            clearHoveredLinkState(window.isDoingTemporalUpdate);
             if (linkSelection) linkSelection.interrupt();
             if (nodeEnter) nodeEnter.interrupt();
             if (labelSelection) labelSelection.interrupt();
@@ -11316,12 +10964,13 @@
           }
     
           function updateTemporalNetwork() {
+            const changingMapLayout = currentMode === "map" && isMovingToMap;
+            nodeGroup.interrupt("map-position");
             topNMetric = getHotspotRankings(hotspots);
             isDoingTemporalUpdate = true;
             window.isDoingTemporalUpdate = true;
             let previousLinkIndex = hoveredLink ? hoveredLink.id : null;
-            clearHoveredLinkState();
-            d3.select("#radial-labels-container").selectAll("*").remove();
+            clearHoveredLinkState(true);
     
             let lastSelectedNodeIndex = null;
     
@@ -11386,10 +11035,7 @@
                 d3.select(this)
                   .attr("stroke-dasharray", totalLength + " " + totalLength)
                   .attr("stroke-dashoffset", totalLength);
-              })
-              .on("mouseenter", handleLinkMouseEnter)
-              .on("mousemove", handleLinkMouseMove)
-              .on("mouseleave", handleLinkMouseLeave);
+              });
     
             // MERGE and transition links.
             linkSelection = linksEnter.merge(linksSelection);
@@ -11439,6 +11085,7 @@
               .call(drag(forceSim))
               .on("click", debouncedOnClickNode)
               .on("mouseover", function (event, d) {
+                if (hoveredLink) clearHoveredLinkState();
                 hoveredNode = d;
                 d3.select(this).select("circle.primary").attr("stroke", theme.text);
                 updateAnnotationForNode(d, annotationGroup);
@@ -11454,7 +11101,7 @@
                   .select("circle.primary")
                   .attr("stroke", null)
                   .attr("stroke-width", null);
-                annotationGroup.selectAll("*").remove();
+                clearNetworkCallout();
               });
     
             // In the enter selection, build the node shapes.
@@ -11660,25 +11307,25 @@
                 circleSel
                   .attr("fill", nodeColor(d.community))
                   .transition()
-                  .duration(200)
+                  .duration(nodeAppearanceDuration)
                   .style("opacity", 1)
                   .attr("r", d.r)
                   .attr("stroke", null)
                   .attr("stroke-width", null);
                 foSel
                   .transition()
-                  .duration(200)
+                  .duration(nodeAppearanceDuration)
                   .style("opacity", 0)
                   .on("end", function () {
                     d3.select(this).style("display", "none");
                   });
               } else {
                 // Otherwise, fade out the circle and fade in the overlay.
-                circleSel.transition().duration(200).style("opacity", 0);
+                circleSel.transition().duration(nodeAppearanceDuration).style("opacity", 0);
                 foSel
                   .style("display", "block")
                   .transition()
-                  .duration(200)
+                  .duration(nodeAppearanceDuration)
                   .style("opacity", 1);
               }
             });
@@ -11714,20 +11361,13 @@
             // Restart simulation in graph mode.
             if (currentMode === "graph") {
               forceSim.alpha(1).restart();
+            } else if (changingMapLayout) {
+              updateMapLayout(true);
             } else {
               updateMapPositionsWithTransition(
                 (instant = true),
                 (recordOnly = true),
               );
-            }
-    
-            // If previously hovered over a link, first check if it has zero weight.
-            if (previousLinkIndex !== null) {
-              const previousLink = allLinks.find((d) => d.id === previousLinkIndex);
-              if (previousLink && !previousLink.disabled && previousLink.weight > 0) {
-                hoveredLink = previousLink;
-                updateAnnotationForLink(hoveredLink, annotationGroup);
-              }
             }
     
             // Restore previsouly selected node if it still exists.
@@ -11742,15 +11382,11 @@
               }
             }
     
-            // Force update annotation for hovered node.
             if (hoveredNode) {
-              if (currentMode === "graph") {
-                hoveredNode = null;
-                updateAnnotationForNode(null, annotationGroup);
-              } else {
-                updateAnnotationForNode(hoveredNode, annotationGroup);
-              }
+              hoveredNode = allNodes.find((node) => node.id === hoveredNode.id) || null;
             }
+            if (previousLinkIndex !== null) restoreNetworkLinkCallout(previousLinkIndex);
+            if (!hoveredLink) updateAnnotationForNode(hoveredNode || selectedNodeData, annotationGroup);
 
             if (isSimulationModeActive()) {
               renderSimulationPanels();
@@ -12095,6 +11731,7 @@
                 .attr("r", (m, i) => d.r + (i + 1) * hotspotRingSpacing);
             });
             labelSelection.attr("dy", hotspotLabelDy);
+            updateNetworkLinkBoundaries(true);
           }
     
           function restoreLinks() {
@@ -12147,6 +11784,7 @@
             svg.selectAll(".map-region").attr("d", path);
             mapLayers.mount({ projection, geometry: nlMapData, width: w, height: h });
 
+            const targets = new Map();
             if (!nlLabelPoints) {
               console.error("NL label point data not loaded.");
             } else {
@@ -12155,16 +11793,13 @@
                   (f) => f.properties.statcode === d.id,
                 );
                 if (labelFeature) {
-                  const coords = projection(labelFeature.geometry.coordinates);
-                  d.x = coords[0];
-                  d.y = coords[1];
+                  targets.set(d.id, projection(labelFeature.geometry.coordinates));
                 }
               });
             }
 
-            updateMapPositionsWithTransition(instant);
+            updateMapPositionsWithTransition(instant, false, targets);
             applySimulationMapPrevalence();
-            if (hoveredLink) updateAnnotationForLink(hoveredLink, annotationGroup);
           }
 
           function resizeNetworkPanel() {
@@ -12176,8 +11811,9 @@
             w = width;
             h = height;
             svg.attr("viewBox", `0 0 ${w} ${h}`);
+            calloutSvg.attr("viewBox", `0 0 ${w} ${h}`);
             svg.select("#mapOverlay").attr("width", w).attr("height", h);
-            if (!forceSim) return;
+            if (!forceSim || !linkSelection) return;
 
             forceSim.force("center").x(w / 2).y(h / 2);
             if (currentMode === "map") {
@@ -12269,9 +11905,7 @@
     
           function switchToGraphMode() {
             mapLayers.unmount();
-            nodeEnter.interrupt("map-position");
-            linkSelection.interrupt("map-position");
-            labelSelection.interrupt("map-position");
+            nodeGroup.interrupt("map-position");
             disableAllButtons();
             disableAllCheckboxes();
     
@@ -12305,131 +11939,49 @@
             }
           }
     
-          // Update Node Positions When Switching to Map Mode
-          function updateMapPositionsWithTransition(
-            instant = false,
-            recordOnly = false,
-          ) {
-            const transitionDuration = instant ? 0 : 1000;
+          function updateMapPositionsWithTransition(instant = false, recordOnly = false, targets = new Map()) {
+            nodeGroup.interrupt("map-position");
+            if (recordOnly) {
+              nodeEnter.each(function (d) {
+                const transform = d3.select(this).attr("transform");
+                const position = transform?.match(/translate\(([^,]+),\s*([^)]+)\)/);
+                d.x0 = d.x = position ? +position[1] : d.x;
+                d.y0 = d.y = position ? +position[2] : d.y;
+              });
+              return;
+            }
 
-            const getMapLinkPath = (d) => {
-              const dx = d.target.x - d.source.x,
-                dy = d.target.y - d.source.y,
-                dr = Math.sqrt(dx * dx + dy * dy),
-                adj = getAdjustedTarget(d);
-              return (
-                "M" +
-                d.source.x +
-                "," +
-                d.source.y +
-                "A" +
-                dr +
-                "," +
-                dr +
-                " 0 0,1 " +
-                adj.x +
-                "," +
-                adj.y
-              );
-            };
-
-            const recordNodeMapPosition = (d) => {
-              d.x0 = d.x;
-              d.y0 = d.y;
-              if (selectedNodeData && selectedNodeData.id === d.id) {
-                updateAnnotationForNode(d, annotationGroup);
+            const positions = allNodes.map((d) => ({
+              d, x: d.x, y: d.y, target: targets.get(d.id) || [d.x, d.y],
+            }));
+            const render = (t) => {
+              for (const { d, x, y, target } of positions) {
+                d.x0 = d.x = x + (target[0] - x) * t;
+                d.y0 = d.y = y + (target[1] - y) * t;
               }
-              if (hoveredNode && hoveredNode.id === d.id) {
-                updateAnnotationForNode(d, annotationGroup);
-              }
-            };
-
-            const recordLinkMapPosition = (d) => {
-              if (typeof d.source === "object") {
-                d.source.x0 = d.source.x;
-                d.source.y0 = d.source.y;
-              }
-              if (typeof d.target === "object") {
-                d.target.x0 = d.target.x;
-                d.target.y0 = d.target.y;
-              }
-            };
-    
-            if (!recordOnly) {
-              if (instant) {
-                nodeEnter
-                  .interrupt("map-position")
-                  .attr("transform", (d) => `translate(${d.x},${d.y})`)
-                  .each(recordNodeMapPosition);
-
-                linkSelection
-                  .interrupt("map-position")
-                  .attr("d", getMapLinkPath)
-                  .each(recordLinkMapPosition);
-
-                labelSelection
-                  .interrupt("map-position")
-                  .attr("x", (d) => d.x)
-                  .attr("y", (d) => d.y - (d.r + 13));
-
-                return;
-              }
-
-              // Transition node groups.
-              nodeEnter
-                .transition("map-position")
-                .duration(transitionDuration)
-                .attr("transform", (d) => `translate(${d.x},${d.y})`)
-                .on("end", function () {
-                  recordNodeMapPosition(d3.select(this).datum());
-                });
-    
-              // Transition link positions.
-              linkSelection
-                .transition("map-position")
-                .duration(transitionDuration)
-                .attr("d", getMapLinkPath)
-                .on("end", function () {
-                  recordLinkMapPosition(d3.select(this).datum());
-                });
-    
-              // Transition label positions.
+              nodeEnter.attr("transform", (d) => `translate(${d.x},${d.y})`);
+              linkSelection.attr("d", getNetworkLinkPath);
               labelSelection
-                .transition("map-position")
-                .duration(transitionDuration)
                 .attr("x", (d) => d.x)
                 .attr("y", (d) => d.y - (d.r + 13));
+              if (hoveredLink) {
+                updateAnnotationForLink(hoveredLink, annotationGroup);
+              } else if (hoveredNode || selectedNodeData) {
+                updateAnnotationForNode(hoveredNode || selectedNodeData, annotationGroup);
+              }
+            };
+
+            if (instant) {
+              render(1);
             } else {
-              // In recordOnly mode, do not change element positions—just record what is currently shown.
-              nodeEnter.each(function (d) {
-                // Get the current transform attribute from the node element.
-                const transformStr = d3.select(this).attr("transform");
-                if (transformStr) {
-                  const match = transformStr.match(
-                    /translate\(([^,]+),\s*([^)]+)\)/,
-                  );
-                  if (match) {
-                    d.x0 = +match[1];
-                    d.y0 = +match[2];
-                  }
-                } else {
-                  d.x0 = d.x;
-                  d.y0 = d.y;
-                }
-              });
-              allLinks.forEach((link) => {
-                link.x0 =
-                  typeof link.source === "object" ? link.source.x0 : link.source;
-                link.y0 =
-                  typeof link.source === "object" ? link.source.y0 : link.source;
-                link.x1 =
-                  typeof link.target === "object" ? link.target.x0 : link.target;
-                link.y1 =
-                  typeof link.target === "object" ? link.target.y0 : link.target;
-              });
+              render(0);
+              isMovingToMap = true;
+              nodeGroup.transition("map-position").duration(1000)
+                .tween("positions", () => render)
+                .on("end interrupt cancel", () => { isMovingToMap = false; });
             }
           }
-    
+
           // Function to bridge native graph data and JSNetworkX
           // function createJSNetworkxGraph(nodes, links) {
           //     // Create a new directed graph.
@@ -14052,6 +13604,7 @@
             if (svg && svg.node().hasChildNodes()) {
               svg.selectAll("*").remove();
             }
+            clearNetworkCallout(calloutSvg);
     
             // Use weekly aggregation as the default CSV file.
             const defaultCSVUrl = resolveAssetUrl(
@@ -14153,6 +13706,11 @@
           }
     
           function initHerdLink(csvUrl) {
+            nodeGroup?.interrupt("link-boundary");
+            nodeGroup?.interrupt("map-position");
+            clearHoveredLinkState();
+            hoveredNode = null;
+            linkSelection = null;
             comparisonDataError = null;
             cancelSimulationRecompute();
             if (forceSim) forceSim.stop();

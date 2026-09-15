@@ -15,7 +15,7 @@ const functions = [
   "computeTradeCommunityTimeline", "evaluatePartitionModularity",
   "computeHotSpotMetrics", "computeEigenvectorCentrality", "buildAdjList",
   "getStronglyConnectedComponents", "computePerronPair", "computePerronRoot", "computeSpectralRadius",
-  "getComparisonMetricDefinitions", "buildComparisonSeries", "getOriginalSimulationSeries", "getComparisonData", "initHerdLink",
+  "getComparisonMetricDefinitions", "buildComparisonSeries", "getOriginalSimulationSeries", "getComparisonData", "initHerdLink", "clearNetworkCallout", "clearHoveredLinkState",
 ].map((name) => {
   const match = source.match(new RegExp(`^([ ]*)function ${name}\\([^]*?^\\1}`, "m"));
   assert.ok(match, `Runtime function ${name} exists`);
@@ -333,7 +333,15 @@ test("failed CSV fetches and parsing publish an error instead of stale results, 
     const context = runtime();
     assert.equal(context.getComparisonData().status, "ready");
     const updates = [];
+    let clearedCallouts = 0;
+    const positionInterrupts = [];
     Object.assign(context, {
+      nodeGroup: { interrupt(name) { positionInterrupts.push(name); } },
+      hoveredLink: { id: "CR01-CR02" }, hoveredLinkElement: null, hoveredNode: { id: "CR01" }, linkSelection: {},
+      annotationGroup: { selectAll: () => ({
+        interrupt(name) { assert.equal(name, "radar"); return this; },
+        remove() { clearedCallouts += 1; },
+      }) },
       forceSim: null, svg: null, mapLayers: { unmount() {} }, persistentUiHandlersBound: true,
       cancelSimulationRecompute() {}, setTimeReplayState() {}, disableAllButtons() {},
       disableAllCheckboxes() {}, removeTimeControlListeners() {}, console: { error() {} },
@@ -344,6 +352,11 @@ test("failed CSV fetches and parsing publish an error instead of stale results, 
     context.d3.csvParse = () => { throw new Error("Parse failed"); };
     context.window.herdlinkComparison = { refresh: () => updates.push(context.getComparisonData()) };
     context.initHerdLink("test.csv");
+    assert.equal(context.hoveredLink, null);
+    assert.equal(context.hoveredNode, null);
+    assert.equal(context.linkSelection, null);
+    assert.equal(clearedCallouts, 1);
+    assert.deepEqual(positionInterrupts, ["link-boundary", "map-position"]);
     await new Promise(setImmediate);
     assert.deepEqual(updates.map(({ status }) => status), ["loading", "error"]);
     const result = context.getComparisonData();

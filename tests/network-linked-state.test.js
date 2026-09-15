@@ -129,41 +129,73 @@ test("radar axes remain finite when restrictions remove a metric across all date
   assert.deepEqual(values.slice(1), [0, 0, 0.5, 0]);
 });
 
-test("annotations separate permitted local trades from imports and exports", () => {
+test("node callouts separate permitted local trades from imports and exports", () => {
   const node = { id: "CR35", statnaam: "Region", community: 1, x: 0, y: 0 };
   const allLinks = [
     { source: node, target: node, weight: 100, disabled: false },
     { source: node, target: "CR10", weight: 300, disabled: true },
     { source: "CR10", target: node, weight: 200, disabled: false },
   ];
-  let label;
-  const annotation = {
-    type() { return this; }, notePadding() { return this; },
-    annotations(items) { label = items[0].note.label; return this; },
-  };
+  let info;
   const context = vm.createContext({
-    currentMode: "graph", w: 800, h: 600, allNodes: [node], allLinks,
-    selectedNodeData: node, theme: {}, nodeAnnoType: null,
-    getAnnotationOffset: () => ({ dx: 0, dy: 0 }),
-    isSimulationModeActive: () => false, drawRadarChart() {},
-    d3: {
-      sum: (items, value) => items.reduce((total, item) => total + value(item), 0),
-      annotation: () => annotation,
-    },
+    currentMode: "graph", allNodes: [node], allLinks,
+    theme: { incoming: "blue", outgoing: "orange", accent: "mint" },
+    isSimulationModeActive: () => false, getRadarValuesForNode: () => [0, 0, 0, 0, 0],
+    formatCount: String, renderNetworkCallout: (_group, _x, _y, data) => { info = data; },
   });
-  vm.runInContext(extractFunction("updateAnnotationForNode"), context);
+  vm.runInContext(["getNodeId", "getNodeCalloutData", "updateAnnotationForNode"].map(extractFunction).join("\n"), context);
   context.updateAnnotationForNode(node, selection());
-  assert.match(label, /Incoming Trade: 200\nOutgoing Trade: 0\nLocal Trade: 100\nSelf-Trade Ratio: 100\.0%/);
+  assert.equal(info.name, "Region");
+  assert.equal(info.tag, "P1");
+  assert.equal(info.hero, "100.0%");
+  assert.deepEqual(Array.from(info.rows, ({ label, value, color }) => [label, value, color]), [
+    ["Incoming trade", "200", "blue"], ["Outgoing trade", "0", "orange"], ["Local trade", "100", "mint"],
+  ]);
 
   allLinks[0].disabled = true;
   allLinks[2].disabled = true;
   context.updateAnnotationForNode(node, selection());
-  assert.match(label, /Incoming Trade: 0\nOutgoing Trade: 0\nLocal Trade: 0\nSelf-Trade Ratio: NA$/);
+  assert.deepEqual(Array.from(info.rows, ({ value }) => value), ["0", "0", "0"]);
+  assert.equal(info.hero, "—");
 
   allLinks[0].disabled = false;
   allLinks[1].disabled = false;
   context.updateAnnotationForNode(node, selection());
-  assert.match(label, /Outgoing Trade: 300\nLocal Trade: 100\nSelf-Trade Ratio: 25\.0%/);
+  assert.deepEqual(Array.from(info.rows, ({ value }) => value), ["0", "300", "100"]);
+  assert.equal(info.hero, "25.0%");
+});
+
+test("simulation node callouts use the displayed frame for compartments, pressure and radar", () => {
+  const node = { id: "CR35", statnaam: "Region", community: 0 };
+  const state = { N: 1000, S: 650, E: 100, I: 200, R: 50,
+    exposedShare: 0.1, prevalence: 0.2, recoveredShare: 0.05, incomingExposure: 80, outgoingPressure: 40 };
+  const context = vm.createContext({
+    allNodes: [node], simulationState: { currentFrame: { nodeStates: { CR35: state } } },
+    isSimulationModeActive: () => true, formatCount: String, formatSmall: String,
+    theme: { incoming: "blue", outgoing: "orange" },
+    simulationCompartmentLabels: { S: "Susceptible", E: "Exposed", I: "Infectious", R: "Recovered" },
+    simulationCompartmentColors: { S: "green", E: "amber", I: "red", R: "blue" },
+    get allLinks() { assert.fail("Simulation callouts read frame values directly"); },
+  });
+  vm.runInContext(["formatPct", "getRadarValuesForNode", "getNodeCalloutData"].map(extractFunction).join("\n"), context);
+  const info = context.getNodeCalloutData(node);
+  assert.equal(info.hero, "20.0%");
+  assert.equal(info.detail, "1000");
+  assert.deepEqual(Array.from(info.values), [0.65, 0.1, 0.2, 0.05, 0.12]);
+  assert.deepEqual(Array.from(info.labels), ["S", "E", "I", "R", "XP"]);
+  assert.deepEqual(Array.from(info.compartments, ({ label, value, color }) => [label, value, color]), [
+    ["Susceptible", "650", "green"], ["Exposed", "100", "amber"],
+    ["Infectious", "200", "red"], ["Recovered", "50", "blue"],
+  ]);
+  assert.deepEqual(Array.from(info.rows, ({ label, value }) => [label, value]), [
+    ["Incoming exposure", "80"], ["Outgoing pressure", "40"],
+  ]);
+  state.N = state.S = state.E = state.I = state.R = 0;
+  state.exposedShare = state.prevalence = state.recoveredShare = 0;
+  state.incomingExposure = state.outgoingPressure = 0;
+  const empty = context.getNodeCalloutData(node);
+  assert.equal(empty.hero, "0.00%");
+  assert.deepEqual(Array.from(empty.values), [0, 0, 0, 0, 0]);
 });
 
 test("simulation recomputes dirty network partitions before building and displaying its trajectory", async () => {

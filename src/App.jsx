@@ -1011,7 +1011,6 @@ export default function App() {
           role="tooltip"
           aria-hidden="true"
         ></div>
-        <div id="radial-labels-container"></div>
         <div id="mainContainer">
           <LeftPanel />
           <NetworkPanel onOpenComparison={comparison.toggle} />

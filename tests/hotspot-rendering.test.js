@@ -172,6 +172,7 @@ test("a hotspot regained during its exit transition becomes visible and keeps it
     },
   };
   let labelOffset;
+  const boundaryRefreshes = [];
   Object.assign(context, {
     hotspots: { CR35: scores() }, hotspotRingSpacing: 4,
     hotspotStyles: { outDegree: { color: "blue", dash: "10 5" } },
@@ -180,6 +181,7 @@ test("a hotspot regained during its exit transition becomes visible and keeps it
       return { each(callback) { callback.call(node, node); } };
     } },
     labelSelection: { attr(name, value) { assert.equal(name, "dy"); labelOffset = value(node); } },
+    updateNetworkLinkBoundaries: (includeTransition) => boundaryRefreshes.push(includeTransition),
     d3: { select(element) {
       assert.equal(element, node);
       return { select(selector) { assert.equal(selector, ".hotspot-rings"); return ringGroup; } };
@@ -197,4 +199,5 @@ test("a hotspot regained during its exit transition becomes visible and keeps it
   assert.equal(ring.styles.opacity, 1);
   assert.equal(ring.attrs.r, 16);
   assert.equal(labelOffset, -4);
+  assert.deepEqual(boundaryRefreshes, [true, true]);
 });

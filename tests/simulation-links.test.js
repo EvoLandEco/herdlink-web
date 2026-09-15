@@ -87,6 +87,7 @@ test("Restore skips recomputation when no controls have been changed", () => {
 function prepareModeSwitching(context) {
   Object.assign(context, {
     clearTimeout, simulationRunId: 0, simulationRecomputeTimer: null,
+    clearNetworkCallout() {},
     canSwitchAppDataMode: () => true,
     beginAppModeSwitchBounce: () => true,
     refreshCurrentNetworkFrame: () => {
@@ -103,7 +104,7 @@ function prepareModeSwitching(context) {
   });
   context.d3.selectAll = () => ({ property() {} });
   for (const name of [
-    "syncModeSwitcherRadios", "setModePanelsRendering", "resetRadarRenderState",
+    "syncModeSwitcherRadios", "setModePanelsRendering",
     "configureSimulationModeUi", "restoreLedgerHotspotsMax", "hideSimulationOverlay",
     "clearSimulationRenderState", "updateNetwork", "applySimulationMapPrevalence",
     "finishModePanelsRendering", "setSimulationInputsDisabled", "enableAllButtons",

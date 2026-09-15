@@ -151,6 +151,7 @@ export function NetworkPanel({ onOpenComparison }) {
         </button>
       </div>
       <svg id="mainFigureSVG" tabIndex="-1"></svg>
+      <svg id="networkCalloutSVG"></svg>
       <div className="watermark">
         <span className="watermark-text"></span>
         <img

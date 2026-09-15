@@ -65,7 +65,7 @@ function runtime(capture, inert = false) {
   const theme = new Map([["--color-accent", "#72e4d4"], ["--color-track", "#52667d"], ["color", "white"]]);
   const app = {
     inert,
-    children: [{ id: "mainContainer" }, { id: "radial-labels-container" }],
+    children: [{ id: "mainContainer" }],
     getBoundingClientRect: () => ({ width: 1440, height: 900 }),
     querySelectorAll(selector) {
       if (selector === "select") return [selected];
@@ -111,7 +111,7 @@ function runtime(capture, inert = false) {
   return { context, app, downloads, sliderRule, stickyNodes, stickyStyles };
 }
 
-test("app screenshots retain radar labels, form state and slider styles while excluding transient overlays", async () => {
+test("app screenshots retain chart content, form state and slider styles while excluding transient overlays", async () => {
   const { context, app, downloads, sliderRule, stickyNodes, stickyStyles } = runtime(async (target, options) => {
     assert.equal(target, app);
     assert.equal(app.inert, true);

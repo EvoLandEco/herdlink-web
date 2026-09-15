@@ -14,7 +14,7 @@ function extractFunction(name) {
 function selection(data = []) {
   return {
     elements: data.map((datum) => ({ datum, attrs: {} })),
-    interruptions: [],
+    interruptions: [], transitions: new Map(), transitionCalls: [],
     attr(name, value) {
       this.elements.forEach((element) => {
         element.attrs[name] = typeof value === "function" ? value.call(element, element.datum) : value;
@@ -25,7 +25,35 @@ function selection(data = []) {
       this.elements.forEach((element) => callback.call(element, element.datum));
       return this;
     },
-    interrupt(name) { this.interruptions.push(name); return this; },
+    node() { return this.elements[0]; },
+    interrupt(name) {
+      this.interruptions.push(name);
+      const transition = this.transitions.get(name);
+      this.transitions.delete(name);
+      transition?.end?.();
+      return this;
+    },
+    transition(name) {
+      const pending = {};
+      this.transitions.set(name, pending);
+      this.transitionCalls.push(name);
+      const transition = {
+        duration(value) { pending.duration = value; return this; },
+        tween(key, factory) { pending.factory = factory; return this; },
+        on(events, callback) { pending.end = callback; return this; },
+      };
+      return transition;
+    },
+    advance(name, time) {
+      const pending = this.transitions.get(name);
+      if (!pending) return;
+      pending.tick ??= pending.factory();
+      pending.tick(time);
+      if (time === 1) {
+        this.transitions.delete(name);
+        pending.end?.();
+      }
+    },
   };
 }
 
@@ -36,6 +64,7 @@ function runtime(mode = "map") {
   ];
   const allLinks = [{ source: allNodes[0], target: allNodes[1], weight: 25, disabled: true }];
   const nodeEnter = selection(allNodes);
+  const nodeGroup = selection([{}]);
   const labelSelection = selection(allNodes);
   const linkSelection = selection(allLinks);
   linkSelection.elements[0].attrs = { class: "linkSelectOut", display: "none", opacity: 0.5 };
@@ -47,6 +76,7 @@ function runtime(mode = "map") {
   const mapRegions = selection(nlMapData.features);
   const overlay = selection([{}]);
   const svg = selection([{}]);
+  const calloutSvg = selection([{}]);
   svg.select = (selector) => { assert.equal(selector, "#mapOverlay"); return overlay; };
   svg.selectAll = (selector) => { assert.equal(selector, ".map-region"); return mapRegions; };
   const mapMounts = [];
@@ -64,10 +94,10 @@ function runtime(mode = "map") {
     restart() { forceState.running = true; forceState.starts += 1; return this; },
   };
   const context = vm.createContext({
-    allNodes, allLinks, nodeEnter, labelSelection, linkSelection, svg,
+    allNodes, allLinks, nodeEnter, nodeGroup, labelSelection, linkSelection, svg, calloutSvg,
     nlMapData, nlLabelPoints, forceSim, selectedNodeData: allNodes[0],
     hoveredNode: null, hoveredLink: null, annotationGroup: {},
-    currentMode: mode, w: 800, h: 600,
+    currentMode: mode, isMovingToMap: false, w: 800, h: 600,
     containerCol2: { clientWidth: 800, clientHeight: 600 },
     window: { isPlaying: true, currentDate: new Date("2020-04-01") },
     mapLayers: { mount: (value) => mapMounts.push(value) },
@@ -95,11 +125,11 @@ function runtime(mode = "map") {
     },
   });
   vm.runInContext([
-    "getAdjustedTarget", "renderGraphPositions", "updateMapPositionsWithTransition",
+    "getAdjustedTarget", "getNetworkLinkPath", "getNetworkLinkArc", "renderGraphPositions", "updateMapPositionsWithTransition",
     "updateMapLayout", "resizeNetworkPanel",
   ].map(extractFunction).join("\n"), context);
   return {
-    context, allNodes, allLinks, nodeEnter, labelSelection, linkSelection, svg,
+    context, allNodes, allLinks, nodeEnter, nodeGroup, labelSelection, linkSelection, svg,
     overlay, mapRegions, mapMounts, annotations, fits, forceState,
     resize(width, height) {
       context.containerCol2.clientWidth = width;
@@ -117,6 +147,7 @@ test("map resize keeps regions, routes, labels, focus and context layers aligned
   app.resize(600, 900);
 
   assert.equal(app.svg.elements[0].attrs.viewBox, "0 0 600 900");
+  assert.equal(app.context.calloutSvg.elements[0].attrs.viewBox, "0 0 600 900");
   assert.deepEqual(app.overlay.elements[0].attrs, { width: 600, height: 900 });
   assert.deepEqual(app.fits, [[600, 900]]);
   assert.equal(app.mapRegions.elements[0].attrs.d, "0,750 600,150");
@@ -127,16 +158,13 @@ test("map resize keeps regions, routes, labels, focus and context layers aligned
   assert.deepEqual(app.labelSelection.elements.map(({ attrs }) => [attrs.x, attrs.y]), [[150, 579], [450, 275]]);
   const path = app.linkSelection.elements[0].attrs.d;
   assert.ok(path.startsWith("M150,600A"));
-  assert.ok(path.endsWith(`${450 - 12 / Math.sqrt(2)},${300 + 12 / Math.sqrt(2)}`));
+  assert.ok(path.endsWith(`${450 - 17 / Math.sqrt(2)},${300 + 17 / Math.sqrt(2)}`));
   assert.equal(app.mapMounts.length, 1);
   assert.equal(app.mapMounts[0].width, 600);
   assert.equal(app.mapMounts[0].height, 900);
   assert.equal(app.mapMounts[0].geometry, app.context.nlMapData);
   assert.deepEqual(app.mapMounts[0].projection([25, 25]), [150, 600]);
-  assert.deepEqual(app.annotations, [
-    { type: "node", id: "A", x: 150, y: 600, x0: 150, y0: 600 },
-    { type: "link", source: "A", target: "B" },
-  ]);
+  assert.deepEqual(app.annotations, [{ type: "link", source: "A", target: "B" }]);
   assert.equal(app.context.selectedNodeData, selected);
   assert.equal(app.context.window.currentDate, date);
   assert.equal(app.context.window.isPlaying, true);
@@ -146,8 +174,9 @@ test("map resize keeps regions, routes, labels, focus and context layers aligned
   assert.deepEqual(app.linkSelection.elements[0].attrs, { class: "linkSelectOut", display: "none", opacity: 0.5, d: path });
   assert.equal(app.forceState.running, false);
   assert.equal(app.forceState.starts, 0);
+  assert.deepEqual(app.nodeGroup.interruptions, ["map-position"]);
   for (const item of [app.nodeEnter, app.linkSelection, app.labelSelection]) {
-    assert.deepEqual(item.interruptions, ["map-position"]);
+    assert.deepEqual(item.interruptions, []);
   }
 });
 
@@ -170,6 +199,100 @@ test("graph resize scales coordinates, velocities and held nodes before resuming
   assert.equal(app.context.selectedNodeData, selected);
   assert.equal(app.context.window.isPlaying, true);
   assert.equal(app.allLinks[0].disabled, true);
+});
+
+test("map date changes retain displayed positions when force nodes receive new data", () => {
+  const app = runtime();
+  app.nodeEnter.elements[0].attrs.transform = "translate(150,600)";
+  app.nodeEnter.elements[1].attrs.transform = "translate(450,300)";
+  app.context.d3.select = (element) => ({ attr: (name) => element.attrs[name] });
+  app.context.updateMapPositionsWithTransition(true, true);
+  assert.deepEqual(app.allNodes.map(({ x, y, x0, y0 }) => [x, y, x0, y0]), [
+    [150, 600, 150, 600], [450, 300, 450, 300],
+  ]);
+  app.linkSelection.attr("d", app.context.getNetworkLinkPath);
+  const path = app.linkSelection.elements[0].attrs.d;
+  assert.ok(path.startsWith("M150,600A"));
+  assert.ok(path.endsWith(`${450 - 17 / Math.sqrt(2)},${300 + 17 / Math.sqrt(2)}`));
+});
+
+test("one map tween keeps arrow clearance and callouts aligned as route directions change", () => {
+  const app = runtime();
+  const [source, target] = app.allNodes;
+  Object.assign(source, { x: 200, y: 100 });
+  Object.assign(target, { x: 400, y: 300, linkBoundaryRadius: 40 });
+  app.context.hoveredLink = app.allLinks[0];
+  app.context.hoveredNode = source;
+  const destinations = new Map([[source.id, [600, 100]], [target.id, [400, 300]]]);
+  app.context.updateMapPositionsWithTransition(false, false, destinations);
+  assert.equal(app.context.isMovingToMap, true);
+  assert.deepEqual(app.nodeGroup.transitionCalls, ["map-position"]);
+  for (const item of [app.nodeEnter, app.linkSelection, app.labelSelection]) {
+    assert.deepEqual(item.transitionCalls, []);
+  }
+  for (const time of [0.1, 0.25, 0.5, 0.75, 1]) {
+    app.nodeGroup.advance("map-position", time);
+    assert.equal(source.x, 200 + 400 * time);
+    assert.equal(source.x0, source.x);
+    assert.equal(source.y0, source.y);
+    assert.equal(app.nodeEnter.elements[0].attrs.transform, `translate(${source.x},${source.y})`);
+    assert.equal(app.labelSelection.elements[0].attrs.x, source.x);
+    assert.equal(app.labelSelection.elements[0].attrs.y, source.y - source.r - 13);
+    const arc = app.context.getNetworkLinkArc(app.linkSelection.elements[0].attrs.d);
+    assert.ok(Math.abs(Math.hypot(arc.x2 - target.x, arc.y2 - target.y) - 44) < 1e-9);
+  }
+  assert.equal(app.context.isMovingToMap, false);
+  assert.ok(app.annotations.every(({ type }) => type === "link"));
+  app.context.hoveredLink = null;
+  app.context.updateMapPositionsWithTransition(true, false, destinations);
+  assert.equal(app.annotations.at(-1).id, source.id);
+});
+
+test("boundary refreshes during map movement use displayed coordinates and keep the refreshed radius", () => {
+  const app = runtime();
+  const [source, target] = app.allNodes;
+  app.context.updateMapLayout();
+  app.nodeGroup.advance("map-position", 0.3);
+  const displayed = app.allNodes.map(({ x, y }) => [x, y]);
+  app.nodeEnter.elements.forEach((element) => {
+    element.querySelector = () => ({ getAttribute: () => element.datum.r });
+    element.querySelectorAll = () => [];
+  });
+  target.r = 30;
+  vm.runInContext(extractFunction("updateNetworkLinkBoundaries"), app.context);
+  app.context.updateNetworkLinkBoundaries();
+  assert.deepEqual(app.allNodes.map(({ x, y }) => [x, y]), displayed);
+  const check = () => {
+    const arc = app.context.getNetworkLinkArc(app.linkSelection.elements[0].attrs.d);
+    assert.equal(arc.x1, source.x);
+    assert.equal(arc.y1, source.y);
+    assert.ok(Math.abs(Math.hypot(arc.x2 - target.x, arc.y2 - target.y) - 35) < 1e-9);
+  };
+  check();
+  app.nodeGroup.advance("map-position", 0.7);
+  check();
+  app.nodeGroup.advance("map-position", 1);
+  check();
+});
+
+test("an interrupted map move leaves nodes and arrows at their displayed positions", () => {
+  const app = runtime();
+  app.context.updateMapLayout();
+  app.nodeGroup.advance("map-position", 0.4);
+  const displayed = app.allNodes.map(({ x, y }) => [x, y]);
+  const path = app.linkSelection.elements[0].attrs.d;
+  app.nodeGroup.interrupt("map-position");
+  assert.equal(app.context.isMovingToMap, false);
+  app.nodeGroup.advance("map-position", 1);
+  assert.deepEqual(app.allNodes.map(({ x, y }) => [x, y]), displayed);
+  assert.equal(app.linkSelection.elements[0].attrs.d, path);
+
+  app.context.updateMapLayout();
+  assert.equal(app.context.isMovingToMap, true);
+  app.resize(600, 900);
+  assert.equal(app.context.isMovingToMap, false);
+  assert.equal(app.nodeGroup.transitions.size, 0);
+  assert.deepEqual(app.allNodes.map(({ x, y }) => [x, y]), [[150, 600], [450, 300]]);
 });
 
 test("graph positions and their annotation follow subsequent layout ticks", () => {
@@ -202,69 +325,143 @@ test("graph ticks show the hovered link before hovered or selected node annotati
   assert.equal(app.annotations.at(-1).id, "A");
 });
 
-test("link annotations remove node radar content on hover and after map or graph resize", () => {
+function calloutContent(app) {
+  const content = { radar: false, text: [], signature: undefined, present: false, redraws: 0, attrs: {} };
+  const item = {
+    append() { return this; }, attr() { return this; }, style() { return this; },
+    text(value) { content.text.push(value); return this; },
+  };
+  const clear = () => { content.text = []; content.redraws += 1; };
+  const contentLayer = {
+    ...item, data() { return this; }, join() { return this; },
+    selectAll(selector) { assert.equal(selector, "*"); return { remove: clear }; },
+  };
+  const card = {
+    empty: () => !content.present,
+    datum(value) {
+      if (!arguments.length) return content.signature;
+      content.signature = value;
+      return this;
+    },
+    attr(name, value) { content.attrs[name] = value; return this; },
+    classed() { return this; }, append() { return item; },
+    selectAll(selector) { assert.equal(selector, "g.network-callout-content"); return contentLayer; },
+  };
+  const connector = { data() { return this; }, join() { return this; }, attr() { return this; } };
+  const group = {
+    select(selector) { assert.equal(selector, "g.network-hover-callout"); return card; },
+    append(tag) { assert.equal(tag, "g"); content.present = true; return card; },
+    selectAll(selector) {
+      if (selector === "*") return {
+        interrupt(name) { assert.equal(name, "radar"); return this; },
+        remove() { clear(); content.radar = false; content.present = false; content.signature = undefined; },
+      };
+      assert.equal(selector, "path.network-callout-connector");
+      return connector;
+    },
+    raise() { return this; },
+  };
+  Object.assign(app.context, {
+    annotationGroup: group, hoveredLinkElement: null, isSimulationModeActive: () => false,
+    getStatnaam: (id) => `Region ${id}`, formatCount: String, formatSmall: String,
+    drawRadarChart(_card, info) { content.radar = info.kind === "node"; }, simulationCompartmentColors: { I: "red" },
+  });
+  vm.runInContext([
+    "getNodeId", "formatPct", "clearNetworkCallout", "getNetworkCalloutPosition", "renderNetworkCallout", "updateAnnotationForLink",
+  ].map(extractFunction).join("\n"), app.context);
+  return { content, group };
+}
+
+test("link callouts replace node radar content on hover and after map or graph resize", () => {
   for (const mode of ["map", "graph"]) {
     const app = runtime(mode);
-    const content = { radar: null, axisLabels: [], note: null };
-    const styleSelection = selection([]);
-    const annotationGroup = {
-      selectAll(selector) {
-        return selector === "svg.custom-radar"
-          ? { remove() { content.radar = null; } }
-          : styleSelection;
-      },
-      call(generator) { generator(); return this; },
-      raise() { return this; },
-    };
-    const nodeAnnotation = () => {
-      content.radar = {};
-      content.axisLabels = ["ID", "OD", "BT", "PR", "EC"];
-    };
-    app.context.annotationGroup = annotationGroup;
-    app.context.updateAnnotationForNode = nodeAnnotation;
-    Object.assign(app.context, {
-      theme: {}, linkAnnoType: {},
-      isSimulationModeActive: () => false,
-      getStatnaam: (id) => `Region ${id}`,
+    const { content, group } = calloutContent(app);
+    const nodeAnnotation = (node = app.allNodes[0]) => app.context.renderNetworkCallout(group, node.x, node.y, {
+      kind: "node", code: node.id, name: "Region A", tag: "P1", rows: [],
     });
-    app.context.d3.select = (selector) => {
-      assert.equal(selector, "#radial-labels-container");
-      return { selectAll(selector) {
-        assert.equal(selector, ".radial-axis-label");
-        return { remove() { content.axisLabels = []; } };
-      } };
-    };
-    app.context.d3.annotation = () => {
-      let note;
-      const generator = () => {
-        assert.equal(content.radar, null);
-        assert.deepEqual(content.axisLabels, []);
-        content.note = note;
-      };
-      generator.type = () => generator;
-      generator.notePadding = () => generator;
-      generator.annotations = (annotations) => { note = annotations[0].note; return generator; };
-      return generator;
-    };
-    vm.runInContext([
-      "getAnnotationOffsetNoXDefault", "updateAnnotationForLink",
-    ].map(extractFunction).join("\n"), app.context);
-
+    app.context.updateAnnotationForNode = nodeAnnotation;
     nodeAnnotation();
-    app.context.updateAnnotationForLink(app.allLinks[0], annotationGroup);
-    assert.equal(content.radar, null);
-    assert.deepEqual(content.axisLabels, []);
-    assert.equal(content.note.title, "Region A → Region B");
-    assert.equal(content.note.label, "Trade volume: 25");
+    assert.equal(content.radar, true);
+    app.context.updateAnnotationForLink(app.allLinks[0], group);
+    assert.equal(content.radar, false);
+    assert.ok(content.text.includes("A → B"));
+    assert.ok(content.text.includes("Region A"));
+    assert.ok(content.text.includes("Region B"));
+    assert.ok(content.text.includes("Trade volume"));
+    assert.ok(content.text.includes("25"));
 
     nodeAnnotation();
     app.context.hoveredLink = app.allLinks[0];
     app.resize(600, 900);
-    assert.equal(content.radar, null);
-    assert.deepEqual(content.axisLabels, []);
-    assert.equal(content.note.title, "Region A → Region B");
+    assert.equal(content.radar, false);
+    assert.equal(JSON.parse(content.signature).kind, "link");
     assert.equal(app.context.selectedNodeData.id, "A");
   }
+});
+
+test("callouts move with graph ticks while reusing unchanged content and refresh changed values", () => {
+  const app = runtime("graph");
+  const { content, group } = calloutContent(app);
+  const link = app.allLinks[0];
+  app.context.updateAnnotationForLink(link, group);
+  const redraws = content.redraws, transform = content.attrs.transform;
+  link.source.x += 40;
+  link.source.y += 60;
+  app.context.updateAnnotationForLink(link, group);
+  assert.equal(content.redraws, redraws);
+  assert.notEqual(content.attrs.transform, transform);
+  link.weight = 50;
+  app.context.updateAnnotationForLink(link, group);
+  assert.equal(content.redraws, redraws + 1);
+  assert.ok(content.text.includes("50"));
+  assert.ok(!content.text.includes("25"));
+
+  app.context.isSimulationModeActive = () => true;
+  link.simulation = { ledgerWeight: 0, sourcePrevalence: 0.2, targetPrevalence: 0.05 };
+  link.ledgerWeight = 80;
+  app.context.updateAnnotationForLink(link, group);
+  const info = JSON.parse(content.signature);
+  assert.equal(info.heroLabel, "Exposure load");
+  assert.deepEqual(info.rows.map(({ value }) => value), ["0", "20.0%", "5.00%"]);
+});
+
+test("callouts clear invalid coordinates and degenerate links", () => {
+  const app = runtime("graph");
+  const { content, group } = calloutContent(app);
+  const link = app.allLinks[0];
+  for (const x of [NaN, Infinity, -Infinity]) {
+    app.context.updateAnnotationForLink(link, group);
+    assert.equal(content.present, true);
+    app.context.renderNetworkCallout(group, x, 200, { kind: "node" });
+    assert.equal(content.present, false);
+    assert.equal(content.text.length, 0);
+  }
+  app.context.updateAnnotationForLink(link, group);
+  link.target.x = link.source.x;
+  link.target.y = link.source.y;
+  app.context.updateAnnotationForLink(link, group);
+  assert.equal(content.present, false);
+  assert.equal(content.text.length, 0);
+});
+
+test("callout placement keeps full cards inside the panel at every edge", () => {
+  const context = vm.createContext({});
+  vm.runInContext(extractFunction("getNetworkCalloutPosition"), context);
+  for (const [panelWidth, panelHeight] of [[400, 540], [800, 600], [1200, 1000]]) {
+    for (const [width, height] of [[270, 309], [270, 368], [296, 239]]) {
+      for (const x of [0, panelWidth / 2, panelWidth]) {
+        for (const y of [0, panelHeight / 2, panelHeight]) {
+          const position = context.getNetworkCalloutPosition(x, y, width, height, panelWidth, panelHeight);
+          assert.ok(position.x >= 12 && position.x + width <= panelWidth - 12);
+          assert.ok(position.y >= 12 && position.y + height <= panelHeight - 12);
+        }
+      }
+    }
+  }
+  const above = context.getNetworkCalloutPosition(218, 450, 270, 368, 436, 728);
+  const below = context.getNetworkCalloutPosition(218, 200, 270, 368, 436, 728);
+  assert.ok(above.y + 368 < 450);
+  assert.ok(below.y > 200);
 });
 
 test("small graph bounds keep inactive nodes and route endpoints inside the panel", () => {
@@ -294,6 +491,34 @@ test("zero sizes are ignored and restored dimensions resize only once", () => {
   app.resize(900, 700);
   assert.equal(app.mapMounts.length, 1);
   assert.equal(app.svg.elements[0].attrs.viewBox, "0 0 900 700");
+});
+
+test("resizing while a dataset loads records dimensions without drawing the cleared network", () => {
+  for (const mode of ["map", "graph"]) {
+    const app = runtime(mode);
+    const positions = app.allNodes.map(({ x, y }) => [x, y]);
+    app.context.linkSelection = null;
+    app.forceState.running = false;
+    app.resize(600, 900);
+
+    assert.equal(app.context.w, 600);
+    assert.equal(app.context.h, 900);
+    assert.equal(app.svg.elements[0].attrs.viewBox, "0 0 600 900");
+    assert.equal(app.context.calloutSvg.elements[0].attrs.viewBox, "0 0 600 900");
+    assert.deepEqual(app.allNodes.map(({ x, y }) => [x, y]), positions);
+    assert.equal(app.mapMounts.length, 0);
+    assert.equal(app.annotations.length, 0);
+    assert.equal(app.forceState.running, false);
+    assert.equal(app.forceState.starts, 0);
+    assert.equal(app.nodeEnter.elements[0].attrs.transform, undefined);
+    assert.equal(app.labelSelection.elements[0].attrs.x, undefined);
+    assert.equal(app.linkSelection.elements[0].attrs.d, undefined);
+
+    app.context.linkSelection = app.linkSelection;
+    app.context.updateMapLayout(true);
+    assert.deepEqual(app.fits, [[600, 900]]);
+    assert.deepEqual(app.allNodes.map(({ x, y }) => [x, y]), [[150, 600], [450, 300]]);
+  }
 });
 
 test("resizing before data loads records usable dimensions without drawing", () => {
