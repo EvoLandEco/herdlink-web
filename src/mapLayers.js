@@ -185,13 +185,9 @@ export function createMapLayers({ svg, theme, fetchAsset, refreshRegions }) {
     const landCover = document.getElementById("mapLandCover").checked;
     if (!density && !landCover) return;
     const group = svg.append("g").attr("class", "map-layer-legend").attr("pointer-events", "none");
-    const width = Math.min(270, context.width - 32);
     const legendRowsHeight = (density ? 54 : 0) + (landCover ? 20 : 0);
     panel.style.setProperty("--map-layer-legend-height", `${legendRowsHeight}px`);
-    group.attr("transform", `translate(16, ${context.height - 110 - legendRowsHeight})`);
-    group.append("rect").attr("width", width)
-      .attr("height", 16 + legendRowsHeight)
-      .attr("rx", 5).attr("fill", theme.canvas).attr("fill-opacity", 0.92);
+    group.attr("transform", `translate(16, ${context.height - 80 - legendRowsHeight})`);
     if (density) {
       const scale = densityScale();
       const max = scale.domain()[1];

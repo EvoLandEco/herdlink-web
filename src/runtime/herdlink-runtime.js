@@ -12622,8 +12622,10 @@
             container.select("div.simulation-partition-map").remove();
             container.classed("simulation-partition-map-expanded", false);
             const width = element.clientWidth, height = element.clientHeight;
-            const top = 103, bottom = 35;
-            const radius = Math.max(24, Math.min((width - 86) / 2, (height - top - bottom - 68) / 2));
+            const compact = height < 360;
+            const top = compact ? 68 : 103, bottom = compact ? 4 : 35;
+            const radius = Math.max(24, Math.min((width - (compact ? 80 : 86)) / 2,
+              (height - top - bottom - (compact ? 80 : 68)) / 2));
             const cx = width / 2, cy = top + (height - top - bottom) / 2;
             let svg = container.select("svg.community-flow-chart");
             if (svg.empty()) {
@@ -12723,10 +12725,12 @@
               .attr("transform", (node) => geometry.nodesById.get(node.id).x < Math.PI ? null : "rotate(180)")
               .text((node) => node.id.slice(2));
             const caption = svg.selectAll("text.community-flow-summary").data([null]).join("text")
-              .attr("class", "community-flow-summary community-flow-caption").attr("x", width / 2).attr("y", 80).attr("text-anchor", "middle");
+              .attr("class", "community-flow-summary community-flow-caption").attr("x", width / 2).attr("y", 80).attr("text-anchor", "middle")
+              .attr("display", compact ? "none" : null);
             const detail = svg.selectAll("text.community-flow-detail").data([null]).join("text")
               .attr("class", "community-flow-detail community-flow-caption").attr("x", width / 2)
-              .attr("y", height - 21).attr("text-anchor", "middle");
+              .attr("y", height - 21).attr("text-anchor", "middle")
+              .attr("display", compact ? "none" : null);
             const summary = `${formatSmall(data.total)} ${simulation ? "exposure" : "animals"} · ${data.activeCount}/${data.nodes.length} active · ${data.total > 0 ? `${(100 * data.local / data.total).toFixed(1)}%` : "—"} local`;
             function highlight(id) {
               const node = data.nodes.find((item) => item.id === id);
