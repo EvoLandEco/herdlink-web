@@ -99,6 +99,7 @@ test("opening waits for runtime registration, respects capture and viewport lock
       prepare: () => calls.push("prepare"),
     };
     const context = vm.createContext({
+      setTimeout, clearTimeout,
       useState: (value) => {
         const slot = { value };
         state.push(slot);

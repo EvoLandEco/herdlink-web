@@ -45,6 +45,7 @@ function runtime() {
   const cache = new WeakMap([[data, original]]);
   const context = vm.createContext({
     Date, Map, Set, communityScale: "broad", loadedCSVData: data, uniqueDates: dates,
+    presetDailyData: data, presetDailyDates: dates.map(Number),
     tradeCommunityTimeline: Object.freeze({ ...byScale.broad, byScale }),
     originalLedgerStatsByDataset: cache,
     comparisonDataCache: new Map([["trade", { label: "trade" }], ["simulation", { label: "simulation" }]]),
@@ -202,7 +203,7 @@ test("community repaint preserves node positions, graph identity, and simulation
     context.window.currentSelectedNodeStat = "eigenvector";
     context.window.currentSelectedTradeNodeInsight = "communityMix";
     for (const name of ["updateSCCs", "updateNetworkStats", "updateGlobalStatsChart", "updateNodeStatsChart",
-      "updateTradeTable", "updateTradeNodeInsight"])
+      "updateTradeTable", "updateTradeNodeInsight", "renderSimulationNodeStatsChart"])
       context[name] = () => context.calls.push(name);
     vm.runInContext(extractFunction("refreshTradeCommunityScale"), context);
     const trajectory = context.simulationState.trajectory;
@@ -223,6 +224,7 @@ test("community repaint preserves node positions, graph identity, and simulation
         assert.ok(context.calls.includes(name));
     } else {
       assert.deepEqual(fills, []);
+      assert.ok(context.calls.includes("renderSimulationNodeStatsChart"));
       assert.ok(!context.calls.includes("updateNetworkStats"));
       assert.ok(!context.calls.includes("updateGlobalStatsChart"));
       assert.ok(!context.calls.includes("updateNodeStatsChart"));

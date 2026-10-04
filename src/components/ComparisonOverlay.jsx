@@ -1,10 +1,14 @@
 import { Fragment, memo, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { faBook, faCalendarDays, faChartLine, faCodeCompare, faFlask, faLayerGroup, faLocationDot, faNetworkWired, faRankingStar } from "@fortawesome/free-solid-svg-icons";
+import { faBook, faCalendarDays, faChartLine, faCodeCompare, faFlask, faLayerGroup, faLocationDot, faNetworkWired, faScaleBalanced } from "@fortawesome/free-solid-svg-icons";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
-import { ScenarioLibrary, ScenarioPresets } from "./ScenarioLibrary";
+import { ScenarioLibrary, ScenarioPresetSettings, ScenarioPresets } from "./ScenarioLibrary";
+import { ComparisonChartControls, RecommendedComparisons, ScenarioComparison, useScenarioComparison } from "./ScenarioComparison";
+import { ComparisonScenarioDetails } from "./ComparisonScenarioDetails";
+import { comparisonConfigurations } from "../scenarioComparison";
 import { useAnimatedComparisonSeries } from "../useAnimatedComparisonSeries";
 import {
   buildComparisonChart,
+  comparisonChartDomain,
   comparisonEventMarkerWidth,
   formatComparisonDelta,
   formatComparisonValue,
@@ -12,6 +16,7 @@ import {
   groupComparisonEvents,
   nearestComparisonDate,
   pairComparisonSeries,
+  topComparisonRegions,
 } from "../comparisonCharts";
 import "../styles/comparison.css";
 
@@ -30,7 +35,7 @@ function useComparisonTipPosition(label, maxHeight = 420) {
   const [active, setActive] = useState(false);
   useLayoutEffect(() => {
     const info = infoRef.current;
-    const body = info.closest(".comparison-body, .scenario-library");
+    const body = info.closest(".comparison-body, .comparison-sidebar, .scenario-library, .scenario-comparison-body");
     if (!active || !body) return;
     const tip = tipRef.current;
     const place = () => {
@@ -42,7 +47,14 @@ function useComparisonTipPosition(label, maxHeight = 420) {
       const needed = Math.min(maxHeight, tip.scrollHeight + 2);
       const down = below >= needed || below >= above;
       info.dataset.placement = down ? "below" : "above";
-      tip.style.maxHeight = `${Math.min(maxHeight, down ? below : above)}px`;
+      const height = Math.min(maxHeight, down ? below : above);
+      tip.style.maxHeight = `${height}px`;
+      if (body.classList.contains("comparison-sidebar")) {
+        tip.style.left = `${anchor.left}px`;
+        tip.style.right = "auto";
+        tip.style.top = `${down ? anchor.bottom + 10 : anchor.top - 10 - Math.min(needed, height)}px`;
+        tip.style.bottom = "auto";
+      }
     };
     place();
     const observer = new ResizeObserver(place);
@@ -98,10 +110,11 @@ function ComparisonInfo({ label, children, icon = faChartLine, rows = [], footer
   );
 }
 
-function PairedChart({ points, metric, date, currentDate, interventionEvents, introduction, scope, identity, animate, onInspect }) {
+function PairedChart({ points, compact = false, scalePoints, seriesLabel, metric, date, currentDate, interventionEvents, introduction, scope, animate, onInspect }) {
   const containerRef = useRef(null);
   const [size, setSize] = useState(null);
-  const animatedPoints = useAnimatedComparisonSeries(points, identity, animate);
+  const domain = useMemo(() => comparisonChartDomain(scalePoints || points), [scalePoints, points]);
+  const { points: animatedPoints, domain: animatedDomain } = useAnimatedComparisonSeries(points, domain, animate);
   useEffect(() => {
     const observer = new ResizeObserver(([entry]) => {
       const { width, height } = entry.contentRect;
@@ -111,16 +124,16 @@ function PairedChart({ points, metric, date, currentDate, interventionEvents, in
     return () => observer.disconnect();
   }, []);
   const chart = useMemo(() => size?.width > 0 && size?.height > 0
-    ? buildComparisonChart(animatedPoints, size.width, size.height) : null, [animatedPoints, size]);
+    ? buildComparisonChart(animatedPoints, size.width, size.height, compact, scalePoints, animatedDomain) : null, [animatedPoints, size, compact, scalePoints, animatedDomain]);
   const dates = useMemo(() => points.map((point) => point.date), [points]);
   const chartStart = chart?.start;
   const chartEnd = chart?.end;
   const plotWidth = chart ? chart.plot.right - chart.plot.left : 0;
-  const eventClusters = useMemo(() => groupComparisonEvents(interventionEvents, dates, plotWidth,
+  const eventClusters = useMemo(() => compact ? [] : groupComparisonEvents(interventionEvents, dates, plotWidth,
     (eventDate) => chartStart === chartEnd ? 0.5 : (Date.parse(eventDate) - chartStart) / (chartEnd - chartStart),
-  ), [chartStart, chartEnd, plotWidth, dates, interventionEvents]);
+  ), [chartStart, chartEnd, plotWidth, dates, interventionEvents, compact]);
   const introductionPosition = introduction && chart
-    ? (chart.x(Date.parse(introduction.recordedDate)) - chart.plot.left) / plotWidth : null;
+    ? (chart.x(Date.parse(introduction.displayDate)) - chart.plot.left) / plotWidth : null;
   const selected = points.find((point) => point.date === date);
   const animatedSelected = animatedPoints.find((point) => point.date === date);
   const delta = formatComparisonDelta(selected?.original, selected?.intervention, metric.format);
@@ -134,6 +147,18 @@ function PairedChart({ points, metric, date, currentDate, interventionEvents, in
     const timestamp = chart.start + fraction * (chart.end - chart.start);
     onInspect(dates[nearestComparisonDate(dates, timestamp)]);
   };
+  const inspectWithKeyboard = (event) => {
+    const index = Math.max(0, dates.indexOf(date));
+    const next = {
+      ArrowLeft: Math.max(0, index - 1),
+      ArrowRight: Math.min(dates.length - 1, index + 1),
+      Home: 0,
+      End: dates.length - 1,
+    }[event.key];
+    if (next === undefined && event.key !== "Enter") return;
+    event.preventDefault();
+    onInspect(event.key === "Enter" ? null : dates[next]);
+  };
 
   return (
     <div ref={containerRef} className="comparison-chart-container">
@@ -142,12 +167,14 @@ function PairedChart({ points, metric, date, currentDate, interventionEvents, in
           className="comparison-chart"
           viewBox={`0 0 ${size.width} ${size.height}`}
           role="img"
-          aria-label={`${metric.label} over time. At ${dateLabel(date)}, original ${formatComparisonValue(selected?.original, metric.format)}, intervention ${formatComparisonValue(selected?.intervention, metric.format)}, change ${delta}. Use the date slider to inspect other dates.`}
+          tabIndex={0}
+          aria-label={`${scope}: ${metric.label} over time. At ${dateLabel(date)}, ${seriesLabel ? `${seriesLabel} ${formatComparisonValue(selected?.intervention, metric.format)}` : `original ${formatComparisonValue(selected?.original, metric.format)}, intervention ${formatComparisonValue(selected?.intervention, metric.format)}, change ${delta}`}. Use left and right arrow keys to inspect dates; Enter follows the replay date.`}
+          onKeyDown={inspectWithKeyboard}
           onPointerDown={inspect}
           onPointerMove={(event) => { if (event.pointerType === "mouse" || event.buttons) inspect(event); }}
         >
-          {chart.ticks.map((tick) => (
-            <g key={tick}>
+          {chart.ticks.map((tick, index) => (
+            <g key={index}>
               <line className="comparison-gridline" x1={chart.plot.left} x2={chart.plot.right} y1={chart.y(tick)} y2={chart.y(tick)} />
               <text className="comparison-axis" x={chart.plot.left - 9} y={chart.y(tick) + 4} textAnchor="end">{formatAxis(tick)}</text>
             </g>
@@ -157,10 +184,10 @@ function PairedChart({ points, metric, date, currentDate, interventionEvents, in
               <line key={cluster.steps[0].date} x1={chart.plot.left + cluster.position * plotWidth} x2={chart.plot.left + cluster.position * plotWidth} y1={chart.plot.top - 7} y2={chart.plot.bottom} />
             ))}
           </g>
-          {introduction && <line className="comparison-introduction-line"
-            x1={chart.x(Date.parse(introduction.recordedDate))} x2={chart.x(Date.parse(introduction.recordedDate))}
+          {!compact && introduction && <line className="comparison-introduction-line"
+            x1={chart.x(Date.parse(introduction.displayDate))} x2={chart.x(Date.parse(introduction.displayDate))}
             y1={chart.plot.top - 27} y2={chart.plot.bottom} />}
-          <path className="comparison-line comparison-line--original" d={chart.original} />
+          {!seriesLabel && <path className="comparison-line comparison-line--original" d={chart.original} />}
           <path className="comparison-line comparison-line--intervention" d={chart.intervention} />
           {date !== currentDate && points.some((point) => point.date === currentDate) && <line className="comparison-current-date" x1={chart.x(Date.parse(currentDate))} x2={chart.x(Date.parse(currentDate))} y1={chart.plot.top} y2={chart.plot.bottom} />}
           {["original", "intervention"].map((key) => animatedPoints.map((point, index) => (
@@ -176,13 +203,13 @@ function PairedChart({ points, metric, date, currentDate, interventionEvents, in
               ))}
             </g>
           )}
-          <text className="comparison-delta" x={chart.plot.right - 5} y={chart.plot.top + 18} textAnchor="end">
+          {!compact && !seriesLabel && <text className="comparison-delta" x={chart.plot.right - 5} y={chart.plot.top + 18} textAnchor="end">
             <title>Intervention minus original</title>Δ {delta}
-          </text>
-          <text className="comparison-axis" x={chart.plot.left} y={size.height - 7}>{dateLabel(points[0].date)}</text>
-          {points.length > 1 && <text className="comparison-axis" x={chart.plot.right} y={size.height - 7} textAnchor="end">{dateLabel(points.at(-1).date)}</text>}
+          </text>}
+          {!compact && <text className="comparison-axis" x={0} y={size.height - 7}>{dateLabel(points[0].date)}</text>}
+          {!compact && points.length > 1 && <text className="comparison-axis" x={size.width} y={size.height - 7} textAnchor="end">{dateLabel(points.at(-1).date)}</text>}
         </svg>
-        {(eventClusters.length > 0 || introduction) && <div className="comparison-chart-events" role="group" aria-label={`${scope} chart events`}
+        {!compact && (eventClusters.length > 0 || introduction) && <div className="comparison-chart-events" role="group" aria-label={`${scope} chart events`}
           style={{ left: chart.plot.left, top: chart.plot.top - 22, width: chart.plot.right - chart.plot.left,
             "--event-marker-width": `${comparisonEventMarkerWidth}px`, "--chart-event-space": `${chart.plot.bottom - chart.plot.top - 20}px`,
             "--chart-event-width": `${chart.plot.right - chart.plot.left}px` }}>
@@ -194,35 +221,53 @@ function PairedChart({ points, metric, date, currentDate, interventionEvents, in
   );
 }
 
-function ComparisonScope({ title, description, helpRows, metrics, original, intervention, dates, date, currentDate, interventionEvents, introduction, metricKey, identity, animate, onMetricChange, onInspect, children }) {
+function ComparisonScope({ title, description, helpRows, metrics, original, intervention, regions, onRegionSelect, dates, date, currentDate, interventionEvents, introduction, metricKey, animate, onMetricChange, onInspect, children }) {
   const selectId = useId();
   const metric = metrics.find((entry) => entry.key === metricKey) || metrics[0];
   const originalFrame = original.find((frame) => frame.date === date);
   const interventionFrame = intervention.find((frame) => frame.date === date);
-  const points = useMemo(() => metric ? pairComparisonSeries(dates, original, intervention, metric.key) : [],
-    [dates, original, intervention, metric?.key]);
+  const points = useMemo(() => !regions && metric ? pairComparisonSeries(dates, original, intervention, metric.key) : [],
+    [dates, original, intervention, regions, metric?.key]);
   if (!metric) return <section className="comparison-scope"><h3>{title}</h3><p>No metrics available.</p></section>;
 
   return (
-    <section className="comparison-scope">
+    <section className={`comparison-scope${regions ? " comparison-scope--top-regions" : ""}`}>
       <div className="comparison-scope__heading">
-        <h3>{title}</h3>
-        <div className="comparison-scope__context">{children || <span>Across all regions</span>}</div>
-        <ComparisonInfo label={title} icon={title === "Network" ? faNetworkWired : faLocationDot} rows={helpRows}>{description}</ComparisonInfo>
+        <div className="comparison-scope__title">
+          <h3>{title}</h3>
+          <ComparisonInfo label={title} icon={title === "Overall" ? faNetworkWired : faLocationDot} rows={helpRows}>{description}</ComparisonInfo>
+        </div>
+        {children && <div className="comparison-scope__context">{children}</div>}
+        <div className="comparison-metric-select">
+          <label htmlFor={selectId} className="visually-hidden">{title} metric</label>
+          <select id={selectId} value={metric.key} title={metric.label} onChange={(event) => onMetricChange(event.target.value)}>
+            {metrics.map((entry) => <option key={entry.key} value={entry.key}>{entry.label}</option>)}
+          </select>
+          <ComparisonInfo label={metric.label} footer={metric.format === "percent" ? "Δ uses percentage points (pp)." : "Δ = Intervention − Original"}>{metric.description || metric.label}</ComparisonInfo>
+        </div>
       </div>
-      <div className="comparison-metric-select">
-        <label htmlFor={selectId}>Metric</label>
-        <select id={selectId} value={metric.key} onChange={(event) => onMetricChange(event.target.value)}>
-          {metrics.map((entry) => <option key={entry.key} value={entry.key}>{entry.label}</option>)}
-        </select>
-        <ComparisonInfo label={metric.label} footer={metric.format === "percent" ? "Δ uses percentage points (pp)." : "Δ = Intervention − Original"}>{metric.description || metric.label}</ComparisonInfo>
+      <div className={regions ? "comparison-ranked-regions" : "comparison-trajectories"} role="group"
+        aria-label={regions ? "Top region trajectories" : `${title} trajectories`} tabIndex={regions ? 0 : undefined}>
+        {(regions || [{ name: title, points }]).map((region, index) => {
+          const point = region.points.find((point) => point.date === date);
+          return <section key={index} className={regions ? "comparison-region-row" : "comparison-trajectory"} aria-label={regions ? `${region.name} (${region.id})` : title}>
+            {regions && <button type="button" className="comparison-region-row__name" onClick={() => onRegionSelect(region.id)}
+              aria-label={`Inspect ${region.name} (${region.id})`} title={region.name}>
+              <span>{region.id}</span> {region.name}
+            </button>}
+            <div className={regions ? "comparison-region-row__values" : "comparison-pair"}>
+              <div className="comparison-series-label--original"><span className={regions ? undefined : "comparison-series-label comparison-series-label--original"}>Original</span> <strong>{formatComparisonValue(point?.original, metric.format)}</strong></div>
+              <div className="comparison-series-label--intervention"><span className={regions ? undefined : "comparison-series-label comparison-series-label--intervention"}>Intervention</span> <strong>{formatComparisonValue(point?.intervention, metric.format)}</strong></div>
+              {regions && <span>Δ <strong>{formatComparisonDelta(point?.original, point?.intervention, metric.format)}</strong></span>}
+            </div>
+            <PairedChart compact={Boolean(regions)} points={region.points} metric={metric} date={date} currentDate={currentDate}
+              interventionEvents={interventionEvents} introduction={introduction} scope={region.name}
+              animate={animate} onInspect={onInspect} />
+          </section>;
+        })}
+        {regions && !regions.length && <p className="comparison-region-empty">No regional results for this metric.</p>}
       </div>
-      <div className="comparison-pair">
-        <div><span className="comparison-series-label comparison-series-label--original">Original</span><strong>{formatComparisonValue(originalFrame?.[metric.key], metric.format)}</strong></div>
-        <div><span className="comparison-series-label comparison-series-label--intervention">Intervention</span><strong>{formatComparisonValue(interventionFrame?.[metric.key], metric.format)}</strong></div>
-      </div>
-      <PairedChart points={points} metric={metric} date={date} currentDate={currentDate} interventionEvents={interventionEvents} introduction={introduction} scope={title} identity={`${identity}:${metric.key}`} animate={animate} onInspect={onInspect} />
-      <details className="comparison-stats">
+      {title === "Region" && !regions && <details className="comparison-stats">
         <summary>All {title.toLowerCase()} stats <span>{metrics.length}</span></summary>
         <table>
           <caption className="visually-hidden">{title} comparison for {dateLabel(date)}</caption>
@@ -236,7 +281,7 @@ function ComparisonScope({ title, description, helpRows, metrics, original, inte
             </tr>
           ))}</tbody>
         </table>
-      </details>
+      </details>}
     </section>
   );
 }
@@ -250,7 +295,7 @@ function InterventionTrack({ clusters, onInspect }) {
 }
 
 function IntroductionMarker({ introduction, position, onInspect }) {
-  const cluster = useMemo(() => ({ position, steps: [{ date: introduction.recordedDate, events: [{
+  const cluster = useMemo(() => ({ position, steps: [{ date: introduction.displayDate, events: [{
     date: introduction.date, description: `Seed introduction in ${introduction.seedLabel}. Both scenarios share this introduction.`,
   }] }] }), [introduction, position]);
   return <InterventionMarker cluster={cluster} introduction onInspect={onInspect} />;
@@ -265,7 +310,7 @@ const InterventionMarker = memo(function InterventionMarker({ cluster, introduct
   const [detailDate, setDetailDate] = useState(firstDate);
   const selectedDate = steps.some((step) => step.date === detailDate) ? detailDate : firstDate;
   const label = introduction
-    ? `Inspect seed introduction on ${dateLabel(steps[0].events[0].date)}${steps[0].events[0].date !== firstDate ? `, recorded at ${dateLabel(firstDate)}` : ""}`
+    ? `Inspect seed introduction on ${dateLabel(steps[0].events[0].date)}`
     : grouped
     ? `Choose among ${steps.length} intervention steps from ${dateLabel(firstDate)} to ${dateLabel(steps.at(-1).date)}`
     : `Inspect ${eventCount} intervention ${eventCount === 1 ? "event" : "events"} at ${dateLabel(firstDate)}`;
@@ -288,7 +333,7 @@ const InterventionMarker = memo(function InterventionMarker({ cluster, introduct
           <span>{introduction ? dateLabel(steps[0].events[0].date) : `${eventCount} ${eventCount === 1 ? "event" : "events"}`}</span>
         </div>
         {grouped && <p className="comparison-event__range-label">{dateLabel(firstDate)} — {dateLabel(steps.at(-1).date)}</p>}
-        {introduction && steps[0].events[0].date !== firstDate && <p className="comparison-event__range-label">First recorded step: {dateLabel(firstDate)}</p>}
+        {introduction && steps[0].events[0].date !== firstDate && <p className="comparison-event__range-label">Display period: {dateLabel(firstDate)}</p>}
         {steps.map((step, stepIndex) => (
           <div key={step.date} className="comparison-event__step">
             {grouped && <button type="button" aria-expanded={selectedDate === step.date}
@@ -315,59 +360,41 @@ function ComparisonContent({ data, animate }) {
   const dates = data?.dates || [];
   const regions = data?.regions || [];
   const nodeMetrics = data?.nodeMetrics || [];
-  const [regionId, setRegionId] = useState(data?.selectedRegionId || regions[0]?.id || "");
+  const [regionId, setRegionId] = useState("");
   const [globalMetricKey, setGlobalMetricKey] = useState(data?.mode === "simulation" ? "prevalence" : "totalTradeVolume");
   const [nodeMetricKey, setNodeMetricKey] = useState(data?.mode === "simulation" ? "prevalence" : "eigenvector");
   const [inspectedDate, setInspectedDate] = useState(null);
-  const [eventTrackWidth, setEventTrackWidth] = useState(0);
-  const eventTrackRef = useRef(null);
-  const rangeId = useId();
   const regionSelectId = useId();
-  useEffect(() => {
-    if (!ready) return;
-    const observer = new ResizeObserver(([entry]) => setEventTrackWidth(entry.contentRect.width));
-    observer.observe(eventTrackRef.current);
-    return () => observer.disconnect();
-  }, [ready]);
   useEffect(() => {
     setGlobalMetricKey(data?.mode === "simulation" ? "prevalence" : "totalTradeVolume");
     setNodeMetricKey(data?.mode === "simulation" ? "prevalence" : "eigenvector");
     setInspectedDate(null);
+    setRegionId("");
   }, [data?.mode, data?.scenarioContext?.datasetKey]);
-  useEffect(() => {
-    if (data?.selectedRegionId) setRegionId(data.selectedRegionId);
-  }, [data?.selectedRegionId]);
-  const selectedRegion = regions.find((region) => region.id === regionId) || regions[0];
+  const selectedRegion = regions.find((region) => region.id === regionId);
   const selectedMetric = nodeMetrics.find((metric) => metric.key === nodeMetricKey) || nodeMetrics[0];
+  const topRegions = useMemo(() => ready && selectedMetric ? topComparisonRegions(regions, data.original.nodes, selectedMetric.key, 3)
+    .map((region) => ({ ...region,
+      points: pairComparisonSeries(dates, data.original.nodes[region.id] || [], data.intervention.nodes[region.id] || [], selectedMetric.key),
+    })) : [], [ready, regions, dates, data?.original?.nodes, data?.intervention?.nodes, selectedMetric?.key]);
   const dateIndex = Math.max(0, dates.indexOf(inspectedDate || data?.date));
   const date = dates[dateIndex];
-  const timelineProgress = dates.length > 1 ? dateIndex / (dates.length - 1) : 0;
   const interventionEvents = data?.interventionEvents || [];
-  const eventClusters = useMemo(() => groupComparisonEvents(interventionEvents, dates, eventTrackWidth),
-    [interventionEvents, dates, eventTrackWidth]);
   const introductionDate = data?.mode === "simulation" ? data.settings?.introductionDate
     : data?.scenarioContext?.presetSettings?.ready ? data.scenarioContext.settings?.introductionDate : null;
   const seedLabel = data?.scenarioContext?.seedLabel;
+  const coverage = data?.scenarioContext?.provenance?.movementData;
   const introduction = useMemo(() => {
-    const point = getComparisonIntroduction(introductionDate, dates);
+    const point = getComparisonIntroduction(introductionDate, dates, coverage);
     return point ? { ...point, seedLabel } : null;
-  }, [introductionDate, dates, seedLabel]);
-  const changes = ready && selectedMetric ? regions.map((region) => {
-    const original = data.original.nodes[region.id]?.[dateIndex]?.[selectedMetric.key];
-    const intervention = data.intervention.nodes[region.id]?.[dateIndex]?.[selectedMetric.key];
-    return { ...region, original, intervention, delta: intervention - original };
-  }).filter((region) => Number.isFinite(region.original) && Number.isFinite(region.intervention))
-    .sort((a, b) => Math.abs(b.delta) - Math.abs(a.delta) || a.id.localeCompare(b.id)) : [];
-  const changedRegions = changes.filter((region) => region.delta !== 0);
-  const largestChange = Math.abs(changedRegions[0]?.delta || 0);
-
+  }, [introductionDate, dates, seedLabel, coverage]);
   return (
     <>
       <div className="comparison-body">
         {ready ? <div className="comparison-layout">
           <ComparisonScope
-            title="Network"
-            identity={`${data.mode}:network`} animate={animate}
+            title="Overall"
+            animate={animate}
             description="Compare the whole system across both scenarios."
             helpRows={[
               ["Original", "All recorded routes and regional trade permissions are open."],
@@ -385,20 +412,23 @@ function ComparisonContent({ data, animate }) {
             introduction={introduction}
             metricKey={globalMetricKey} onMetricChange={setGlobalMetricKey} onInspect={setInspectedDate}
           />
-          {selectedRegion ? (
+          {regions.length ? (
             <ComparisonScope
               title="Region"
-              identity={`${data.mode}:${selectedRegion.id}`} animate={animate}
-              description="Follow one region across both scenarios."
+              animate={animate}
+              description="Compare the leading regions or follow one region across both scenarios."
               helpRows={[
-                ["Choose a region", "Use the selector or select an entry in Largest changes. Your main network selection stays fixed."],
+                ["Top regions", "Three regions ranked by the highest finite value of the selected metric in Original across the full displayed timeline. Ties use region ID; regions without results are omitted."],
+                ["Compare curves", "Each row has its own scale shared by Original and Intervention. Original is dashed and Intervention is solid. Point at a chart to inspect the same date across all rows."],
+                ["Choose a region", "Use the selector or select a regional row. Your main network selection stays fixed."],
                 ["Read its trajectory", "Both lines share a scale. The dashed line shows Original; gaps mark missing results."],
                 ["Introduction", "The violet Intro marker shows introduction in the scenario's seed region."],
                 ["Interventions", "Markers show all scenario changes. Count badges gather nearby dates; hover for details or select a date."],
               ]}
               metrics={data.nodeMetrics}
-              original={data.original.nodes[selectedRegion.id] || []}
-              intervention={data.intervention.nodes[selectedRegion.id] || []}
+              original={data.original.nodes[selectedRegion?.id] || []}
+              intervention={data.intervention.nodes[selectedRegion?.id] || []}
+              regions={selectedRegion ? undefined : topRegions} onRegionSelect={setRegionId}
               dates={data.dates} date={date} currentDate={data.date}
               interventionEvents={interventionEvents}
               introduction={introduction}
@@ -406,40 +436,19 @@ function ComparisonContent({ data, animate }) {
             >
               <div className="comparison-region-select">
                 <label htmlFor={regionSelectId} className="visually-hidden">Region to compare</label>
-                <select id={regionSelectId} value={selectedRegion.id} onChange={(event) => setRegionId(event.target.value)}>
-                  {data.regions.map((region) => <option key={region.id} value={region.id}>{region.name} · {region.id}</option>)}
+                <select id={regionSelectId} value={selectedRegion?.id || "top-3"}
+                  title={selectedRegion ? `${selectedRegion.name} · ${selectedRegion.id}` : "Top 3 regions"}
+                  onChange={(event) => setRegionId(event.target.value === "top-3" ? "" : event.target.value)}>
+                  <optgroup label="Top regions">
+                    <option value="top-3">Top 3 regions</option>
+                  </optgroup>
+                  <optgroup label="Single region">
+                    {data.regions.map((region) => <option key={region.id} value={region.id}>{region.name} · {region.id}</option>)}
+                  </optgroup>
                 </select>
               </div>
             </ComparisonScope>
           ) : <section className="comparison-scope"><h3>Region</h3><p>No regional results available.</p></section>}
-          <aside className="comparison-changes">
-            <div className="comparison-scope__heading">
-              <h3>Largest changes</h3>
-              <ComparisonInfo label="Largest changes" icon={faRankingStar} rows={[
-                ["Ranking", "Up to six regions, ranked by absolute change for the selected region metric and inspected date."],
-                ["Inspect", "Select a region to show its trajectory in the Region panel."],
-              ]} footer="Positive values show increases; negative values show decreases. Interpret each change using the selected metric.">Find the regions most affected by your interventions.</ComparisonInfo>
-            </div>
-            <p className="comparison-changes__metric">{selectedMetric?.label || "Region metric"}</p>
-            {changedRegions.length ? (
-              <ol className="comparison-change-list" tabIndex={0} aria-label="Largest regional changes">
-                {changedRegions.slice(0, 6).map((region, index) => (
-                  <li key={region.id}>
-                    <button type="button" aria-pressed={region.id === selectedRegion?.id} onClick={() => setRegionId(region.id)}>
-                      <span className="comparison-change-rank">{String(index + 1).padStart(2, "0")}</span>
-                      <span className="comparison-change-copy">
-                        <span className="comparison-change-name">{region.name}<small>{region.id}</small></span>
-                        <span className="comparison-change-values">{formatComparisonValue(region.original, selectedMetric.format)} → {formatComparisonValue(region.intervention, selectedMetric.format)}</span>
-                        <span className="comparison-change-bar" aria-hidden="true"><i style={{ width: `${Math.abs(region.delta) / largestChange * 100}%` }} /></span>
-                      </span>
-                      <span className="comparison-change-delta">{formatComparisonDelta(region.original, region.intervention, selectedMetric.format)}</span>
-                    </button>
-                  </li>
-                ))}
-              </ol>
-            ) : <p className="comparison-changes__empty">{changes.length ? "No regional change at this date." : "No paired regional results at this date."}</p>}
-            <p className="comparison-changes__hint">Select a region to inspect its trajectory.</p>
-          </aside>
         </div> : (
           <div className="comparison-state" role="status" aria-live="polite">
             <span className={`comparison-state__symbol${data?.status === "error" ? " is-error" : ""}`} aria-hidden="true">{data?.status === "error" ? "!" : "↔"}</span>
@@ -448,35 +457,6 @@ function ComparisonContent({ data, animate }) {
           </div>
         )}
       </div>
-      {ready && <footer className="comparison-timeline">
-        <div className="comparison-timeline__heading">
-          <label htmlFor={rangeId}>Inspect date <time dateTime={date}>{dateLabel(date)}</time></label>
-          <span className="comparison-timeline__actions">
-            <span className="comparison-event-legend" aria-hidden="true">
-              {introduction && <span className="comparison-event-legend__introduction"><i />Introduction</span>}
-              {interventionEvents.length > 0 && <span className="comparison-event-legend__intervention"><i />Interventions</span>}
-            </span>
-            {date !== data.date && <button type="button" onClick={() => setInspectedDate(null)}>Current date</button>}
-            <ComparisonInfo label="Date inspector" icon={faCalendarDays} rows={[
-              ["Inspect a date", "Drag the ring or point at either chart."],
-              ["Intervention markers", "Hover or focus a diamond for details. Select it to inspect that step."],
-              ["Introduction", "The violet Intro marker shares the seed date used by both scenarios."],
-              ["Grouped steps", "A glowing rail spans nearby event dates. The badge counts recorded steps; open it to choose a date."],
-              ["Between recorded dates", "Introduction and interventions appear at the next recorded step; their actual dates remain in the details."],
-            ]} footer="The main replay date stays fixed." />
-          </span>
-        </div>
-        <div className={`comparison-timeline-slider${interventionEvents.length ? " has-events" : ""}${introduction ? " has-introduction" : ""}`} style={{ "--timeline-progress": `${timelineProgress * 100}%` }}>
-          <div className="comparison-timeline-track" aria-hidden="true"><span /></div>
-          <input id={rangeId} type="range" min="0" max={data.dates.length - 1} step="1" value={dateIndex} disabled={data.dates.length < 2} aria-valuetext={dateLabel(date)} onChange={(event) => setInspectedDate(data.dates[Number(event.target.value)])} />
-          <div ref={eventTrackRef} className="comparison-timeline-events" role="group" aria-label="Timeline events" style={{ "--event-marker-width": `${comparisonEventMarkerWidth}px` }}>
-            <InterventionTrack clusters={eventClusters} onInspect={setInspectedDate} />
-            {introduction && <IntroductionMarker introduction={introduction}
-              position={dates.length > 1 ? introduction.index / (dates.length - 1) : 0} onInspect={setInspectedDate} />}
-          </div>
-        </div>
-        <div className="comparison-timeline__ends"><span>{dateLabel(data.dates[0])}</span><span>{dateLabel(data.dates.at(-1))}</span></div>
-      </footer>}
     </>
   );
 }
@@ -490,14 +470,26 @@ export function ComparisonOverlay({ open, data, recomputing = false, onClose, on
   const titleId = useId();
   const libraryId = useId();
   const [scenariosOpen, setScenariosOpen] = useState(false);
+  const [threeScenarios, setThreeScenarios] = useState(false);
+  const [selectedComparisonSet, setSelectedComparisonSet] = useState("strategies");
+  const [comparisonColumns, setComparisonColumns] = useState(null);
+  const [comparisonMetricKeys, setComparisonMetricKeys] = useState({ simulation: "prevalence", trade: "outDegree" });
+  const [comparisonRegionView, setComparisonRegionView] = useState("top-3");
   const closeScenarios = () => {
     setScenariosOpen(false);
     scenariosToggleRef.current.focus({ preventScroll: true });
   };
   const busy = open && (recomputing || data?.status === "loading");
   const displayedData = busy && completedData.current ? completedData.current : data;
+  const comparisonMetrics = displayedData?.globalMetrics?.filter((metric) => displayedData.nodeMetrics.some((nodeMetric) => nodeMetric.key === metric.key)) || [];
+  const comparisonMetric = comparisonMetrics.find((metric) => metric.key === comparisonMetricKeys[displayedData?.mode]);
   const context = useMemo(() => busy && data?.scenarioContext
     ? { ...data.scenarioContext, disabled: true } : data?.scenarioContext, [busy, data?.scenarioContext]);
+  const columns = comparisonColumns || (displayedData?.scenarioContext?.presetSettings
+    ? comparisonConfigurations("strategies", displayedData.scenarioContext.presetSettings) : null);
+  const comparisonEvaluation = useScenarioComparison({ data: displayedData, enabled: open && threeScenarios && !busy,
+    slots: scenarioSlots, configurations: columns });
+  const comparisonBusy = open && threeScenarios && comparisonEvaluation.status === "loading";
   useLayoutEffect(() => {
     if (!open || data?.status === "error" || data?.status === "empty") completedData.current = null;
     else if (data?.status === "ready") completedData.current = data;
@@ -513,18 +505,27 @@ export function ComparisonOverlay({ open, data, recomputing = false, onClose, on
     return () => { if (dialog.open) dialog.close(); };
   }, [open]);
   useLayoutEffect(() => {
-    if (!open || busy) setScenariosOpen(false);
+    if (!open) setScenariosOpen(false);
     else if (scenariosOpen) {
       libraryRef.current.scrollTo({ top: 0 });
       libraryRef.current.querySelector("input:not(:disabled)")?.focus({ preventScroll: true });
     }
-  }, [open, busy, scenariosOpen]);
+  }, [open, scenariosOpen]);
+
+  const customControl = (
+    <button ref={scenariosToggleRef} type="button" className={`comparison-scenarios-toggle${activeScenarioSlot !== null ? " has-active-scenario" : ""}`} disabled={busy} aria-expanded={scenariosOpen} aria-controls={libraryId} onClick={() => setScenariosOpen((value) => !value)}>
+      <FontAwesomeIcon icon={faLayerGroup} aria-hidden="true" />
+      Custom{activeScenarioSlot !== null ? ` ${String(activeScenarioSlot + 1).padStart(2, "0")}` : ""}
+      <span aria-hidden="true">{scenariosOpen ? "−" : "+"}</span>
+    </button>
+  );
 
   return (
     <dialog
       ref={dialogRef}
       id="comparisonOverlay"
       className="comparison-overlay"
+      data-private-population={displayedData?.settings?.population?.reference?.accessClass === "private" ? "true" : undefined}
       aria-labelledby={titleId}
       onCancel={(event) => { event.preventDefault(); if (scenariosOpen) closeScenarios(); else onClose(); }}
       onClickCapture={(event) => {
@@ -539,14 +540,6 @@ export function ComparisonOverlay({ open, data, recomputing = false, onClose, on
       <header className="comparison-header">
         <h2 id={titleId} className="comparison-header__title"><FontAwesomeIcon icon={faCodeCompare} aria-hidden="true" />Compare Scenarios</h2>
         <div className="comparison-header__actions">
-          <div className="comparison-scenario-actions">
-            <ScenarioPresets context={context} activePresetId={activePresetId} onLoadPreset={onLoadPreset} Info={ComparisonInfo} />
-            <button ref={scenariosToggleRef} type="button" className={`comparison-scenarios-toggle${activeScenarioSlot !== null ? " has-active-scenario" : ""}`} disabled={busy} aria-expanded={scenariosOpen} aria-controls={libraryId} onClick={() => setScenariosOpen((value) => !value)}>
-              <FontAwesomeIcon icon={faLayerGroup} aria-hidden="true" />
-              Custom{activeScenarioSlot !== null ? ` ${String(activeScenarioSlot + 1).padStart(2, "0")}` : ""}
-              <span aria-hidden="true">{scenariosOpen ? "−" : "+"}</span>
-            </button>
-          </div>
           <div className="comparison-mode" data-mode={data?.mode} role="group" aria-label="Comparison mode">
             <button type="button" aria-pressed={data?.mode === "trade"} disabled={busy || !data || data.modeSwitchDisabled} onClick={() => { if (data.mode !== "trade") onModeChange("trade"); }}>
               <FontAwesomeIcon icon={faBook} aria-hidden="true" />
@@ -565,19 +558,58 @@ export function ComparisonOverlay({ open, data, recomputing = false, onClose, on
         </div>
       </header>
       {scenarioError && <p className="comparison-scenario-message is-error" role="alert">{scenarioError}</p>}
-      <p className="visually-hidden" role="status" aria-atomic="true">{busy ? "Recomputing scenario" : scenarioError ? "" : scenarioNotice}</p>
-      <div className="comparison-results" aria-busy={busy}>
+      <p className="visually-hidden" role="status" aria-atomic="true">{busy || comparisonBusy ? threeScenarios ? "Recomputing scenarios" : "Recomputing scenario" : scenarioError ? "" : scenarioNotice}</p>
+      <div className="comparison-results" aria-busy={busy || comparisonBusy}>
+        <aside className="comparison-sidebar" aria-label="Presets and comparison settings">
+          <div className="comparison-view-switch" data-view={threeScenarios ? "three" : "pair"} role="group" aria-label="Comparison view" inert={scenariosOpen ? "" : undefined}>
+            <button type="button" aria-pressed={!threeScenarios} disabled={busy} title="Compare the current scenario with the unrestricted baseline" onClick={() => setThreeScenarios(false)}>
+              <FontAwesomeIcon icon={faScaleBalanced} aria-hidden="true" />
+              <span>Baseline</span>
+            </button>
+            <button type="button" aria-pressed={threeScenarios} disabled={busy} title="Compare three independently configured scenarios" onClick={() => {
+              if (!threeScenarios) {
+                setSelectedComparisonSet("strategies");
+                setComparisonColumns(null);
+                setComparisonMetricKeys({ simulation: "prevalence", trade: "outDegree" });
+                setComparisonRegionView("top-3");
+                setThreeScenarios(true);
+              }
+            }}>
+              <FontAwesomeIcon icon={faLayerGroup} aria-hidden="true" />
+              <span>Compare <strong>3</strong></span>
+            </button>
+          </div>
+          {displayedData?.status === "ready" && <ComparisonScenarioDetails data={displayedData} threeScenarios={threeScenarios}
+            evaluation={comparisonEvaluation} configurations={columns} slots={scenarioSlots} activePresetId={activePresetId}
+            Info={ComparisonInfo} inert={scenariosOpen} />}
+          {threeScenarios ? <RecommendedComparisons context={context} selectedSet={selectedComparisonSet}
+            onChooseSet={(id) => {
+              setSelectedComparisonSet(id);
+              setComparisonColumns(comparisonConfigurations(id, context.presetSettings));
+            }} Info={ComparisonInfo} inert={scenariosOpen} />
+            : <ScenarioPresets context={context} activePresetId={activePresetId} onLoadPreset={onLoadPreset} Info={ComparisonInfo} inert={scenariosOpen}>{customControl}</ScenarioPresets>}
+          {!threeScenarios && <ScenarioPresetSettings context={context} onChangePresetSettings={onChangePresetSettings} Info={ComparisonInfo} inert={scenariosOpen} />}
+          {threeScenarios && displayedData?.status === "ready" && <ComparisonChartControls data={displayedData} metrics={comparisonMetrics}
+            metric={comparisonMetric} regionView={comparisonRegionView} disabled={busy}
+            onMetricChange={(key) => setComparisonMetricKeys((keys) => ({ ...keys, [displayedData.mode]: key }))}
+            onRegionChange={setComparisonRegionView} inert={scenariosOpen} />}
+        </aside>
         <div className="comparison-results__content" inert={busy || scenariosOpen ? "" : undefined}>
-          <ComparisonContent data={displayedData} animate={open && !busy} />
+          {threeScenarios && displayedData?.status === "ready"
+            ? <ScenarioComparison data={displayedData} enabled={open && !busy} slots={scenarioSlots}
+              configurations={columns} evaluation={comparisonEvaluation}
+              onChangeConfigurations={(columns) => { setSelectedComparisonSet(null); setComparisonColumns(columns); }}
+              metric={comparisonMetric} regionView={comparisonRegionView}
+              Chart={PairedChart} Info={ComparisonInfo} />
+            : <ComparisonContent data={displayedData} animate={open && !busy} />}
         </div>
         {scenariosOpen && <button type="button" className="comparison-custom-backdrop" aria-label="Close custom scenarios" tabIndex={-1} onClick={closeScenarios} />}
         <ScenarioLibrary id={libraryId} panelRef={libraryRef} open={scenariosOpen} context={context} slots={scenarioSlots} activeSlot={activeScenarioSlot}
-          onChangePresetSettings={onChangePresetSettings}
           onSaveScenario={onSaveScenario}
-          onLoadScenario={(index) => { closeScenarios(); onLoadScenario(index); }} Info={ComparisonInfo} />
-        {busy && displayedData?.status === "ready" && <div className="comparison-recomputing" aria-hidden="true">
+          onLoadScenario={(index) => { closeScenarios(); setThreeScenarios(false); onLoadScenario(index); }} Info={ComparisonInfo} />
+        {(busy || comparisonBusy) && displayedData?.status === "ready" && <div className={`comparison-recomputing${comparisonBusy && !busy ? " comparison-recomputing--editable" : ""}`} aria-hidden="true">
           <span className="comparison-recomputing__ring" aria-hidden="true"><FontAwesomeIcon icon={faCodeCompare} /></span>
-          <span>Recomputing scenario</span>
+          <span>{threeScenarios ? "Recomputing scenarios" : "Recomputing scenario"}</span>
         </div>}
       </div>
     </dialog>

@@ -22,6 +22,9 @@ function hook() {
   let supportedScreen = true;
   let unmounted = false;
   const frames = new Map();
+  const timers = new Map();
+  let timerId = 0;
+  let time = 0;
   const calls = [];
   let frameId = 0;
   let snapshot = { status: "ready" };
@@ -64,6 +67,8 @@ function hook() {
     getComputedStyle: (element) => ({ visibility: element.visibility }),
     requestAnimationFrame: (callback) => { frames.set(++frameId, callback); return frameId; },
     cancelAnimationFrame: (id) => frames.delete(id),
+    setTimeout: (callback, delay) => { timers.set(++timerId, { callback, at: time + delay }); return timerId; },
+    clearTimeout: (id) => timers.delete(id),
     readScenarioSlots: () => slots,
     saveScenarioSlot: (storage, index, name, scenario) => {
       slots = slots.slice();
@@ -107,6 +112,15 @@ function hook() {
       commit();
     },
     refresh() { window.dispatchEvent(new Event("herdlink:comparison-change")); },
+    advance(milliseconds) {
+      time += milliseconds;
+      for (const [id, timer] of timers) {
+        if (timer.at > time) continue;
+        timers.delete(id);
+        timer.callback();
+      }
+      commit();
+    },
     frame(render = true) {
       for (const id of Array.from(frames.keys())) {
         const callback = frames.get(id);
@@ -306,6 +320,57 @@ const openScenario = {
 const seedScenario = { ...openScenario, nodeInterventions: [[1578441600000, [["CR35", { exports: false }]]]] };
 const comparison = (scenario, status = "ready") => ({ status, mode: "trade", dates: scenario.dates, scenarioContext: scenario });
 const finishLoad = (app) => { app.frame(); app.frame(); app.frame(); };
+
+test("Custom edits debounce the selected preset and cancel when the user leaves or loads another scenario", () => {
+  for (const finish of ["rerun", "close", "unmount", "preset", "saved", "mode"]) {
+    const app = hook();
+    let settings = { introductionDate: "2020-01-01", targetBudget: 3, responseDays: 7, standstillDays: 14 };
+    const snapshot = () => comparison({ ...seedScenario, presetSettings: settings });
+    app.setSnapshot(snapshot()); app.api.toggle(); app.frame();
+    app.bridge.loadPreset = (id) => {
+      app.calls.push(["preset", id, { ...settings }]);
+      app.setSnapshot(snapshot());
+      return { label: id, scenario: seedScenario, presetKey: presetSettingsKey(id, settings) };
+    };
+    app.bridge.setPresetSettings = (patch) => {
+      settings = { ...settings, ...patch };
+      app.setSnapshot(snapshot()); app.refresh();
+    };
+    app.api.loadPreset("hub-controls"); finishLoad(app);
+    assert.equal(app.api.activePresetId, "hub-controls");
+    app.calls.length = 0;
+    for (const patch of [{ targetBudget: 5 }, { responseDays: 3 }, { standstillDays: 30 }]) {
+      app.api.changePresetSettings(patch); app.frame();
+      app.advance(400);
+      assert.deepEqual(app.calls, []);
+      assert.equal(app.recomputing, false);
+    }
+    if (finish === "close") app.api.close();
+    if (finish === "unmount") app.unmount();
+    if (finish === "preset") app.api.loadPreset("temporary-standstill");
+    if (finish === "saved") app.api.loadScenario(0);
+    if (finish === "mode") app.api.changeMode("simulation");
+    app.advance(199);
+    if (finish === "rerun") assert.equal(app.recomputing, false);
+    app.advance(1);
+    if (finish === "rerun") {
+      assert.equal(app.recomputing, true);
+      assert.deepEqual(app.calls, []);
+    }
+    finishLoad(app);
+    app.advance(1000); finishLoad(app);
+    if (finish === "rerun" || finish === "preset") {
+      const id = finish === "rerun" ? "hub-controls" : "temporary-standstill";
+      assert.deepEqual(app.calls, [["preset", id, {
+        introductionDate: "2020-01-01", targetBudget: 5, responseDays: 3, standstillDays: 30,
+      }]]);
+      assert.equal(app.api.activePresetId, id);
+      assert.equal(app.recomputing, false);
+    } else if (finish === "saved") assert.deepEqual(app.calls, [["scenario", app.slots[0].scenario]]);
+    else if (finish === "mode") assert.deepEqual(app.calls, [["mode", "simulation"]]);
+    else assert.deepEqual(app.calls, []);
+  }
+});
 
 test("active indicators follow complete configurations through loads, inspection, manual edits and slot changes", () => {
   const app = hook();

@@ -1,0 +1,80 @@
+{
+  "source": {
+    "url": "https://krd.igoview.nl/Gelderland/main",
+    "view": "Totaaloverzicht dieren / Export csv Format",
+    "scope": "Gelderland/Twente public export",
+    "filename": "dieren.csv",
+    "retrievedOn": "2026-09-16",
+    "sha256": "31ea7839a3f984f0b2529e06433a2528e93a3161c1560fd2441e518fad024f01",
+    "bytes": 9699682,
+    "encoding": "cp1252",
+    "delimiter": "tab",
+    "quantity": "permitted-or-notified-animal-count"
+  },
+  "columns": [
+    "Bronhouder",
+    "VTHobject ID",
+    "Adres",
+    "Gemeente",
+    "RAV-versie-vergund",
+    "RAV-code vergund",
+    "RAV-code actueel",
+    "Aantal dieren",
+    "Besluitdatum",
+    "NH3 emissie (kg/j)",
+    "Geur emissie (ouE/s)",
+    "Fijnstof emissie (g/j)",
+    "Diercategroei omschrijving",
+    "Omschrijving RAV"
+  ],
+  "ledgerEnd": "2022-04-15",
+  "allAnimalRows": {
+    "rows": 41096,
+    "positiveCountRows": 40754,
+    "zeroCountRows": 342,
+    "authorityObjectKeys": 10878,
+    "positiveCountKeys": 10768,
+    "repeatedIdenticalExportRows": 888,
+    "unknownDecisionDateRows": 6202,
+    "earliestDecisionDate": "1972-08-01",
+    "latestDecisionDate": "2026-09-15",
+    "decisionRowsAfter2018": 19709,
+    "decisionRowsAfterLedgerEnd": 13936
+  },
+  "pigCategoryRows": {
+    "rows": 6452,
+    "positiveCountRows": 6371,
+    "zeroCountRows": 81,
+    "authorityObjectKeys": 1761,
+    "positiveCountKeys": 1724,
+    "repeatedIdenticalExportRows": 109,
+    "unknownDecisionDateRows": 389,
+    "earliestDecisionDate": "1973-11-19",
+    "latestDecisionDate": "2026-09-15",
+    "decisionRowsAfter2018": 4042,
+    "decisionRowsAfterLedgerEnd": 3124
+  },
+  "pigCategorySelection": [
+    "biggenopfok (gespeende biggen)",
+    "kraamzeugen (incl. biggen tot spenen)",
+    "guste en dragende zeugen",
+    "dekberen, 7 maanden en ouder",
+    "vleesvarkens, opfokberen van circa 25 kg tot 7 maanden, opfokzeugen van circa 25 kg tot eerste dekking"
+  ],
+  "authorityRowCounts": {
+    "ODA": 10568,
+    "ODDV": 7113,
+    "ODGM-N": 1231,
+    "ODGM-Z": 1375,
+    "ODR": 3132,
+    "ODT": 12803,
+    "ODV": 4874
+  },
+  "notes": [
+    "Pig selection uses five exact category labels, not a substring or a capacity multiplier.",
+    "Counts and dates describe export rows; positive keys are not verified active establishments.",
+    "Identical export rows remain separate; stable and animal-group identifiers are absent.",
+    "Missing dates and 1900-01-01 mean unknown; decision dates are not stock observation dates.",
+    "The export alone supplies neither occupied stock nor a historical population series."
+  ]
+}

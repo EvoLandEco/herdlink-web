@@ -2,7 +2,7 @@ import { memo, useEffect, useId, useState } from "react";
 import { faBridge, faBullseye, faCheck, faCircleInfo, faClock, faCircleNodes, faFlask, faHourglassHalf, faLayerGroup, faLocationDot, faLockOpen, faNetworkWired, faPause, faRankingStar, faShieldHalved, faSliders } from "@fortawesome/free-solid-svg-icons";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 
-const presetIcons = {
+export const presetIcons = {
   "open-trade": faLockOpen,
   "seed-containment": faShieldHalved,
   "partner-ring": faCircleNodes,
@@ -11,7 +11,7 @@ const presetIcons = {
   "seed-community": faLayerGroup,
   "trade-bottlenecks": faBridge,
 };
-const presetLabels = {
+export const presetLabels = {
   "open-trade": "Open",
   "seed-containment": "Seed",
   "partner-ring": "Trace Ring",
@@ -28,8 +28,9 @@ function ScenarioSlot({ slot, index, context, active, onSave, onLoad }) {
   const inputId = useId();
   const hintId = useId();
   useEffect(() => { setName(slot?.name || ""); }, [slot?.name, slot?.savedAt]);
-  const disabled = !context || context.disabled;
-  const differentDataset = slot && context && slot.scenario.datasetKey !== context.datasetKey;
+  const locked = !context || context.disabled;
+  const disabled = locked || !context.controlsValid;
+  const incompatibleModel = slot && slot.scenario.schemaVersion !== 3;
   const label = `Scenario ${index + 1}`;
 
   return (
@@ -40,12 +41,12 @@ function ScenarioSlot({ slot, index, context, active, onSave, onLoad }) {
       </div>
       <input id={inputId} type="text" maxLength={48} value={name} placeholder={label} aria-label={`${label} name`} disabled={disabled} onChange={(event) => setName(event.target.value)} />
       <div className="scenario-slot__footer">
-        <p id={hintId}>{differentDataset
-          ? `Switch to ${datasetLabel(slot.scenario.datasetKey).toLowerCase()} to load.`
+        <p id={hintId}>{incompatibleModel
+          ? "Population reference missing. Choose a population to create a runnable scenario."
           : slot ? `${datasetLabel(slot.scenario.datasetKey)} · ${slot.scenario.settings.model} · ${slot.scenario.settings.seedRegion}` : "Save the current settings and schedule."}</p>
         <div className="scenario-slot__actions">
-          <button type="button" disabled={disabled} onClick={() => onSave(index, name.trim() || label)} aria-label={`${slot ? "Overwrite" : "Save"} ${label.toLowerCase()}`}>{slot ? "Overwrite" : "Save"}</button>
-          <button type="button" disabled={disabled || !slot || differentDataset} aria-describedby={hintId} onClick={() => onLoad(index)} aria-label={`Load ${slot?.name || label}`}>Load</button>
+          <button type="button" disabled={disabled || context?.privatePopulation} title={context?.privatePopulation ? "Private populations stay in memory." : undefined} onClick={() => onSave(index, name.trim() || label)} aria-label={`${slot ? "Overwrite" : "Save"} ${label.toLowerCase()}`}>{slot ? "Overwrite" : "Save"}</button>
+          <button type="button" disabled={locked || !slot || incompatibleModel} aria-describedby={hintId} onClick={() => onLoad(index)} aria-label={`Load ${slot?.name || label}`}>Load</button>
         </div>
       </div>
     </article>
@@ -92,15 +93,15 @@ function PresetHelp({ preset, context }) {
   );
 }
 
-export const ScenarioPresets = memo(function ScenarioPresets({ context, activePresetId, onLoadPreset, Info }) {
-  const disabled = !context || context.disabled;
+export const ScenarioPresets = memo(function ScenarioPresets({ context, activePresetId, onLoadPreset, Info, children, inert }) {
+  const disabled = !context || context.disabled || !context.controlsValid;
   const presets = context?.presets || [];
   return (
     <div className="scenario-presets" role="group" aria-label="Intervention presets">
       <span className="scenario-presets__heading" aria-hidden="true">Presets</span>
       <div className="scenario-presets__buttons">
         {presets.map((preset) => (
-          <div key={preset.id} className={`scenario-preset${preset.id === activePresetId ? " is-active" : ""}`}>
+          <div key={preset.id} className={`scenario-preset${preset.id === activePresetId ? " is-active" : ""}`} inert={inert ? "" : undefined}>
             <button type="button" disabled={disabled || Boolean(preset.disabledReason)} aria-pressed={preset.id === activePresetId} onClick={() => onLoadPreset(preset.id)} aria-label={`Load ${preset.label} preset`}>
               <span className="scenario-preset__icon"><FontAwesomeIcon icon={presetIcons[preset.id]} aria-hidden="true" /></span>
               <span className="scenario-preset__label">{presetLabels[preset.id]}</span>
@@ -109,6 +110,7 @@ export const ScenarioPresets = memo(function ScenarioPresets({ context, activePr
             <Info label={preset.label} rich><PresetHelp preset={preset} context={context} /></Info>
           </div>
         ))}
+        {children}
       </div>
     </div>
   );
@@ -128,68 +130,75 @@ function PresetSetting({ name, label, shortLabel, inputLabel, value, min, max, u
           <span className="scenario-preset-setting__label-full">{label}</span>
           <span className="scenario-preset-setting__label-short" aria-hidden="true">{shortLabel}</span>
         </label>
-        <Info label={label} icon={icon} rows={rows} footer="Applies the next time you load a preset.">{detail}</Info>
+        <Info label={label} icon={icon} rows={rows} footer="Reapplies the selected preset after a short pause.">{detail}</Info>
       </div>
       <div className="scenario-preset-setting__value">
         <div className="scenario-preset-stepper">
           <button type="button" aria-label={`Decrease ${label.toLowerCase()}`} aria-controls={id}
             disabled={disabled || value <= min} onClick={() => step(-1)}><span aria-hidden="true">−</span></button>
-          <input id={id} type="number" aria-label={inputLabel} aria-describedby={`${id}-help`}
-            value={draft ?? value} min={min} max={max} step={1} disabled={disabled}
-            onBlur={() => setDraft(null)} onChange={(event) => {
-              setDraft(event.target.value);
-              if (event.target.value && event.target.validity.valid) onChange({ [name]: event.target.valueAsNumber });
-            }} />
+          <div className="scenario-preset-stepper__number">
+            <input id={id} type="number" aria-label={inputLabel} aria-describedby={`${id}-help`}
+              value={draft ?? value} min={min} max={max} step={1} disabled={disabled}
+              onBlur={() => setDraft(null)} onChange={(event) => {
+                setDraft(event.target.value);
+                if (event.target.value && event.target.validity.valid) onChange({ [name]: event.target.valueAsNumber });
+              }} />
+            {unit && <span className="scenario-preset-stepper__unit" aria-hidden="true">{unit}</span>}
+          </div>
           <button type="button" aria-label={`Increase ${label.toLowerCase()}`} aria-controls={id}
             disabled={disabled || value >= max} onClick={() => step(1)}><span aria-hidden="true">+</span></button>
         </div>
-        {unit && <span>{unit}</span>}
       </div>
       <p id={`${id}-help`} className="visually-hidden">{detail}</p>
     </div>
   );
 }
 
-export const ScenarioLibrary = memo(function ScenarioLibrary({ id, panelRef, open, context, slots, activeSlot, onChangePresetSettings, onSaveScenario, onLoadScenario, Info }) {
-  const headingId = useId();
+export const ScenarioPresetSettings = memo(function ScenarioPresetSettings({ context, onChangePresetSettings, Info, inert }) {
+  const helpId = useId();
   const settings = context?.presetSettings;
-  const disabled = !context || context.disabled;
+  const disabled = !context || context.disabled || !context.controlsValid;
+  if (!settings) return null;
+  return (
+    <fieldset className="scenario-preset-settings scenario-settings-group" aria-describedby={helpId} inert={inert ? "" : undefined}>
+      <legend>Preset settings</legend>
+      <p id={helpId} className="visually-hidden">Changes reapply the selected preset after a short pause.</p>
+      <div className="scenario-preset-settings__row">
+        <PresetSetting name="targetBudget" label="Target regions" shortLabel="Targets" inputLabel="Target regions for Hubs and Bridges"
+          value={settings.targetBudget} min={1} max={40} detail="Hubs and Bridges share this target count." icon={faRankingStar}
+          rows={[
+            ["Selection", "Ranked from the preceding year's trade."],
+            ["Range", "1–40 regions with outgoing trade."],
+          ]} disabled={disabled} onChange={onChangePresetSettings} Info={Info} />
+        <PresetSetting name="responseDays" label="Response delay" shortLabel="Delay" inputLabel="Response delay in days"
+          value={settings.responseDays} min={0} max={365} unit="d" detail="Days from introduction to intervention." icon={faClock}
+          rows={[
+            ["Scope", "All six intervention presets."],
+            ["Range", "0–365; 0 starts at introduction."],
+          ]} disabled={disabled} onChange={onChangePresetSettings} Info={Info} />
+        <PresetSetting name="standstillDays" label="Standstill duration" shortLabel="Standstill" inputLabel="Standstill duration in days"
+          value={settings.standstillDays} min={1} max={365} unit="d" detail="Duration of national export restrictions." icon={faHourglassHalf}
+          rows={[
+            ["Timing", "Starts at response; ends with reopening."],
+            ["Range", "1–365 days."],
+          ]} disabled={disabled} onChange={onChangePresetSettings} Info={Info} />
+      </div>
+    </fieldset>
+  );
+});
+
+export const ScenarioLibrary = memo(function ScenarioLibrary({ id, panelRef, open, context, slots, activeSlot, onSaveScenario, onLoadScenario, Info }) {
+  const headingId = useId();
   return (
     <section ref={panelRef} id={id} className="scenario-library" hidden={!open} aria-labelledby={headingId}>
       <div className="scenario-library__heading">
         <h3 id={headingId}>Custom scenarios</h3>
         <Info label="Custom scenarios" icon={faLayerGroup} rows={[
-          ["Preset settings", "Choose the target count and response timing, then load a preset from the buttons above."],
           ["Save", "Store the dataset, model settings, seed, and complete intervention schedule."],
           ["Overwrite", "Replace the scenario stored in that slot."],
-          ["Load", "Replace current settings and interventions. Switch to the saved dataset before loading."],
+          ["Load", "Replace current settings and interventions. Daily scenarios use the current display resolution."],
         ]} footer="Three slots · Saved in this browser">Keep complete scenarios to revisit and compare.</Info>
       </div>
-      {settings && <fieldset className="scenario-preset-settings" aria-describedby={`${headingId}-preset-help`}>
-        <legend className="visually-hidden">Preset settings</legend>
-        <p id={`${headingId}-preset-help`} className="visually-hidden">Choose settings for the next preset you load.</p>
-        <div className="scenario-preset-settings__row">
-          <PresetSetting name="targetBudget" label="Target regions" shortLabel="Targets" inputLabel="Target regions for Hubs and Bridges"
-            value={settings.targetBudget} min={1} max={40} detail="Hubs and Bridges share this target count." icon={faRankingStar}
-            rows={[
-              ["Selection", "Ranked from the preceding year's trade."],
-              ["Range", "1–40 regions with outgoing trade."],
-            ]} disabled={disabled} onChange={onChangePresetSettings} Info={Info} />
-          <PresetSetting name="responseDays" label="Response delay" shortLabel="Delay" inputLabel="Response delay in days"
-            value={settings.responseDays} min={0} max={365} unit="days" detail="Days from introduction to intervention." icon={faClock}
-            rows={[
-              ["Scope", "All six intervention presets."],
-              ["Range", "0–365; 0 starts at introduction."],
-            ]} disabled={disabled} onChange={onChangePresetSettings} Info={Info} />
-          <PresetSetting name="standstillDays" label="Standstill duration" shortLabel="Standstill" inputLabel="Standstill duration in days"
-            value={settings.standstillDays} min={1} max={365} unit="days" detail="Duration of national export restrictions." icon={faHourglassHalf}
-            rows={[
-              ["Timing", "Starts at response; ends with reopening."],
-              ["Range", "1–365 days."],
-            ]} disabled={disabled} onChange={onChangePresetSettings} Info={Info} />
-        </div>
-      </fieldset>}
-      <h4 className="scenario-library__saved-heading">Saved scenarios</h4>
       <div className="scenario-slot-grid">
         {Array.from({ length: 3 }, (_, index) => <ScenarioSlot key={index} slot={slots[index]} index={index} context={context} active={activeSlot === index} onSave={onSaveScenario} onLoad={onLoadScenario} />)}
       </div>

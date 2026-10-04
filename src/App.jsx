@@ -13,11 +13,14 @@ import jLouvainUrl from "./runtime/jLouvain.js?url";
 import d3AnnotationUrl from "./runtime/d3anno.js?url";
 import herdLinkRuntimeUrl from "./runtime/herdlink-runtime.js?url";
 import * as interventionPresets from "./runtime/intervention-presets.js";
+import * as simulationEngine from "./runtime/simulation-engine.js";
+import * as simulationPopulation from "./runtime/simulation-population.js";
 
 window.createHerdLinkMapLayers = createMapLayers;
 window.downloadHerdLinkScreenshot = downloadAppScreenshot;
 window.HERDLINK_ASSET_URLS = assetUrls;
 window.herdlinkPresetTools = interventionPresets;
+window.herdlinkSimulation = { ...simulationEngine, ...simulationPopulation };
 
 const runtimeScripts = [
   { src: "https://cdn.jsdelivr.net/npm/d3@6.7.0/dist/d3.min.js" },
@@ -94,7 +97,7 @@ const importsExportsGuide = {
       iconClass: "fa-solid fa-flask",
       title: "Shared network",
       text:
-        "Network mode measures the allowed trade routes by movement volume. Simulation mode uses the same routes to calculate disease pressure. Restrictions set in either mode can change later disease outcomes; earlier simulated states stay fixed.",
+        "Ledger mode applies permissions at each aggregated record's date label. Simulation mode applies restrictions to each calendar day and sums attributed infection entries. Use the daily ledger for trade totals that account for closures within coarse bins.",
     },
   ],
 };
@@ -104,43 +107,43 @@ const richTips = {
     title: "Simulation Controls",
     iconClass: "fa-solid fa-flask",
     intro:
-      "Set the disease model before replaying spread through local contacts and livestock movements.",
+      "Choose a population, starting state and model settings for an exploratory simulation.",
     sections: [
+      {
+        iconClass: "fa-solid fa-users",
+        title: "Population",
+        text:
+          "Regional populations are scaled from trade activity and held fixed throughout a run. Each comparison uses the same population on both sides.",
+      },
       {
         iconClass: "fa-solid fa-diagram-project",
         title: "Model choices",
         text:
-          "SEIR adds a latent exposed stage. SIR moves straight from susceptible to infectious. SIS permits reinfection. SEIRS adds waning recovery.",
+          "SEIR includes an exposed stage before infectiousness. SIR enters infectiousness directly. SIS returns recovered units to susceptibility. SEIRS includes a daily fraction for waning immunity.",
       },
       {
         iconClass: "fa-solid fa-location-dot",
         title: "Starting state",
         text:
-          "Seed region chooses where infection starts, with CR35 selected by default. Introduction date sets the first infected date; coarse timelines introduce infection at the first displayed step on or after it. Initial % sets the seed's infectious share.",
+          "Seed region chooses where infection starts, with CR35 selected by default. Initial infectious, exposed and recovered shares define its exact state at the start of Introduction date. The engine stores that state before the first daily transition; displayed compartments show the bin end.",
       },
       {
         iconClass: "fa-solid fa-calendar-days",
         title: "Scenario date",
         text:
-          "Introduction date sets infection timing while scheduled restrictions keep their calendar dates. Custom sets the target count, response delay, and Standstill duration for the next preset load. Loading a preset builds its targets and response schedule from the selected introduction date.",
-      },
-      {
-        iconClass: "fa-solid fa-users",
-        title: "Population units",
-        text:
-          "Compartments use synthetic population units scaled from trade activity. Presets use the preceding year's trade and share fixed populations across policy comparisons. CBS pig census counts provide a separate map layer, attributed to business main addresses.",
+          "Introduction date sets infection timing while restrictions keep their calendar dates. Custom sets target count, response delay and Standstill duration, then reapplies the selected preset after a short pause. These presets choose restriction schedules; they do not choose disease parameters.",
       },
       {
         iconClass: "fa-solid fa-arrows-turn-to-dots",
-        title: "Spread rates",
+        title: "Transmission controls",
         text:
-          "Contact beta controls local spread. Movement beta controls spread along trade links.",
+          "Contact controls exposure within a region. Movement controls exposure along recorded routes. Local movement checkboxes affect the recorded routes within a region; contact remains separate.",
       },
       {
         iconClass: "fa-solid fa-clock",
         title: "Timing",
         text:
-          "Latency moves exposed population units into the infectious compartment. Recovery moves infectious units into recovered or susceptible states. Rates apply once per displayed step.",
+          "Progression, recovery and waning apply once per day. Weekly, monthly and yearly views show states at the end of each period and total new infections during it.",
       },
     ],
   },
@@ -205,7 +208,7 @@ const richTips = {
         iconClass: "fa-solid fa-chart-simple",
         title: "Scheduled restrictions",
         text:
-          "Routes contribute on dates when trade is allowed. Editing restrictions rebuilds the groups across the whole period, including earlier dates.",
+          "Ledger summaries apply permissions at each record's label date. Coarse bins do not reconstruct daily closures. Editing restrictions rebuilds the groups across the whole period, including earlier dates.",
       },
       {
         iconClass: "fa-solid fa-people-arrows",
@@ -229,6 +232,32 @@ const richTips = {
       ["Risk Score", "Spectral radius relative to the highest unrestricted value across the loaded period at this temporal resolution. A score of 1 marks that reference peak."],
       ["Modularity", "Agreement of each date's trade with those fixed communities at the selected resolution. Compare values at the same community scale; scores can be negative."],
       ["Spectral Radius", "A network pressure score tied to amplification potential."],
+    ],
+  },
+  tradeConcentration: {
+    title: "Trade Concentration",
+    iconClass: "fa-solid fa-chart-area",
+    intro:
+      "See how much of the selected interval's livestock volume is carried by its busiest directed routes.",
+    sections: [
+      {
+        iconClass: "fa-solid fa-arrow-down-wide-short",
+        title: "Ranked routes",
+        text:
+          "Routes run from busiest to smallest along the horizontal axis. The amber curve shows their cumulative share of all allowed volume, including movements within a region. Repeated records for the same source and destination count as one route.",
+      },
+      {
+        iconClass: "fa-solid fa-chart-line",
+        title: "Equal share",
+        text:
+          "The dashed diagonal shows equal volume on every route. A curve rising well above it means fewer routes carry more of the volume. Both axes use percentages, so dates with different route counts can be compared.",
+      },
+      {
+        iconClass: "fa-solid fa-bullseye",
+        title: "Readouts",
+        text:
+          "Top 5 gives the share carried by up to five busiest routes. The 80% readout gives the fewest whole routes needed to reach that share, marked by the dot. Date changes and movement controls refresh the distribution; blocked and zero-volume routes are excluded.",
+      },
     ],
   },
   nodeMetric: {
@@ -304,7 +333,7 @@ const richTips = {
         iconClass: "fa-solid fa-list-check",
         title: "Controls",
         text:
-          "Link checkboxes change routes for the displayed time step. The switch beside the region name opens Imports & Exports, where regional permissions last until re-enabled. Both controls are shared with simulation mode. Restore all clears both schedules across every date.",
+          "Link checkboxes change routes across the daily intervals covered by the displayed bin. The switch beside the region name opens Imports & Exports, where regional permissions last until re-enabled. Both controls are shared with simulation mode. Restore all clears both schedules across every date.",
       },
     ],
   },
@@ -318,19 +347,19 @@ const richTips = {
         iconClass: "fa-solid fa-virus",
         title: "Prevalence",
         text:
-          "The main line shows infection pressure at the focal region through the replay.",
+          "The infectious share is I divided by the region's fixed model population. Each displayed point describes the state at the end of its covered bin.",
       },
       {
         iconClass: "fa-solid fa-layer-group",
         title: "Compartments",
         text:
-          "Susceptible, exposed, infectious, and recovered shares show where the region sits in the outbreak cycle.",
+          "Susceptible, exposed, infectious and recovered shares describe the model's compartments. Daily infection entries count transitions out of susceptibility; initial seeds are separate.",
       },
       {
         iconClass: "fa-solid fa-calendar-day",
         title: "Current frame",
         text:
-          "The date marker links the chart to the map and the focus trade table.",
+          "The marker uses the bin's start date, matching the map and focus trade table. The chart samples the end state from the daily simulation.",
       },
     ],
   },
@@ -338,15 +367,15 @@ const richTips = {
     title: "Focus Simulation",
     iconClass: "fa-solid fa-stethoscope",
     intro:
-      "Select a view to explain why the focal region is exposed in the current simulation frame.",
+      "Inspect the focal region's model state, movement pressure and attributed infection entries for the displayed bin.",
     options: [
-      ["Partition load", "Shows how burden is distributed across trade partitions."],
-      ["Exposure balance", "Compares incoming exposure and outgoing pressure."],
-      ["Spatial pattern", "Shows nearby and distant regions contributing to exposure."],
+      ["Partition load", "Compares the region's state with its trade community."],
+      ["Exposure balance", "Compares summed daily incoming and outgoing movement pressure, distinct from infection entries."],
+      ["Spatial pattern", "Groups attributed infection entries on incoming and outgoing routes by partner distance."],
     ],
   },
   localTrades: {
-    title: "Local Trades",
+    title: "Local Movements",
     iconClass: "fa-solid fa-repeat",
     intro:
       "Control recorded livestock movements that begin and end within the selected region. The value shows their recorded volume.",
@@ -355,13 +384,13 @@ const richTips = {
         iconClass: "fa-solid fa-calendar-day",
         title: "Timing",
         text:
-          "The checkbox controls local routes for the displayed time step, independently of regional import and export permissions.",
+          "The checkbox controls recorded local routes across the daily intervals covered by the displayed bin, independently of regional import and export permissions. A mixed mark indicates that only part of the bin has a route closure.",
       },
       {
         iconClass: "fa-solid fa-flask",
         title: "Shared with simulation",
         text:
-          "The same checkbox controls local contact spread in simulation, including dates with zero recorded local trade. Its effects carry forward through the simulation; earlier states stay fixed.",
+          "The same checkbox controls pressure from recorded local movements in simulation. Contact beta controls a separate local contact pathway that remains active when these movements are blocked.",
       },
     ],
   },
@@ -381,7 +410,7 @@ const richTips = {
         iconClass: "fa-solid fa-list-check",
         title: "Availability",
         text:
-          "Each checkbox controls one route for the displayed time step. The title checkbox changes all displayed outgoing routes; a mixed mark means only some are checked. A checked route also needs source exports and destination imports to be allowed. These settings are shared with simulation mode.",
+          "Each checkbox controls one route across the daily intervals covered by the displayed bin. The title checkbox changes all displayed outgoing routes; a mixed mark means only some are checked. A checked route also needs source exports and destination imports to be allowed. These settings are shared with simulation mode.",
       },
     ],
   },
@@ -401,67 +430,67 @@ const richTips = {
         iconClass: "fa-solid fa-list-check",
         title: "Availability",
         text:
-          "Each checkbox controls one route for the displayed time step. The title checkbox changes all displayed incoming routes; a mixed mark means only some are checked. A checked route also needs source exports and destination imports to be allowed. These settings are shared with simulation mode.",
+          "Each checkbox controls one route across the daily intervals covered by the displayed bin. The title checkbox changes all displayed incoming routes; a mixed mark means only some are checked. A checked route also needs source exports and destination imports to be allowed. These settings are shared with simulation mode.",
       },
     ],
   },
   localTransmission: {
-    title: "Local Transmission",
+    title: "Local Movements",
     iconClass: "fa-solid fa-repeat",
     intro:
-      "Control spread within the selected region for the displayed time step.",
+      "Control recorded movements within the selected region for the displayed bin.",
     sections: [
       {
         iconClass: "fa-solid fa-virus",
         title: "Within the region",
         text:
-          "This checkbox controls local contact spread and livestock movements within the region. It shares the Local Trades setting in network mode and operates independently of regional import and export permissions.",
+          "This checkbox controls pressure from recorded movements within the region. It shares the Local Trades setting in network mode and operates independently of regional import and export permissions. Contact beta controls a separate local contact pathway.",
       },
       {
         iconClass: "fa-solid fa-calendar-day",
         title: "Timing",
         text:
-          "The change applies to the displayed time step. The simulation recomputes disease outcomes from that point onward, while earlier states stay fixed.",
+          "The setting applies to the daily intervals covered by the displayed bin. The simulation uses each calendar day's restrictions before calculating that day's transition.",
       },
     ],
   },
   outgoingPressure: {
-    title: "Outgoing Pressure",
+    title: "Outgoing Entries",
     iconClass: "fa-solid fa-arrow-right-from-bracket",
     intro:
-      "Inspect routes carrying infection pressure from the selected region to other regions.",
+      "Inspect infection entries attributed to movements from the selected region to other regions.",
     sections: [
       {
         iconClass: "fa-solid fa-chart-simple",
         title: "Reading routes",
         text:
-          "For an allowed route, the value is movement volume multiplied by source prevalence and Movement beta. The bar shows the destination's infectious share. Blocked routes contribute zero pressure.",
+          "The value sums daily infection entries attributed to this route's share of the destination's total hazard. The bar shows the destination's infectious share at the bin end. Movement pressure is a separate quantity; attributed entries are model calculations, not observed transmission links.",
       },
       {
         iconClass: "fa-solid fa-list-check",
         title: "Availability",
         text:
-          "Each checkbox controls one route for the displayed time step. The title checkbox changes all displayed outgoing routes; a mixed mark means only some are checked. A checked route also needs source exports and destination imports to be allowed. These settings are shared with network mode. Changes can affect later disease outcomes, while earlier states stay fixed.",
+          "Each checkbox controls one route across the daily intervals covered by the displayed bin. The title checkbox changes all displayed outgoing routes; a mixed mark means only some are checked. A route also needs source exports and destination imports to be allowed. These settings are shared with network mode.",
       },
     ],
   },
   incomingExposure: {
-    title: "Incoming Exposure",
+    title: "Incoming Entries",
     iconClass: "fa-solid fa-arrow-left-to-bracket",
     intro:
-      "Inspect routes carrying infection pressure into the selected region from other regions.",
+      "Inspect infection entries attributed to movements into the selected region from other regions.",
     sections: [
       {
         iconClass: "fa-solid fa-chart-simple",
         title: "Reading routes",
         text:
-          "For an allowed route, the value is movement volume multiplied by source prevalence and Movement beta. The bar shows the source's infectious share. Blocked routes contribute zero exposure.",
+          "The value sums daily infection entries attributed to this route's share of the destination's total hazard. The bar shows the source's infectious share at the bin end. Movement pressure is a separate quantity; attributed entries are model calculations, not observed transmission links.",
       },
       {
         iconClass: "fa-solid fa-list-check",
         title: "Availability",
         text:
-          "Each checkbox controls one route for the displayed time step. The title checkbox changes all displayed incoming routes; a mixed mark means only some are checked. A checked route also needs source exports and destination imports to be allowed. These settings are shared with network mode. Changes can affect later disease outcomes, while earlier states stay fixed.",
+          "Each checkbox controls one route across the daily intervals covered by the displayed bin. The title checkbox changes all displayed incoming routes; a mixed mark means only some are checked. A route also needs source exports and destination imports to be allowed. These settings are shared with network mode.",
       },
     ],
   },
@@ -471,19 +500,19 @@ const richTips = {
     title: "Main Exposure Backbone",
     iconClass: "fa-solid fa-sitemap",
     intro:
-      "This tree highlights the strongest exposure routes around the focal region in simulation mode.",
+      "This tree highlights routes with the largest attributed infection entries around the focal region.",
     sections: [
       {
         iconClass: "fa-solid fa-arrow-right-arrow-left",
         title: "Exposure paths",
         text:
-          "Links show the main movement channels that can carry pressure into or out of the selected region.",
+          "Link weights sum daily infection entries attributed to incoming or outgoing movements. Attribution allocates the model's incidence across contributing pathways.",
       },
       {
         iconClass: "fa-solid fa-filter",
         title: "Filtered reading",
         text:
-          "Link checkboxes apply only to the displayed time step. The switch beside the region name opens Imports & Exports controls, which apply from the selected date until re-enabled and include future partners. Both controls are shared with network mode and can change later disease outcomes; earlier states stay fixed. Restore all clears link edits and import or export restrictions across every date.",
+          "Link checkboxes apply across the daily intervals covered by the displayed bin. Imports & Exports controls apply from the selected date until re-enabled and include future partners. Both controls are shared with network mode. Restore all clears link edits and import or export restrictions across every date.",
       },
     ],
   },
@@ -491,19 +520,19 @@ const richTips = {
     title: "Spatial Spread",
     iconClass: "fa-solid fa-map-location-dot",
     intro:
-      "This simulation panel shows where infection pressure is concentrated across regions.",
+      "Inspect the geographic distribution of infectious shares, infection entries and attributed movement pathways.",
     sections: [
       {
         iconClass: "fa-solid fa-map",
         title: "Map pattern",
         text:
-          "Darker or stronger marks show regions with higher simulated pressure at the current frame.",
+          "Regional fills show the infectious share at the bin end. The color range uses the full daily run, including the initial state, and stays fixed during replay. Teal circle area shows new infection entries summed within the selected bin; zero entries have no circle.",
       },
       {
         iconClass: "fa-solid fa-arrows-split-up-and-left",
         title: "Movement signal",
         text:
-          "Use the pattern to see whether pressure stays local or reaches across partitions.",
+          "Amber curves show the 18 largest cross-region movement pathways in the selected bin. Width shows attributed infection entries. Move totals all cross-region entries; Local combines contact transmission with local movements. Mean km is weighted by cross-region entries; Top 5 is the share of all new entries in the five largest regions.",
       },
     ],
   },
@@ -511,7 +540,7 @@ const richTips = {
     title: "Partition Exposure",
     iconClass: "fa-solid fa-diagram-project",
     intro:
-      "Explore simulated pressure within and between trade communities. Groups reflect allowed interregional trade across the full period, including scheduled restrictions. Local exposure remains visible in the charts.",
+      "Explore attributed infection entries within and between trade communities. Groups reflect allowed interregional trade across the full period, including scheduled restrictions. Local entries remain visible in the charts.",
     sections: [
       {
         iconClass: "fa-solid fa-layer-group",
@@ -523,13 +552,13 @@ const richTips = {
         iconClass: "fa-solid fa-table-cells-large",
         title: "Partition load",
         text:
-          "Cells and bars show which trade communities carry the most simulated burden.",
+          "Cells and bars sum daily infection entries attributed to the source and destination communities. Local contact and local movement entries share the diagonal.",
       },
       {
         iconClass: "fa-solid fa-people-arrows",
         title: "Cross partition spread",
         text:
-          "Use the between partition pattern to spot pressure that may bridge communities.",
+          "Entries between communities describe the model's allocation to cross-community movements. They are not observed transmission chains.",
       },
     ],
   },
@@ -549,13 +578,33 @@ const richTips = {
         iconClass: "fa-solid fa-chart-line",
         title: "Shape over time",
         text:
-          "Expanding infectious or exposed bands mark outbreak growth. A growing recovered band shows accumulated resolved cases.",
+          "Band size shows the compartment count at each bin end. R contains recovered model units and can decrease through SEIRS waning; it does not count all infection episodes.",
       },
       {
         iconClass: "fa-solid fa-calendar-day",
         title: "Current frame",
         text:
-          "The date marker matches the map, regional prevalence ranking, and timeline controls.",
+          "The marker uses the bin's start date, matching the map, regional prevalence ranking and timeline controls. Compartment values describe the actual bin end.",
+      },
+    ],
+  },
+  simulationIncidence: {
+    title: "New Infections",
+    iconClass: "fa-solid fa-chart-line",
+    intro:
+      "New infection entries during each displayed interval, split by the model's contact and movement contributions.",
+    sections: [
+      {
+        iconClass: "fa-solid fa-layer-group",
+        title: "Sources",
+        text:
+          "Teal shows contact within regions. Amber shows recorded movements, including movements within the same region. Their sum is the total number of new infection entries. These are model attributions, not observed transmission chains.",
+      },
+      {
+        iconClass: "fa-solid fa-calendar-days",
+        title: "Time resolution",
+        text:
+          "Daily, weekly, monthly and yearly views sum entries within their display bins. The marker and the two readouts follow the selected interval. Initial exposed and infectious units are starting states and are not counted as new entries.",
       },
     ],
   },
@@ -563,25 +612,25 @@ const richTips = {
     title: "Highest Regional Prevalence",
     iconClass: "fa-solid fa-temperature-high",
     intro:
-      "This ranking shows which regions carry the largest infectious share at the current simulation frame.",
+      "This ranking shows regions with the largest infectious share at the end of the displayed bin.",
     sections: [
       {
         iconClass: "fa-solid fa-ranking-star",
         title: "Ranking",
         text:
-          "Bars are sorted by prevalence, so the highest pressure regions stay at the top.",
+          "Bar length shows I divided by the region's fixed model population, with the largest infectious shares at the top. Bar colors match the region's cluster in Partition Exposure and follow the selected community scale.",
       },
       {
         iconClass: "fa-solid fa-percent",
         title: "Labels",
         text:
-          "Each label combines prevalence percentage with the infectious count for that region.",
+          "Each label combines the infectious percentage with the infectious count in synthetic model units.",
       },
       {
         iconClass: "fa-solid fa-map-location-dot",
         title: "Map link",
         text:
-          "Use the list with the map to see whether regional pressure is clustered or spread across the network.",
+          "Use the list with the map to inspect the geographic pattern of regional infectious shares.",
       },
     ],
   },

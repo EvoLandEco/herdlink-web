@@ -1,5 +1,69 @@
-import { Fragment } from "react";
+import { Fragment, useState } from "react";
 import { HerdLinkLogo } from "./HerdLinkLogo";
+import herdLinkMarkUrl from "../assets/files/herdlink-mark.svg";
+import wurLogoUrl from "../assets/files/herdlink/WUR_W_standard_2021.svg?url";
+
+function HerdLinkBrandMark() {
+  const [open, setOpen] = useState(false);
+  return (
+    <div
+      className={`app-brand-info${open ? " is-open" : ""}`}
+      onPointerEnter={() => setOpen(true)}
+      onPointerLeave={(event) => {
+        if (!event.currentTarget.contains(document.activeElement)) setOpen(false);
+      }}
+      onFocus={() => setOpen(true)}
+      onBlur={(event) => {
+        if (!event.currentTarget.contains(event.relatedTarget) && !event.currentTarget.matches(":hover")) setOpen(false);
+      }}
+      onKeyDown={(event) => {
+        if (event.key === "Escape") {
+          event.stopPropagation();
+          setOpen(false);
+        }
+      }}
+    >
+      <button
+        className="app-brand-trigger"
+        type="button"
+        aria-label="About HerdLink"
+        aria-expanded={open}
+        aria-controls="herdlinkBrandCard"
+        onClick={() => setOpen(true)}
+      >
+        <img className="app-brand-mark" src={herdLinkMarkUrl} alt="" width="64" height="64" />
+      </button>
+      <div id="herdlinkBrandCard" className="app-brand-card" aria-hidden={!open} inert={open ? undefined : ""}>
+        <section className="app-brand-card-content" aria-labelledby="herdlinkBrandHeading">
+          <header className="app-brand-card-header">
+            <h2 id="herdlinkBrandHeading">About HerdLink</h2>
+            <img src={wurLogoUrl} alt="Wageningen University & Research" width="227" height="67" />
+          </header>
+          <dl className="app-brand-people">
+            <div>
+              <dt>Author</dt>
+              <dd>
+                <a href="https://qtj.me" target="_blank" rel="noopener noreferrer">
+                  <span><strong>Tianjian Qin</strong><small>qtj.me</small></span>
+                  <span className="app-brand-link-arrow" aria-hidden="true">↗</span>
+                </a>
+              </dd>
+            </div>
+            <div>
+              <dt>Advisor</dt>
+              <dd>
+                <a href="https://www.boris.earth" target="_blank" rel="noopener noreferrer">
+                  <span><strong>Boris Schmid</strong><small>boris.earth</small></span>
+                  <span className="app-brand-link-arrow" aria-hidden="true">↗</span>
+                </a>
+              </dd>
+            </div>
+          </dl>
+        </section>
+      </div>
+    </div>
+  );
+}
 
 const resolutionOptions = [
   {
@@ -83,21 +147,24 @@ export function LeftPanel() {
         <div className="col1-top">
           <div className="card-header">
             <div className="header-row header-row-1">
-              <div className="logo-container">
-                <h4 className="app-title">HerdLink</h4>
-                <div className="app-version">v0.9.6</div>
-                <div className="app-credit">
-                  <a
-                    className="app-credit-link"
-                    href="https://github.com/EvoLandEco/herdlink-web"
-                    target="_blank"
-                    rel="noopener noreferrer"
-                  >
-                    Source Code
-                  </a>
+              <div className="app-brand">
+                <HerdLinkBrandMark />
+                <div className="logo-container">
+                  <h4 className="app-title">HerdLink</h4>
+                  <div className="app-version">v0.9.8</div>
+                  <div className="app-credit">
+                    <a
+                      className="app-credit-link"
+                      href="https://github.com/EvoLandEco/herdlink-web"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                    >
+                      Source Code
+                    </a>
+                  </div>
                 </div>
               </div>
-              <div className="logo-svg-container">
+              <div className="logo-svg-container" aria-hidden="true">
                 <HerdLinkLogo />
               </div>
             </div>

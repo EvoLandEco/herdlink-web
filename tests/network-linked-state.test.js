@@ -191,11 +191,11 @@ test("simulation node callouts use the displayed frame for compartments, pressur
     ["Incoming exposure", "80"], ["Outgoing pressure", "40"],
   ]);
   state.N = state.S = state.E = state.I = state.R = 0;
-  state.exposedShare = state.prevalence = state.recoveredShare = 0;
+  state.exposedShare = state.prevalence = state.recoveredShare = null;
   state.incomingExposure = state.outgoingPressure = 0;
   const empty = context.getNodeCalloutData(node);
-  assert.equal(empty.hero, "0.00%");
-  assert.deepEqual(Array.from(empty.values), [0, 0, 0, 0, 0]);
+  assert.equal(empty.hero, "—");
+  assert.equal(empty.values, null);
 });
 
 test("simulation recomputes dirty network partitions before building and displaying its trajectory", async () => {
@@ -203,6 +203,7 @@ test("simulation recomputes dirty network partitions before building and display
   const context = vm.createContext({
     clearTimeout, simulationRecomputeTimer: null, simulationRunId: 0,
     window: {},
+    document: { getElementById: () => null },
     loadedCSVData: [{}], uniqueDates: [new Date("2020-01-01T00:00:00Z")], simulationState: {},
     readSimulationSettings: () => ({}),
     ensurePresetDailyData: async () => [{}], presetDailyDataError: null,
@@ -219,4 +220,5 @@ test("simulation recomputes dirty network partitions before building and display
   vm.runInContext(extractFunction("recomputeSimulationTrajectory"), context);
   await context.recomputeSimulationTrajectory();
   assert.deepEqual(order, ["partitions", "trajectory", "frame"]);
+  assert.equal(context.simulationState.status, "ready");
 });

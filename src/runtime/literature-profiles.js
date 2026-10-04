@@ -1,0 +1,38 @@
+export const literatureProfiles = [
+  {
+    id: "hev-herd-field-study",
+    label: "HEV · Herd field study",
+    studyUnit: "Individual pigs in ten commercial herds, divided into age groups.",
+    evidence: "The study compares transmission within an age group with mixing across the whole herd. Its estimates belong to those distinct mixing assumptions.",
+    compatibility: "HerdLink uses synthetic regional populations. These herd coefficients have no established direct mapping to regional contact or movement coefficients. Duration evidence also needs a matching infectious endpoint and residence-time distribution.",
+    sourceLabel: "Backer et al. (2012) · Epidemics · Abstract",
+    sourceUrl: "https://pubmed.ncbi.nlm.nih.gov/22664067/",
+  },
+  {
+    id: "hev-exposure-endpoint",
+    label: "HEV · Exposure and excretion",
+    studyUnit: "Individual pigs in an experimental contact study.",
+    evidence: "The reported interval starts with exposure and ends with detected excretion. Exposure time and infection time are different endpoints.",
+    compatibility: "This interval cannot be assigned directly to the exposed compartment's duration. The study does not supply a complete regional SEIR parameter set.",
+    sourceLabel: "Bouwknegt et al. (2008) · Veterinary Research · Abstract",
+    sourceUrl: "https://pubmed.ncbi.nlm.nih.gov/18367077/",
+  },
+  {
+    id: "prrs-infection-age",
+    label: "PRRS · Infection-age model",
+    studyUnit: "Individual piglets in an experimental study.",
+    evidence: "The study represents infectiousness as a function of time since infection, rather than a constant contribution throughout one infectious compartment.",
+    compatibility: "HerdLink's constant coefficients and geometric compartment durations do not reproduce this model. Choosing SIR or SEIR alone does not resolve that structural difference.",
+    sourceLabel: "Charpin et al. (2012) · Veterinary Research · Full text",
+    sourceUrl: "https://link.springer.com/article/10.1186/1297-9716-43-69",
+  },
+  {
+    id: "prrs-farm-network",
+    label: "PRRS · Farm network model",
+    studyUnit: "Farms, with production types and several contact pathways.",
+    evidence: "The study calibrates a farm model against weekly outbreak observations. It distinguishes pig movements, other contacts and farm production types.",
+    compatibility: "Farm infection status and regional compartment fractions describe different units. The regional movement ledger alone cannot supply the population and outcome observations needed to transfer these estimates.",
+    sourceLabel: "Galvis et al. (2022) · Transboundary and Emerging Diseases · Abstract",
+    sourceUrl: "https://pubmed.ncbi.nlm.nih.gov/35188711/",
+  },
+];

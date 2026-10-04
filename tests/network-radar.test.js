@@ -107,6 +107,20 @@ const info = (values, changes = {}) => ({
 });
 const values = (value) => [value, value, value, value, value];
 
+test("current date notes fit inside the plot at peaks and timeline edges", () => {
+  const { context } = runtime();
+  const noteWidth = 112, noteHeight = 46;
+  for (const [width, height] of [[180, 80], [300, 160], [450, 240]]) {
+    for (const x of [20, width / 2, width - 20]) {
+      for (const y of [0, height / 4, height / 2, height]) {
+        const position = context.getNetworkCalloutPosition(x, y, noteWidth, noteHeight, width, height);
+        assert.ok(position.x >= 12 && position.x + noteWidth <= width - 12);
+        assert.ok(position.y >= 12 && position.y + noteHeight <= height - 12);
+      }
+    }
+  }
+});
+
 test("date changes reuse the radar elements and position updates leave their transition running", () => {
   const app = runtime();
   app.render(info(values(0.2)));

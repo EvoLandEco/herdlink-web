@@ -22,6 +22,7 @@ export function useComparison(hasSupportedScreen) {
   const operationRef = useRef(null);
   const restoreFocusRef = useRef(null);
   const pendingScenarioRef = useRef(null);
+  const presetReloadRef = useRef(null);
   const currentSignature = useMemo(() => data?.status === "ready" && data.scenarioContext
     ? scenarioSignature({ ...data.scenarioContext, dates: data.dates }) : null, [data]);
   const slotSignatures = useMemo(() => scenarioSlots.map((slot) => scenarioSignature(slot?.scenario)), [scenarioSlots]);
@@ -47,14 +48,20 @@ export function useComparison(hasSupportedScreen) {
     }
   }, [open, recomputing]);
 
+  const cancelPresetReload = useCallback(() => {
+    clearTimeout(presetReloadRef.current?.timer);
+    presetReloadRef.current = null;
+  }, []);
+
   const close = useCallback(() => {
+    cancelPresetReload();
     if (operationRef.current?.frame != null) cancelAnimationFrame(operationRef.current.frame);
     operationRef.current = null;
     restoreFocusRef.current = null;
     setRecomputing(false);
     openRef.current = false;
     setOpen(false);
-  }, []);
+  }, [cancelPresetReload]);
 
   const toggle = useCallback(() => {
     if (openRef.current) {
@@ -74,11 +81,13 @@ export function useComparison(hasSupportedScreen) {
 
   const changeMode = useCallback((mode) => {
     if (operationRef.current) return;
+    cancelPresetReload();
     window.herdlinkComparison?.setMode(mode);
-  }, []);
+  }, [cancelPresetReload]);
 
   const runScenarioLoad = useCallback((load, message) => {
     if (!openRef.current || operationRef.current) return;
+    cancelPresetReload();
     const operation = { frame: null, started: false };
     operationRef.current = operation;
     pendingScenarioRef.current = null;
@@ -99,7 +108,7 @@ export function useComparison(hasSupportedScreen) {
         window.dispatchEvent(new Event("herdlink:comparison-change"));
       });
     });
-  }, []);
+  }, [cancelPresetReload]);
 
   const loadPreset = useCallback((id) => {
     runScenarioLoad(() => {
@@ -111,15 +120,19 @@ export function useComparison(hasSupportedScreen) {
   }, [runScenarioLoad]);
 
   const changePresetSettings = useCallback((patch) => {
-    if (operationRef.current) return;
+    if (!openRef.current || operationRef.current) return;
+    const id = presetReloadRef.current?.id ?? activePresetId;
+    cancelPresetReload();
     setScenarioError("");
     setScenarioNotice("");
     try {
       window.herdlinkComparison.setPresetSettings(patch);
+      if (id) presetReloadRef.current = { id, timer: setTimeout(() => loadPreset(id), 600) };
+      else setScenarioNotice("Choose a preset to apply these settings.");
     } catch (error) {
       setScenarioError(error.message);
     }
-  }, []);
+  }, [activePresetId, cancelPresetReload, loadPreset]);
 
   const saveScenario = useCallback((index, name) => {
     if (operationRef.current) return;
@@ -224,13 +237,14 @@ export function useComparison(hasSupportedScreen) {
     return () => {
       window.removeEventListener("herdlink:comparison-change", refresh);
       document.removeEventListener("keydown", handleKey, true);
+      cancelPresetReload();
       if (frame !== null) cancelAnimationFrame(frame);
       if (operationRef.current?.frame != null) cancelAnimationFrame(operationRef.current.frame);
       operationRef.current = null;
       restoreFocusRef.current = null;
       delete window.isComparisonOverlayOpen;
     };
-  }, [hasSupportedScreen, toggle, changeMode]);
+  }, [hasSupportedScreen, toggle, changeMode, cancelPresetReload]);
 
   return { open, data, recomputing, close, toggle, changeMode, scenarioSlots, scenarioError, scenarioNotice,
     activePresetId, activeScenarioSlot,

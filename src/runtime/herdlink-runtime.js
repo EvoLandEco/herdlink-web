@@ -14,6 +14,7 @@
           const tradeRecordsByDataset = new WeakMap();
           const originalLedgerStatsByDataset = new WeakMap();
           let presetDailyData = null;
+          let presetDailyDataHash = null;
           let presetDailyDates = [];
           let presetDailyDataPromise = null;
           let presetDailyDataError = null;
@@ -22,6 +23,12 @@
           let presetStandstillDays = 14;
           let simulationIntroductionDate = null;
           let simulationPresetHoldings = null;
+          let simulationPopulationSource = null;
+          let simulationPopulation = null;
+          let simulationInventoryPackage = null;
+          let simulationInitializationConvention = "prevalence-shares";
+          let simulationInitialStates = null;
+          let dailySimulationCache = new Map();
           let tradeCommunityTimeline = null;
           let communityScale = "finer";
           let communityView = "flow";
@@ -114,7 +121,6 @@
           const hotspotRingMaxScale = Number(themeStyles.getPropertyValue("--hotspot-ring-max-scale"));
           const nodeAppearanceDuration = 200;
           let newSCCs;
-          const currentDateAnnoType = d3.annotationCalloutCircle;
           let hoveredNode = null;
           let hoveredLink = null;
           let hoveredLinkElement = null;
@@ -166,7 +172,8 @@
                 "#ffcca8",
               ]),
             )
-            .domain([0, 0.35])
+            .domain([0, 1])
+            .unknown("#64748b")
             .clamp(true);
           const simulationPrevalenceTextScale = d3
             .scaleSequential(
@@ -179,7 +186,8 @@
                 "#ffcca8",
               ]),
             )
-            .domain([0, 0.35])
+            .domain([0, 1])
+            .unknown("#64748b")
             .clamp(true);
           let appDataMode = "trade";
           const appModeSwitchBounceMs = 550;
@@ -236,6 +244,31 @@
             }
             tradeRecordsByDataset.set(data, recordsByDate);
             return recordsByDate;
+          }
+
+          function getSimulationDisplayInterval(date) {
+            const start = Math.max(date.getTime(), presetDailyDates[0] ?? date.getTime());
+            const next = uniqueDates.find((value) => value.getTime() > date.getTime());
+            const coverageEnd = (presetDailyDates.at(-1) ?? uniqueDates.at(-1).getTime()) + 86400000;
+            return { start, end: Math.min(next?.getTime() ?? coverageEnd, coverageEnd) };
+          }
+
+          function getDisplayedLinkAvailability(date) {
+            const { start, end } = getSimulationDisplayInterval(date);
+            const disabled = new Set(simulationLinkInterventions.get(start)?.keys());
+            for (let time = start + 86400000; time < end; time += 86400000) {
+              for (const key of disabled) if (!simulationLinkInterventions.get(time)?.has(key)) disabled.delete(key);
+            }
+            return disabled;
+          }
+
+          function getDisplayedLinkRestrictionCount(key, date) {
+            const { start, end } = getSimulationDisplayInterval(date);
+            let closed = 0;
+            for (let time = start; time < end; time += 86400000) {
+              if (simulationLinkInterventions.get(time)?.has(key)) closed++;
+            }
+            return { closed, days: (end - start) / 86400000 };
           }
 
           function setSimulationLinkIntervention(key, disabled, date) {
@@ -393,7 +426,8 @@
           }
 
           function formatPct(value) {
-            const num = Number(value) || 0;
+            if (!Number.isFinite(value)) return "—";
+            const num = value;
             return `${(100 * num).toFixed(num >= 0.1 ? 1 : 2)}%`;
           }
 
@@ -483,7 +517,7 @@
             let lower = 0;
             const layout = keys.map((key) => {
               const value = summary[key] || 0;
-              const share = summary.N ? value / summary.N : 0;
+              const share = summary.N > 0 ? value / summary.N : null;
               const labelText = `${key}: ${formatCount(value)} (${formatPct(share)})`;
               const labelWidth = Math.min(
                 maxLabelWidth,
@@ -631,8 +665,8 @@
             mergedGroup.raise();
           }
 
-          function getReadablePrevalenceTextColor(value) {
-            const color = d3.color(simulationPrevalenceScale(value));
+          function getReadableFillTextColor(fill) {
+            const color = d3.color(fill);
             if (!color) return theme.onAccent;
             const luminance =
               (0.299 * color.r + 0.587 * color.g + 0.114 * color.b) / 255;
@@ -686,50 +720,125 @@
                   <i class="fa-solid fa-circle-info" aria-hidden="true"></i>
                 </button>
               </div>
-              <div class="simulation-control-grid">
-                <label>
-                  Model
-                  <select id="simulationModel">
-                    <option value="SEIR">SEIR</option>
-                    <option value="SIR">SIR</option>
-                    <option value="SIS">SIS</option>
-                    <option value="SEIRS">SEIRS</option>
-                  </select>
-                </label>
-                <label class="simulation-seed-region">
-                  Seed region
-                  <select id="simulationSeedRegion">
-                    <option value="CR35">CR35</option>
-                  </select>
-                </label>
-                <label class="simulation-introduction-date">
-                  Introduction date
-                  <input id="simulationIntroductionDate" type="date" aria-label="Simulation introduction date" title="Infection starts on this date. Load a preset to build its response schedule from this date.">
-                </label>
-                <label>
-                  Initial %
-                  <input id="simulationInitialPct" type="number" min="0.05" max="20" step="0.05" value="1">
-                </label>
-                <label>
-                  Contact beta
-                  <input id="simulationBeta" type="number" min="0" max="2" step="0.01" value="0.32">
-                </label>
-                <label>
-                  Movement beta
-                  <input id="simulationMovementBeta" type="number" min="0" max="2" step="0.01" value="0.08">
-                </label>
-                <label>
-                  Latency
-                  <input id="simulationSigma" type="number" min="0" max="1" step="0.01" value="0.22">
-                </label>
-                <label>
-                  Recovery
-                  <input id="simulationGamma" type="number" min="0" max="1" step="0.01" value="0.15">
-                </label>
+              <div id="simulationSettingsLayout" class="simulation-settings-layout" data-view="basic">
+                <div class="simulation-settings-switch" role="tablist" aria-label="Simulation settings" aria-orientation="vertical">
+                  <button id="simulationSettingsTab-basic" type="button" role="tab" aria-controls="simulationSettings-basic" aria-selected="true" aria-label="Basic settings" title="Basic settings">
+                    <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" aria-hidden="true"><rect x="2" y="2" width="4" height="4" rx="1"/><rect x="10" y="2" width="4" height="4" rx="1"/><rect x="2" y="10" width="4" height="4" rx="1"/><rect x="10" y="10" width="4" height="4" rx="1"/></svg>
+                    <span>Basic</span>
+                  </button>
+                  <button id="simulationSettingsTab-additional" type="button" role="tab" aria-controls="simulationSettings-additional" aria-selected="false" aria-label="Additional settings" title="Additional settings" tabindex="-1">
+                    <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" aria-hidden="true"><path d="M3 2v4m0 4v4M8 2v8M13 2v1m0 4v7"/><circle cx="3" cy="8" r="2"/><circle cx="8" cy="12" r="2"/><circle cx="13" cy="5" r="2"/></svg>
+                    <span>More</span>
+                  </button>
+                </div>
+                <div class="simulation-settings-pages">
+                  <section id="simulationSettings-basic" class="simulation-settings-page simulation-settings-page--basic" role="tabpanel" aria-labelledby="simulationSettingsTab-basic" aria-hidden="false">
+                    <div class="simulation-control-grid">
+                      <label>
+                        Model
+                        <select id="simulationModel">
+                          <option value="SEIR">SEIR</option>
+                          <option value="SIR">SIR</option>
+                          <option value="SIS">SIS</option>
+                          <option value="SEIRS">SEIRS</option>
+                        </select>
+                      </label>
+                      <label class="simulation-seed-region">
+                        Seed region
+                        <select id="simulationSeedRegion">
+                          <option value="CR35">CR35</option>
+                        </select>
+                      </label>
+                      <label class="simulation-introduction-date">
+                        Introduction date
+                        <input id="simulationIntroductionDate" type="date" aria-label="Simulation introduction date" title="Infection starts on this date. Load a preset to build its response schedule from this date.">
+                      </label>
+                      <label>
+                        Contact
+                        <input id="simulationBeta" type="number" min="0" step="any" value="0.10">
+                      </label>
+                      <label>
+                        Movement
+                        <input id="simulationMovementBeta" type="number" min="0" step="any" value="0.04" title="Population units per recorded animal">
+                      </label>
+                      <label>
+                        Recovery
+                        <input id="simulationGamma" type="number" min="0" max="1" step="any" value="0.15">
+                      </label>
+                    </div>
+                  </section>
+                  <section id="simulationSettings-additional" class="simulation-settings-page simulation-settings-page--additional" role="tabpanel" aria-labelledby="simulationSettingsTab-additional" aria-hidden="true" inert>
+                    <div class="simulation-control-grid">
+                      <label>
+                        Initialization
+                        <select id="simulationInitializationConvention">
+                          <option value="prevalence-shares">Shares (%)</option>
+                          <option value="absolute-counts">Counts</option>
+                        </select>
+                      </label>
+                      <label>
+                        <span id="simulationInitialPctLabel">Initial infectious %</span>
+                        <input id="simulationInitialPct" type="number" min="0" max="100" step="any" value="1">
+                      </label>
+                      <label>
+                        <span id="simulationInitialExposedPctLabel">Initial exposed %</span>
+                        <input id="simulationInitialExposedPct" type="number" min="0" max="100" step="any" value="0">
+                      </label>
+                      <label>
+                        <span id="simulationInitialRecoveredPctLabel">Initial recovered %</span>
+                        <input id="simulationInitialRecoveredPct" type="number" min="0" max="100" step="any" value="0">
+                      </label>
+                      <label>
+                        Progression
+                        <input id="simulationSigma" type="number" min="0" max="1" step="any" value="0.22">
+                      </label>
+                      <label>
+                        Immunity loss
+                        <input id="simulationOmega" type="number" min="0" max="1" step="any" value="0.02" title="Daily recovered exit fraction for SEIRS">
+                      </label>
+                    </div>
+                    <div id="simulationPopulationControls" class="simulation-population" role="group" aria-label="Population" hidden>
+                      <span>Population <strong id="simulationPopulationLabel">Synthetic</strong></span>
+                      <label class="simulation-population-import" hidden>Load population<input id="simulationPopulationImport" type="file" accept=".json,application/json" aria-label="Load population JSON"></label>
+                      <select id="simulationPopulationScenario" aria-label="Population scenario" hidden></select>
+                      <button id="simulationPopulationSynthetic" type="button" hidden>Use synthetic</button>
+                    </div>
+                  </section>
+                </div>
               </div>
+              <p id="simulationSettingsError" class="simulation-settings-error simulation-model-description" role="status"></p>
             `;
 
             document.getElementById("col3")?.appendChild(panel);
+            const views = ["basic", "additional"];
+            const tabs = views.map((view) => panel.querySelector(`#simulationSettingsTab-${view}`));
+            const pages = views.map((view) => panel.querySelector(`#simulationSettings-${view}`));
+            const selectSettingsView = (view) => {
+              panel.querySelector("#simulationSettingsLayout").dataset.view = view;
+              tabs.forEach((tab, index) => {
+                const active = views[index] === view;
+                tab.setAttribute("aria-selected", String(active));
+                tab.tabIndex = active ? 0 : -1;
+                pages[index].setAttribute("aria-hidden", String(!active));
+                pages[index].inert = !active;
+              });
+            };
+            tabs.forEach((tab, index) => {
+              tab.addEventListener("click", () => selectSettingsView(views[index]));
+              tab.addEventListener("keydown", (event) => {
+                let next;
+                if (event.key === "ArrowDown") next = (index + 1) % tabs.length;
+                else if (event.key === "ArrowUp") next = (index + tabs.length - 1) % tabs.length;
+                else if (event.key === "Home") next = 0;
+                else if (event.key === "End") next = tabs.length - 1;
+                else return;
+                event.preventDefault();
+                event.stopPropagation();
+                selectSettingsView(views[next]);
+                tabs[next].focus({ preventScroll: true });
+              });
+            });
+            selectSettingsView("basic");
             return panel;
           }
 
@@ -938,42 +1047,39 @@
             syncSimulationIntroductionControl();
             const regionSelect = document.getElementById("simulationSeedRegion");
             const seedRegion = regionSelect.value;
-            d3.select(regionSelect).selectAll("option")
-              .data(collectSimulationRegionIds(loadedCSVData || [])).join("option")
-              .attr("value", (id) => id)
-              .text((id) => `${id} · ${getStatnaam(id)}`);
+            const ids = collectSimulationRegionIds(loadedCSVData || []);
+            d3.select(regionSelect).selectAll("option").data(ids).join("option")
+              .attr("value", (id) => id).text((id) => `${id} · ${getStatnaam(id)}`);
             regionSelect.value = seedRegion;
-            return {
-              introductionDate: getPresetSettings().introductionDate,
-              ...(simulationPresetHoldings ? { holdings: { ...simulationPresetHoldings } } : {}),
-              model: document.getElementById("simulationModel")?.value || "SEIR",
-              seedRegion,
-              initialPct: clampNumber(
-                +(document.getElementById("simulationInitialPct")?.value || 1),
-                0.05,
-                20,
-              ),
-              beta: clampNumber(
-                +(document.getElementById("simulationBeta")?.value || 0.32),
-                0,
-                2,
-              ),
-              movementBeta: clampNumber(
-                +(document.getElementById("simulationMovementBeta")?.value || 0.08),
-                0,
-                2,
-              ),
-              sigma: clampNumber(
-                +(document.getElementById("simulationSigma")?.value || 0.22),
-                0,
-                1,
-              ),
-              gamma: clampNumber(
-                +(document.getElementById("simulationGamma")?.value || 0.15),
-                0,
-                1,
-              ),
+            const number = (suffix) => {
+              const input = document.getElementById(`simulation${suffix}`);
+              if (!input || input.value.trim() === "") throw new Error(`Enter a value for ${suffix}.`);
+              return Number(input.value);
             };
+            const absolute = simulationInitializationConvention === "absolute-counts";
+            let initialStates = simulationInitialStates;
+            if (absolute && !initialStates && simulationPresetHoldings) {
+              initialStates = Object.fromEntries(ids.map((id) => {
+                const I = id === seedRegion ? number("InitialPct") : 0;
+                const E = id === seedRegion ? number("InitialExposedPct") : 0;
+                const R = id === seedRegion ? number("InitialRecoveredPct") : 0;
+                return [id, { S: simulationPresetHoldings[id] - E - I - R, E, I, R }];
+              }));
+            }
+            return window.herdlinkSimulation.validateSimulationSettings({
+              engine: "daily-contact-v1",
+              introductionDate: getPresetSettings().introductionDate,
+              initializationConvention: simulationInitializationConvention,
+              ...(simulationPopulation ? { population: structuredClone(simulationPopulation), holdings: { ...simulationPresetHoldings } } : {}),
+              ...(absolute && initialStates ? { initialStates: structuredClone(initialStates) } : {}),
+              model: document.getElementById("simulationModel").value,
+              seedRegion,
+              initialPct: absolute ? 0 : number("InitialPct"),
+              initialExposedPct: absolute ? 0 : number("InitialExposedPct"),
+              initialRecoveredPct: absolute ? 0 : number("InitialRecoveredPct"),
+              beta: number("Beta"), movementBeta: number("MovementBeta"),
+              sigma: number("Sigma"), gamma: number("Gamma"), omega: number("Omega"),
+            }, ids, { requirePopulation: false, movementGeography: "COROP" });
           }
 
           function ensureSimulationLoadingOverlay() {
@@ -1189,315 +1295,30 @@
             return sortedIds;
           }
 
-          function buildSimulationLedger(data, ids, dates = uniqueDates) {
-            const ledgerByDate = new Map(
-              dates.map((date) => [date.getTime(), []]),
-            );
-            const totals = new Map(ids.map((id) => [id, 0]));
-
-            data.forEach((row) => {
-              const source = row.COROP_LEV;
-              const target = row.COROP_AFN;
-              const weight = +row.AANTAL;
-              if (
-                !source ||
-                !target ||
-                source.toUpperCase() === "NA" ||
-                target.toUpperCase() === "NA" ||
-                !Number.isFinite(weight) || weight <= 0
-              ) {
-                return;
-              }
-
-              const dateKey = row.time instanceof Date ? row.time.getTime() : null;
-              if (ledgerByDate.has(dateKey)) {
-                ledgerByDate.get(dateKey).push({ source, target, weight });
-              }
-              totals.set(source, (totals.get(source) || 0) + weight);
-              totals.set(target, (totals.get(target) || 0) + weight * 0.7);
-            });
-
-            return { ledgerByDate, totals };
-          }
-
-          function estimateSimulationHoldings(ids, totals) {
-            const positive = ids
-              .map((id) => Math.log1p(totals.get(id) || 0))
-              .filter((value) => value > 0);
-            const minLog = d3.min(positive) || 0;
-            const maxLog = d3.max(positive) || 1;
-            const span = maxLog - minLog || 1;
-            const holdings = new Map();
-
-            ids.forEach((id) => {
-              const score = Math.log1p(totals.get(id) || 0);
-              const scaled = score > 0 ? (score - minLog) / span : 0;
-              holdings.set(id, Math.round(450 + scaled * 9550));
-            });
-
-            return holdings;
-          }
-
-          function getSimulationFrameSummary(nodeStates) {
-            const summary = { S: 0, E: 0, I: 0, R: 0, N: 0, newInfections: 0, cumulativeInfections: 0 };
-            Object.values(nodeStates).forEach((state) => {
-              summary.S += state.S;
-              summary.E += state.E;
-              summary.I += state.I;
-              summary.R += state.R;
-              summary.N += state.N;
-              summary.newInfections += state.newInfections || 0;
-              summary.cumulativeInfections += state.cumulativeInfections || 0;
-            });
-            summary.prevalence = summary.N ? summary.I / summary.N : 0;
-            summary.exposedShare = summary.N ? summary.E / summary.N : 0;
-            return summary;
-          }
-
           function buildSimulationTrajectory(settings, inputs = {}) {
-            const {
-              data = loadedCSVData,
-              dates = uniqueDates,
-              nodeInterventions = simulationNodeInterventions,
-              linkInterventions = simulationLinkInterventions,
-            } = inputs;
-            if (!data || !dates.length) return null;
-
+            const explicitData = Object.hasOwn(inputs, "data");
+            const data = explicitData ? inputs.data : presetDailyData;
+            const dates = explicitData ? inputs.dates : presetDailyDates.map((time) => new Date(time));
+            if (!data || !dates?.length) throw new Error("A complete daily movement calendar is required.");
+            const nodeInterventions = inputs.nodeInterventions ?? simulationNodeInterventions;
+            const linkInterventions = inputs.linkInterventions ?? simulationLinkInterventions;
             const ids = collectSimulationRegionIds(data);
-            const { ledgerByDate, totals } = buildSimulationLedger(
-              data,
-              ids,
-              dates,
-            );
-            const holdings = settings.holdings
-              ? new Map(ids.map((id) => [id, settings.holdings[id]]))
-              : estimateSimulationHoldings(ids, totals);
-            const seedIds = [settings.seedRegion];
-            let current = new Map();
-
-            ids.forEach((id) => {
-              const N = holdings.get(id);
-              if (!Number.isFinite(N) || N <= 0) {
-                throw new Error(`Model population for ${id} must be a positive finite number.`);
-              }
-              current.set(id, { S: N, E: 0, I: 0, R: 0, N });
+            const validated = window.herdlinkSimulation.validateSimulationSettings(settings, ids);
+            const key = window.herdlinkSimulation.simulationInputKey({
+              settings: validated, data, dates, ids, nodeInterventions, linkInterventions, movementGeography: "COROP",
             });
-
-            const introductionTime = settings.introductionDate ? Date.parse(settings.introductionDate) : dates[0].getTime();
-            let introduced = false;
-
-            const frameByKey = {};
-            const frames = [];
-            const boundaryIndices = [];
-            const cumulativeInfections = new Map(ids.map((id) => [id, 0]));
-            const nodeEvents = Array.from(nodeInterventions).sort(([a], [b]) => a - b);
-            const permissions = new Map();
-            let interventionIndex = 0;
-            let previousAvailability;
-            let previousDisabledKeys = new Set();
-
-            dates.forEach((date, frameIndex) => {
-              if (!introduced && date.getTime() >= introductionTime) {
-                seedIds.forEach((id) => {
-                  const state = current.get(id);
-                  if (!state) return;
-                  const seeded = Math.min(state.N, Math.max(1, settings.initialPct / 100 * state.N));
-                  state.I = seeded;
-                  state.S = state.N - seeded;
-                });
-                introduced = true;
-              }
-              let permissionsChanged = false;
-              while (interventionIndex < nodeEvents.length && nodeEvents[interventionIndex][0] <= date.getTime()) {
-                const [time, changes] = nodeEvents[interventionIndex++];
-                applySimulationNodePermissions(permissions, changes, time);
-                permissionsChanged = true;
-              }
-              const availability = linkInterventions.get(date.getTime());
-              if (permissionsChanged || availability !== previousAvailability) {
-                const disabledKeys = getDisabledLinkKeys(date, ids, permissions, linkInterventions);
-                if (frameIndex > 0 && (disabledKeys.size !== previousDisabledKeys.size ||
-                  Array.from(disabledKeys).some((key) => !previousDisabledKeys.has(key)))) {
-                  boundaryIndices.push(frameIndex);
-                }
-                previousDisabledKeys = disabledKeys;
-              }
-              previousAvailability = availability;
-              const records = ledgerByDate.get(date.getTime()) || [];
-              const incomingLoad = new Map(ids.map((id) => [id, 0]));
-              const externalIncomingLoad = new Map(ids.map((id) => [id, 0]));
-              const outgoingLoad = new Map(ids.map((id) => [id, 0]));
-              const newInfectionByNode = new Map(ids.map((id) => [id, 0]));
-              const linkStates = new Map();
-
-              records.forEach((record) => {
-                const key = getLinkKey(record.source, record.target);
-                if (availability?.has(key) || (record.source !== record.target &&
-                  (permissions.get(record.source)?.exports === false || permissions.get(record.target)?.imports === false))) return;
-                const sourceState = current.get(record.source);
-                const targetState = current.get(record.target);
-                if (!sourceState || !targetState || !sourceState.N || !targetState.N) {
-                  return;
-                }
-                const sourcePrev = sourceState.I / sourceState.N;
-                const targetPrev = targetState.I / targetState.N;
-                const riskLoad = record.weight * sourcePrev * settings.movementBeta;
-                const existing = linkStates.get(key) || {
-                  source: record.source,
-                  target: record.target,
-                  local: record.source === record.target,
-                  ledgerWeight: 0,
-                  riskLoad: 0,
-                  sourcePrevalence: sourcePrev,
-                  targetPrevalence: targetPrev,
-                };
-                existing.ledgerWeight += record.weight;
-                existing.riskLoad += riskLoad;
-                existing.sourcePrevalence = sourcePrev;
-                existing.targetPrevalence = targetPrev;
-                linkStates.set(key, existing);
-                incomingLoad.set(
-                  record.target,
-                  (incomingLoad.get(record.target) || 0) + riskLoad,
-                );
-                if (record.source !== record.target) {
-                  externalIncomingLoad.set(
-                    record.target,
-                    (externalIncomingLoad.get(record.target) || 0) + riskLoad,
-                  );
-                  outgoingLoad.set(
-                    record.source,
-                    (outgoingLoad.get(record.source) || 0) + riskLoad,
-                  );
-                }
+            let daily = dailySimulationCache.get(key);
+            if (!daily) {
+              daily = window.herdlinkSimulation.simulateDaily({
+                settings: validated, data, dates, ids, nodeInterventions, linkInterventions, movementGeography: "COROP",
               });
-
-              const next = new Map();
-              ids.forEach((id) => {
-                const state = current.get(id);
-                const N = state.N;
-                const prevalence = state.I / N;
-                const localForce = availability?.has(getLinkKey(id, id))
-                  ? 0
-                  : settings.beta * prevalence;
-                const movementForce = (incomingLoad.get(id) || 0) / N;
-                const force = localForce + movementForce;
-                const entering = Math.min(
-                  state.S,
-                  state.S * (1 - Math.exp(-force)),
-                );
-                newInfectionByNode.set(id, entering);
-                const localShare = force > 0 ? localForce / force : 0;
-                const localLoad = entering * localShare;
-                const exposedStep =
-                  settings.model === "SEIR" || settings.model === "SEIRS";
-                const toInfectious = exposedStep
-                  ? Math.min(state.E, state.E * settings.sigma)
-                  : entering;
-                const toExposed = exposedStep ? entering : 0;
-                const recovered = Math.min(state.I, state.I * settings.gamma);
-                const waning =
-                  settings.model === "SIS"
-                    ? recovered
-                    : settings.model === "SEIRS"
-                      ? Math.min(state.R, state.R * 0.02)
-                      : 0;
-
-                const S = Math.max(0, state.S - entering + waning);
-                const E = Math.max(
-                  0,
-                  exposedStep ? state.E + toExposed - toInfectious : 0,
-                );
-                const I = Math.max(0, state.I + toInfectious - recovered);
-                const R =
-                  settings.model === "SIS"
-                    ? 0
-                    : Math.max(0, state.R + recovered - waning);
-                next.set(id, { S, E, I, R, N });
-
-                if (localLoad > 0) {
-                  const key = getLinkKey(id, id);
-                  const localMovement = linkStates.get(key);
-                  linkStates.set(key, {
-                    source: id,
-                    target: id,
-                    ledgerWeight: localMovement?.ledgerWeight || 0,
-                    riskLoad: (localMovement?.riskLoad || 0) + localLoad,
-                    sourcePrevalence: prevalence,
-                    targetPrevalence: prevalence,
-                    local: true,
-                  });
-                }
-              });
-
-              current = next;
-
-              const nodeStates = {};
-              const nodeMetrics = {};
-              ids.forEach((id) => {
-                const state = current.get(id);
-                const incoming = externalIncomingLoad.get(id) || 0;
-                const outgoing = outgoingLoad.get(id) || 0;
-                const prevalence = state.N ? state.I / state.N : 0;
-                const exposedShare = state.N ? state.E / state.N : 0;
-                const recoveredShare = state.N ? state.R / state.N : 0;
-                const newInfections = newInfectionByNode.get(id) || 0;
-                cumulativeInfections.set(id, cumulativeInfections.get(id) + newInfections);
-                nodeStates[id] = {
-                  ...state,
-                  prevalence,
-                  exposedShare,
-                  recoveredShare,
-                  incomingExposure: incoming,
-                  outgoingPressure: outgoing,
-                  newInfections: Math.max(0, newInfections),
-                  cumulativeInfections: cumulativeInfections.get(id),
-                  rtProxy: outgoing / Math.max(1, state.I),
-                };
-                nodeMetrics[id] = {
-                  inDegree: incoming,
-                  outDegree: outgoing,
-                  betweenness: prevalence,
-                  pageRank: state.I,
-                  eigenvector: outgoing / Math.max(1, state.I),
-                };
-              });
-
-              const summary = getSimulationFrameSummary(nodeStates);
-              const frame = {
-                date,
-                key: date.toISOString(),
-                nodeStates,
-                linkStates,
-                nodeMetrics,
-                summary,
-                seedIds,
-              };
-              frameByKey[frame.key] = frame;
-              frames.push(frame);
-            });
-
-            const metricMax = {};
-            metricNames.forEach((metric) => {
-              metricMax[metric] =
-                d3.max(frames, (frame) =>
-                  d3.max(Object.values(frame.nodeMetrics), (node) => node[metric]),
-                ) || 1;
-            });
-
-            return {
-              settings,
-              ids,
-              holdings,
-              seedIds,
-              frames,
-              frameByKey,
-              metricMax,
-              boundaryIndices,
-            };
+              if (dailySimulationCache.size >= 2) dailySimulationCache.delete(dailySimulationCache.keys().next().value);
+              dailySimulationCache.set(key, daily);
+            }
+            return explicitData ? daily : window.herdlinkSimulation.aggregateDailyTrajectory(daily, uniqueDates);
           }
 
-          function getComparisonInterventionEvents(dates, ids, mode, nodeInterventions = simulationNodeInterventions, linkInterventions = simulationLinkInterventions) {
+          function getComparisonInterventionEvents(dates, ids, mode, nodeInterventions = simulationNodeInterventions, linkInterventions = simulationLinkInterventions, coverageEnd = dates.at(-1)?.getTime() + 86400000) {
             const groups = new Map();
             const regionLabel = (id) => {
               const name = getStatnaam(id);
@@ -1508,10 +1329,11 @@
               if (!groups.has(date)) groups.set(date, { date, events: [] });
               groups.get(date).events.push({ date: new Date(time).toISOString(), description });
             };
+            const containingDate = (time) => time < coverageEnd ? dates.findLast((date) => date.getTime() <= time) || dates[0] : null;
             const timeline = getSimulationRestrictionTimeline(ids, dates, nodeInterventions);
             for (const row of timeline.rows) {
               for (const point of row.points) {
-                const sampleDate = dates.find((date) => date.getTime() >= point.time);
+                const sampleDate = mode === "simulation" ? containingDate(point.time) : dates.find((date) => date.getTime() >= point.time);
                 if (!sampleDate) continue;
                 for (const [direction, allowed] of Object.entries(point.changes)) {
                   const scope = direction === "exports" ? "Exports" : "Imports";
@@ -1520,13 +1342,15 @@
                 }
               }
             }
-            for (const date of dates) {
-              for (const key of linkInterventions.get(date.getTime())?.keys() || []) {
+            for (const [time, changes] of linkInterventions) {
+              const date = mode === "simulation" ? containingDate(time) : dates.find((date) => date.getTime() === time);
+              if (!date) continue;
+              for (const key of changes.keys()) {
                 const [source, target] = key.split("-");
                 const description = source === target
-                  ? `${mode === "simulation" ? "Local transmission and movements" : "Movements"} blocked within ${regionLabel(source)} for this step.`
-                  : `Movements blocked from ${regionLabel(source)} to ${regionLabel(target)} for this step.`;
-                addEvent(date, date.getTime(), description);
+                  ? `Movements blocked within ${regionLabel(source)} during this calendar day. Contact transmission is separate.`
+                  : `Movements blocked from ${regionLabel(source)} to ${regionLabel(target)} during this calendar day.`;
+                addEvent(date, time, description);
               }
             }
             return Array.from(groups.values()).sort((a, b) => a.date.localeCompare(b.date))
@@ -1538,20 +1362,20 @@
             const metric = (key, label, format, description) => ({ key, label, format, description });
             if (mode === "simulation") {
               const compartments = [
-                metric("S", "Susceptible", "decimal", "Susceptible model population units at the end of the recorded step."),
-                metric("E", "Exposed", "decimal", "Model population units in the latent stage between exposure and infectiousness at the end of the recorded step."),
-                metric("I", "Infectious", "decimal", "Infectious model population units at the end of the recorded step."),
-                metric("R", "Recovered", "decimal", "Recovered model population units at the end of the recorded step."),
-                metric("N", "Model population", "count", "Synthetic population units derived from trade activity and shared by both scenarios. CBS census counts provide separate map context."),
-                metric("prevalence", "Prevalence", "percent", "Infectious model population divided by total model population at the end of the recorded step."),
-                metric("newInfections", "New infections", "decimal", "Model population units newly infected during the recorded step, including those entering the exposed compartment."),
-                metric("cumulativeInfections", "Cumulative infections", "decimal", "New infection events summed across recorded steps, excluding the initial seed. Reinfections count again in SIS and SEIRS."),
+                metric("S", "Susceptible", "decimal", "Susceptible model population units at the end of the displayed period."),
+                metric("E", "Exposed", "decimal", "Model population units in the latent stage between exposure and infectiousness at the end of the displayed period."),
+                metric("I", "Infectious", "decimal", "Infectious model population units at the end of the displayed period."),
+                metric("R", "Recovered", "decimal", "Recovered model population units at the end of the displayed period."),
+                metric("N", "Model population", "count", "Selected population units, shared by both scenarios. A fixed inventory does not model demographic turnover."),
+                metric("prevalence", "Prevalence", "percent", "Infectious model population divided by total model population at the end of the displayed period."),
+                metric("newInfections", "New infections", "decimal", "Model population units newly infected during the displayed period, including those entering the exposed compartment."),
+                metric("cumulativeInfections", "Cumulative infections", "decimal", "New infection events summed across daily steps, excluding the initial seed. Reinfections count again in SIS and SEIRS."),
               ];
               return {
                 globalMetrics: compartments,
                 nodeMetrics: compartments.concat([
-                  metric("incomingExposure", "Incoming exposure", "decimal", "Incoming movements from other regions weighted by source prevalence at the start of the step and the movement transmission rate."),
-                  metric("outgoingPressure", "Outgoing pressure", "decimal", "Outgoing movements to other regions weighted by this region's prevalence at the start of the step and the movement transmission rate."),
+                  metric("incomingExposure", "Incoming exposure", "decimal", "Incoming movement pressure from other regions, weighted by source prevalence at each day's start, multiplied by the movement coefficient and summed across the displayed period."),
+                  metric("outgoingPressure", "Outgoing pressure", "decimal", "Outgoing movement pressure to other regions, weighted by this region's prevalence at each day's start, multiplied by the movement coefficient and summed across the displayed period."),
                 ]),
               };
             }
@@ -1566,6 +1390,8 @@
                 metric("numPartitions", "Communities", "count", "Number of fixed communities from interregional trade across the full loaded period, with scheduled restrictions applied."),
                 metric("modularity", "Modularity", "decimal", "Agreement of this date's allowed interregional trade with the fixed full-period communities, using the selected scale's strength penalty. Compare scores at the same community scale."),
                 metric("spectralRadius", "Spectral radius", "decimal", "The largest eigenvalue magnitude of the directed movement matrix for this date, describing amplification through trade connections."),
+                metric("outDegree", "Outgoing movements", "count", "Cross-region animal movements sent on enabled records, summed across all regions. Movements within a region are excluded."),
+                metric("inDegree", "Incoming movements", "count", "Cross-region animal movements received on enabled records, summed across all regions. Movements within a region are excluded."),
               ],
               nodeMetrics: [
                 metric("inDegree", "Incoming movements", "count", "Animal movements arriving from other regions on enabled records."),
@@ -1594,19 +1420,27 @@
 
           function getOriginalSimulationSeries(settings, originalTrajectory = null) {
             const datesKey = uniqueDates.map((date) => date.toISOString()).join(",");
+            const ids = collectSimulationRegionIds(presetDailyData);
+            const originalKey = window.herdlinkSimulation.simulationInputKey({
+              settings, data: presetDailyData, dates: presetDailyDates.map((time) => new Date(time)), ids, movementGeography: "COROP",
+              nodeInterventions: new Map(), linkInterventions: new Map(),
+            });
+            if (originalTrajectory && originalTrajectory.identity !== originalKey) {
+              throw new Error("The reference trajectory must use the same daily inputs and no restrictions.");
+            }
             const settingsKey = JSON.stringify(settings);
             let cache = comparisonDataCache.get("simulation");
-            if (!cache || cache.data !== loadedCSVData || cache.datesKey !== datesKey || cache.settingsKey !== settingsKey) {
-              cache = { data: loadedCSVData, datesKey, settingsKey };
+            if (!cache || cache.data !== loadedCSVData || cache.dailyData !== presetDailyData || cache.datesKey !== datesKey || cache.settingsKey !== settingsKey) {
+              cache = { data: loadedCSVData, dailyData: presetDailyData, datesKey, settingsKey };
               comparisonDataCache.set("simulation", cache);
             }
-            if (!cache.original) {
-              const trajectory = originalTrajectory || buildSimulationTrajectory(settings, {
-                  data: loadedCSVData, dates: uniqueDates,
-                  nodeInterventions: new Map(), linkInterventions: new Map(),
-                });
+            if (!cache.original || cache.originalKey !== originalKey) {
+              const trajectory = originalTrajectory
+                ? window.herdlinkSimulation.aggregateDailyTrajectory(originalTrajectory, uniqueDates)
+                : buildSimulationTrajectory(settings, { nodeInterventions: new Map(), linkInterventions: new Map() });
               cache.original = buildComparisonSeries(uniqueDates, trajectory.ids, getComparisonMetricDefinitions("simulation"),
                 (key) => trajectory.frameByKey[key]?.summary, (key) => trajectory.frameByKey[key]?.nodeStates);
+              cache.originalKey = originalKey;
             }
             return cache.original;
           }
@@ -1645,13 +1479,14 @@
             if (presetDailyData) return Promise.resolve(presetDailyData).then(initialize).catch(failed);
             if (presetDailyDataPromise) return presetDailyDataPromise;
             presetDailyDataError = null;
-            presetDailyDataPromise = fetchAsset("assets/data/daily_aggregation.csv", "text").then((csv) => {
+            presetDailyDataPromise = fetchAsset("assets/data/daily_aggregation.csv", "text").then(async (csv) => {
               const data = d3.csvParse(csv, (row) => ({ ...row, time: new Date(row.time), AANTAL: +row.AANTAL }));
               const times = [...new Set(data.map((row) => row.time.getTime()))].sort((a, b) => a - b);
               if (!times.length || times.some((time, index) => !Number.isFinite(time) ||
                 (index > 0 && time - times[index - 1] !== 86400000))) {
                 throw new Error("Daily history needs a complete calendar with one recorded date per day.");
               }
+              presetDailyDataHash = await window.herdlinkSimulation.hashSimulationContent(csv);
               presetDailyData = data;
               presetDailyDates = times;
               return data;
@@ -1660,8 +1495,8 @@
           }
 
           function getPresetSettings() {
-            const first = uniqueDates[0]?.getTime() ?? 0;
-            const last = uniqueDates.at(-1)?.getTime() ?? first;
+            const first = presetDailyDates[0] ?? uniqueDates[0]?.getTime() ?? 0;
+            const last = presetDailyDates.at(-1) ?? uniqueDates.at(-1)?.getTime() ?? first;
             const dateLabel = (time) => new Date(time).toISOString().slice(0, 10);
             const defaultTime = Math.max(first, Math.min((presetDailyDates[0] ?? first) + 365 * 86400000, last));
             return {
@@ -1693,11 +1528,13 @@
             const dateChanged = patch.introductionDate !== undefined && patch.introductionDate !== current.introductionDate;
             if (dateChanged) {
               if (!current.ready) throw new Error(presetDailyDataError || "Wait for daily movement history to load.");
-              const holdings = getSimulationPopulationForDate(patch.introductionDate);
+              const holdings = simulationPopulation?.kind === "fixed-animal-inventory" || simulationInitializationConvention === "absolute-counts"
+                ? simulationPresetHoldings : getSimulationPopulationForDate(patch.introductionDate);
               simulationIntroductionDate = patch.introductionDate;
               simulationPresetHoldings = holdings;
               comparisonDataCache.delete("simulation");
               syncSimulationIntroductionControl();
+              syncSimulationPopulationControls();
             }
             if (patch.targetBudget !== undefined) presetTargetBudget = patch.targetBudget;
             if (patch.responseDays !== undefined) presetResponseDays = patch.responseDays;
@@ -1716,11 +1553,98 @@
           }
 
           function getSimulationPopulationForDate(introductionDate) {
-            const introduction = Date.parse(introductionDate);
-            const history = presetDailyData.filter((row) => row.time.getTime() >= introduction - 365 * 86400000 && row.time.getTime() < introduction);
-            const ids = collectSimulationRegionIds(loadedCSVData);
-            const { totals } = buildSimulationLedger(history, ids, []);
-            return Object.fromEntries(estimateSimulationHoldings(ids, totals));
+            const snapshot = window.herdlinkSimulation.createSyntheticPopulationSnapshot({
+              introductionDate, data: presetDailyData, ids: collectSimulationRegionIds(loadedCSVData),
+              historyCoverage: { start: new Date(presetDailyDates[0]).toISOString().slice(0, 10), endExclusive: new Date(presetDailyDates.at(-1) + 86400000).toISOString().slice(0, 10) },
+            });
+            simulationPopulation = snapshot;
+            const { values, ...source } = snapshot;
+            simulationPopulationSource = { ...source, sourceHash: presetDailyDataHash };
+            return values;
+          }
+
+          function syncSimulationPopulationControls() {
+            const label = document.getElementById("simulationPopulationLabel");
+            if (!label) return;
+            const inventory = simulationPopulation?.kind === "fixed-animal-inventory";
+            document.getElementById("simulationPopulationControls").hidden = !inventory;
+            label.textContent = inventory ? (window.herdlinkSimulation.isPrivatePopulation(simulationPopulation) ? "Inventory reference · memory only" : "Inventory reference") : "Synthetic";
+            const select = document.getElementById("simulationPopulationScenario");
+            const scenarios = simulationInventoryPackage?.scenarios || [];
+            select.replaceChildren();
+            scenarios.forEach((scenario) => {
+              const option = document.createElement("option");
+              option.value = scenario.id;
+              option.textContent = scenario.id;
+              select.appendChild(option);
+            });
+            select.hidden = scenarios.length < 2;
+            select.value = simulationPopulation?.scenarioId || "";
+            document.getElementById("simulationPopulationSynthetic").hidden = !inventory;
+            document.getElementById("simulationInitializationConvention").value = simulationInitializationConvention;
+            const absolute = simulationInitializationConvention === "absolute-counts";
+            for (const [suffix, label] of [["InitialPct", "infectious"], ["InitialExposedPct", "exposed"], ["InitialRecoveredPct", "recovered"]]) {
+              document.getElementById(`simulation${suffix}Label`).textContent = `Initial ${label}${absolute ? "" : " %"}`;
+              const input = document.getElementById(`simulation${suffix}`);
+              if (absolute) input.removeAttribute("max");
+              else input.max = "100";
+            }
+          }
+
+          function applySimulationPopulation(snapshot) {
+            const ids = collectSimulationRegionIds(presetDailyData);
+            const population = window.herdlinkSimulation.validatePopulationSnapshot(snapshot, ids, { movementGeography: "COROP" });
+            const settings = { ...readSimulationSettings(), population, holdings: { ...population.values } };
+            if (settings.initialStates) settings.initialStates = Object.fromEntries(ids.map((id) => {
+              const { E, I, R } = settings.initialStates[id];
+              return [id, { S: population.values[id] - E - I - R, E, I, R }];
+            }));
+            buildSimulationTrajectory(settings);
+            applyScenario(new Map(simulationNodeInterventions), new Map(simulationLinkInterventions), settings, "population");
+            comparisonDataCache.delete("simulation");
+            syncSimulationPopulationControls();
+            window.herdlinkComparison?.refresh();
+          }
+
+          function importSimulationPopulation(product, scenarioId = product?.scenarios?.[0]?.id) {
+            if (areScenarioControlsDisabled()) throw new Error("Wait for the current network operation to finish.");
+            const snapshot = window.herdlinkSimulation.selectPopulationScenario(product, scenarioId);
+            applySimulationPopulation(snapshot);
+            simulationInventoryPackage = {
+              schemaVersion: 1, kind: "population-product", reference: structuredClone(snapshot.reference),
+              scenarios: product.scenarios.map(({ id, values }) => ({ id, values: structuredClone(values) })),
+            };
+            syncSimulationPopulationControls();
+          }
+
+          function useSyntheticSimulationPopulation() {
+            if (areScenarioControlsDisabled()) throw new Error("Wait for the current network operation to finish.");
+            const snapshot = window.herdlinkSimulation.createSyntheticPopulationSnapshot({
+              introductionDate: getPresetSettings().introductionDate, data: presetDailyData,
+              ids: collectSimulationRegionIds(presetDailyData),
+              historyCoverage: { start: new Date(presetDailyDates[0]).toISOString().slice(0, 10), endExclusive: new Date(presetDailyDates.at(-1) + 86400000).toISOString().slice(0, 10) },
+            });
+            applySimulationPopulation(snapshot);
+            simulationInventoryPackage = null;
+            syncSimulationPopulationControls();
+          }
+
+          function setSimulationInitializationConvention(convention) {
+            const settings = readSimulationSettings();
+            if (convention === settings.initializationConvention) return;
+            if (!["prevalence-shares", "absolute-counts"].includes(convention)) throw new Error("Choose shares or counts for initialization.");
+            const N = settings.holdings[settings.seedRegion];
+            if (settings.initialStates && Object.entries(settings.initialStates).some(([id, state]) => id !== settings.seedRegion && state.E + state.I + state.R > 0)) {
+              throw new Error("This scenario has counts in multiple regions. Keep count initialization.");
+            }
+            const absolute = convention === "absolute-counts";
+            const values = absolute
+              ? [settings.initialPct, settings.initialExposedPct, settings.initialRecoveredPct].map((value) => N * value / 100)
+              : ["I", "E", "R"].map((key) => N > 0 ? settings.initialStates[settings.seedRegion][key] / N * 100 : 0);
+            simulationInitializationConvention = convention;
+            simulationInitialStates = null;
+            ["InitialPct", "InitialExposedPct", "InitialRecoveredPct"].forEach((suffix, index) => { document.getElementById(`simulation${suffix}`).value = values[index]; });
+            syncSimulationPopulationControls();
           }
 
           function getNetworkPresetGraph(data = presetDailyData, introductionDate = getPresetSettings().introductionDate) {
@@ -1758,9 +1682,12 @@
             const common = { delayDays: responseDays, timing, duration: "Through the remaining timeline.", disabledReason: readyReason };
             const rankedScope = `Up to ${presetSettings.targetBudget} regions with outgoing historical trade. Targets stay fixed.`;
             return {
+              schemaVersion: 3,
+              ...(presetDailyDataHash && simulationPopulationSource ? { provenance: getSimulationProvenance() } : {}),
               datasetKey: currentTimeSpan,
               datasetLabel: currentTimeSpan ? `${currentTimeSpan[0].toUpperCase()}${currentTimeSpan.slice(1)} trade` : "Animal trade network",
-              settings, seedLabel, presetSettings, communityScale, mode: appDataMode, disabled: areScenarioControlsDisabled() || !presetSettings.ready,
+              settings, seedLabel, presetSettings, communityScale, mode: appDataMode, controlsValid: true,
+              privatePopulation: window.herdlinkSimulation.isPrivatePopulation(simulationPopulation), disabled: areScenarioControlsDisabled() || !presetSettings.ready,
               nodeInterventions: Array.from(simulationNodeInterventions, ([time, changes]) =>
                 [time, Array.from(changes, ([id, directions]) => [id, { ...directions }])]),
               linkInterventions: Array.from(simulationLinkInterventions, ([time, changes]) => [time, Array.from(changes)]),
@@ -1798,37 +1725,54 @@
             };
           }
 
+          function getSimulationProvenance(population = simulationPopulation) {
+            if (!presetDailyDataHash || !simulationPopulationSource) throw new Error("Wait for the daily data and population snapshot to load.");
+            return {
+              claimScope: "exploratory",
+              evidence: { population: population.kind === "synthetic" ? "synthetic" : population.reference.evidence,
+                movement: "recorded-ledger", disease: "illustrative", diseaseValidation: "not-assessed" },
+              engine: { id: "daily-contact-v1", numericalMethod: "synchronous-daily-recurrence", timeUnit: "day" },
+              population: { kind: population.kind, reference: structuredClone(population.reference) },
+              movementData: {
+                sourceId: "bundled-daily-pig-ledger", contentHash: presetDailyDataHash,
+                endpointUnit: "COROP", weightUnit: "recorded-animals",
+                start: new Date(presetDailyDates[0]).toISOString(),
+                end: new Date(presetDailyDates.at(-1) + 86400000).toISOString(),
+                intervalConvention: "[start,end)",
+              },
+            };
+          }
+
           function validateScenario(snapshot) {
             const object = (value) => value !== null && typeof value === "object" && !Array.isArray(value);
             const keysAre = (value, keys) => object(value) && Object.keys(value).every((key) => keys.includes(key));
             const fail = (message) => { throw new Error(message); };
-            if (!keysAre(snapshot, ["schemaVersion", "datasetKey", "dates", "settings", "nodeInterventions", "linkInterventions"]) || Object.keys(snapshot).length !== 6 ||
-              snapshot.schemaVersion !== 1) fail("This scenario format is not supported.");
-            if (snapshot.datasetKey !== currentTimeSpan || !Array.isArray(snapshot.dates) ||
-              snapshot.dates.length !== uniqueDates.length || uniqueDates.some((date, index) => snapshot.dates[index] !== date.toISOString())) {
-              fail("This scenario belongs to a different trade dataset or recorded date range.");
+            if ([1, 2].includes(snapshot?.schemaVersion)) fail("This saved scenario has no complete population reference. Choose a population and save a scenario to run it.");
+            if (!keysAre(snapshot, ["schemaVersion", "datasetKey", "dates", "settings", "provenance", "nodeInterventions", "linkInterventions"]) ||
+              Object.keys(snapshot).length !== 7 || snapshot.schemaVersion !== 3) fail("This scenario format is not supported.");
+            if (!["daily", "weekly", "monthly", "yearly"].includes(snapshot.datasetKey) || !Array.isArray(snapshot.dates) ||
+              !snapshot.dates.length || Array.from(snapshot.dates).some((date, index) => typeof date !== "string" || !Number.isFinite(Date.parse(date)) ||
+                new Date(date).toISOString() !== date || (index && date <= snapshot.dates[index - 1]))) {
+              fail("The scenario display calendar is invalid.");
             }
-            const ids = collectSimulationRegionIds(loadedCSVData);
-            const settings = snapshot.settings;
-            const ranges = { initialPct: [0.05, 20], beta: [0, 2], movementBeta: [0, 2], sigma: [0, 1], gamma: [0, 1] };
-            if (!keysAre(settings, ["model", "seedRegion", "introductionDate", "holdings", ...Object.keys(ranges)]) || ![7, 8, 9].includes(Object.keys(settings).length) ||
-              !["SIR", "SIS", "SEIR", "SEIRS"].includes(settings.model) || !ids.includes(settings.seedRegion)) {
-              fail("The scenario model or seed region is invalid.");
-            }
-            for (const [key, [min, max]] of Object.entries(ranges)) {
-              if (!Number.isFinite(settings[key]) || settings[key] < min || settings[key] > max) {
-                fail(`The scenario setting ${key} must be between ${min} and ${max}.`);
-              }
-            }
-            if (settings.introductionDate !== undefined || settings.holdings !== undefined) {
-              const time = Date.parse(settings.introductionDate);
-              if (typeof settings.introductionDate !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(settings.introductionDate) ||
-                !Number.isFinite(time) || new Date(time).toISOString().slice(0, 10) !== settings.introductionDate ||
-                time < uniqueDates[0].getTime() || time > uniqueDates.at(-1).getTime() ||
-                (settings.holdings !== undefined && (!object(settings.holdings) || Object.keys(settings.holdings).length !== ids.length ||
-                !ids.every((id) => Number.isFinite(settings.holdings[id]) && settings.holdings[id] >= 450 && settings.holdings[id] <= 10000)))) {
-                fail("The scenario introduction date or model population is invalid.");
-              }
+            const ids = collectSimulationRegionIds(presetDailyData || []);
+            const settings = window.herdlinkSimulation.validateSimulationSettings(snapshot.settings, ids);
+            window.herdlinkSimulation.validatePopulationSnapshot(settings.population, ids, { values: settings.holdings, movementGeography: "COROP" });
+            if (Date.parse(settings.introductionDate) < presetDailyDates[0] || Date.parse(settings.introductionDate) > presetDailyDates.at(-1)) fail("The introduction must fall within daily coverage.");
+            const expected = getSimulationProvenance(settings.population);
+            const provenance = snapshot.provenance;
+            const canonical = (value) => JSON.stringify(value, (_key, item) => object(item)
+              ? Object.fromEntries(Object.entries(item).sort(([a], [b]) => a.localeCompare(b))) : item);
+            if (!object(provenance) || !keysAre(provenance.population, ["kind", "reference"]) || provenance.claimScope !== "exploratory" ||
+              canonical(provenance.evidence) !== canonical(expected.evidence) ||
+              provenance.engine?.id !== expected.engine.id || provenance.engine?.numericalMethod !== expected.engine.numericalMethod ||
+              provenance.engine?.timeUnit !== "day" || provenance.population?.kind !== settings.population.kind ||
+              canonical(provenance.population?.reference) !== canonical(settings.population.reference) ||
+              provenance.movementData?.contentHash !== expected.movementData.contentHash ||
+              provenance.movementData?.start !== expected.movementData.start || provenance.movementData?.end !== expected.movementData.end ||
+              provenance.movementData?.endpointUnit !== "COROP" || provenance.movementData?.weightUnit !== "recorded-animals" ||
+              provenance.movementData?.intervalConvention !== "[start,end)") {
+              fail("The scenario model, population units or daily movement source does not match this simulation.");
             }
             const linkKeys = new Set(ids.flatMap((source) => ids.map((target) => getLinkKey(source, target))));
             const schedules = {};
@@ -1860,16 +1804,18 @@
               }
               schedules[kind] = schedule;
             }
-            return { settings: { ...settings,
-              introductionDate: settings.introductionDate || uniqueDates[0].toISOString().slice(0, 10),
-              ...(settings.holdings ? { holdings: { ...settings.holdings } } : {}) }, ...schedules };
+            window.herdlinkSimulation.validateSimulationSchedules({
+              ids, dates: presetDailyDates.map((time) => new Date(time)), ...schedules,
+            });
+            return { settings, provenance: structuredClone(provenance), ...schedules };
           }
 
           function captureScenario() {
             if (areScenarioControlsDisabled()) throw new Error("Wait for the current network operation to finish before saving a scenario.");
             const snapshot = {
-              schemaVersion: 1, datasetKey: currentTimeSpan,
+              schemaVersion: 3, datasetKey: currentTimeSpan,
               dates: uniqueDates.map((date) => date.toISOString()), settings: readSimulationSettings(),
+              provenance: getSimulationProvenance(),
               nodeInterventions: Array.from(simulationNodeInterventions, ([time, changes]) =>
                 [time, Array.from(changes, ([id, directions]) => [id, { ...directions }])]),
               linkInterventions: Array.from(simulationLinkInterventions, ([time, changes]) => [time, Array.from(changes)]),
@@ -1881,20 +1827,37 @@
           function applyScenario(nodeInterventions, linkInterventions, settings, label) {
             let settingsChanged = false;
             if (settings) {
-              const currentSettings = readSimulationSettings();
-              settingsChanged = Object.keys({ ...settings, ...currentSettings }).some((key) => {
-                const next = settings[key], previous = currentSettings[key];
-                return key === "holdings" && next && previous
-                  ? Object.keys(next).length !== Object.keys(previous).length || Object.keys(next).some((id) => next[id] !== previous[id])
-                  : next !== previous;
-              });
-              simulationIntroductionDate = settings.introductionDate || uniqueDates[0].toISOString().slice(0, 10);
-              simulationPresetHoldings = settings.holdings ? { ...settings.holdings } : null;
-              syncSimulationIntroductionControl();
-              const controls = { model: "Model", seedRegion: "SeedRegion", initialPct: "InitialPct", beta: "Beta", movementBeta: "MovementBeta", sigma: "Sigma", gamma: "Gamma" };
-              for (const [key, suffix] of Object.entries(controls)) {
-                document.getElementById(`simulation${suffix}`).value = settings[key];
+              settings = window.herdlinkSimulation.validateSimulationSettings(settings, collectSimulationRegionIds(presetDailyData), { movementGeography: "COROP" });
+              const currentPopulation = simulationPopulation && window.herdlinkSimulation.validatePopulationSnapshot(simulationPopulation, Object.keys(settings.holdings));
+              const controlValues = { ...settings };
+              if (settings.initialStates) {
+                const state = settings.initialStates[settings.seedRegion];
+                Object.assign(controlValues, { initialPct: state.I, initialExposedPct: state.E, initialRecoveredPct: state.R });
               }
+              const fields = { model: "Model", seedRegion: "SeedRegion", initialPct: "InitialPct", initialExposedPct: "InitialExposedPct", initialRecoveredPct: "InitialRecoveredPct", beta: "Beta", movementBeta: "MovementBeta", sigma: "Sigma", gamma: "Gamma", omega: "Omega" };
+              settingsChanged = Object.entries(fields).some(([key, suffix]) => String(controlValues[key]) !== document.getElementById(`simulation${suffix}`).value) ||
+                simulationIntroductionDate !== settings.introductionDate || !simulationPresetHoldings ||
+                Object.keys(settings.holdings).some((id) => settings.holdings[id] !== simulationPresetHoldings[id]) ||
+                JSON.stringify(settings.initialStates ?? null) !== JSON.stringify(simulationInitialStates) ||
+                JSON.stringify(settings.population) !== JSON.stringify(currentPopulation) ||
+                settings.initializationConvention !== simulationInitializationConvention;
+              simulationIntroductionDate = settings.introductionDate || uniqueDates[0].toISOString().slice(0, 10);
+              simulationPresetHoldings = { ...settings.holdings };
+              simulationPopulation = structuredClone(settings.population);
+              simulationInitializationConvention = settings.initializationConvention;
+              const { values, ...source } = simulationPopulation;
+              simulationPopulationSource = source;
+              simulationInitialStates = settings.initialStates ? structuredClone(settings.initialStates) : null;
+              syncSimulationIntroductionControl();
+              const controls = { model: "Model", seedRegion: "SeedRegion", initialPct: "InitialPct", initialExposedPct: "InitialExposedPct", initialRecoveredPct: "InitialRecoveredPct", beta: "Beta", movementBeta: "MovementBeta", sigma: "Sigma", gamma: "Gamma", omega: "Omega" };
+              for (const [key, suffix] of Object.entries(controls)) {
+                const input = document.getElementById(`simulation${suffix}`);
+                input.value = controlValues[key];
+                input.setCustomValidity?.("");
+              }
+              syncSimulationPopulationControls();
+              const errorMessage = document.getElementById("simulationSettingsError");
+              if (errorMessage) errorMessage.textContent = "";
             }
             const sameSchedule = (next, current) => next.size === current.size && Array.from(next).every(([time, changes]) => {
               const existing = current.get(time);
@@ -1928,22 +1891,29 @@
             if (areScenarioControlsDisabled()) throw new Error("Wait for the current network operation to finish before loading a scenario.");
             const scenario = validateScenario(snapshot);
             applyScenario(scenario.nodeInterventions, scenario.linkInterventions, scenario.settings, "saved scenario");
+            simulationInventoryPackage = null;
+            syncSimulationPopulationControls();
             return { label: "Saved scenario", detail: "Model settings and all dated trade restrictions restored." };
           }
 
-          function loadPreset(id) {
-            if (areScenarioControlsDisabled()) throw new Error("Wait for the current network operation to finish before loading a preset.");
+          function buildPresetScenario(id, overrides = {}) {
             const context = getScenarioContext();
+            const limits = { targetBudget: [1, 40], responseDays: [0, 365], standstillDays: [1, 365] };
+            for (const [key, value] of Object.entries(overrides)) {
+              if (!limits[key] || !Number.isInteger(value) || value < limits[key][0] || value > limits[key][1]) {
+                throw new Error(`Invalid comparison setting: ${key}.`);
+              }
+            }
+            const presetSettings = { ...context.presetSettings, ...overrides };
             const preset = context.presets.find((item) => item.id === id);
             if (!preset) throw new Error("Choose one of the seven intervention presets.");
             if (preset.disabledReason) throw new Error(preset.disabledReason);
-            const { introductionDate, targetBudget, responseDays, standstillDays } = context.presetSettings;
+            const { introductionDate, targetBudget, responseDays, standstillDays } = presetSettings;
             const introduction = Date.parse(introductionDate);
             const response = introduction + responseDays * 86400000;
             const ids = collectSimulationRegionIds(loadedCSVData);
             const roster = new Set(ids);
-            const holdings = getSimulationPopulationForDate(introductionDate);
-            const settings = { ...context.settings, introductionDate, holdings };
+            const settings = window.herdlinkSimulation.validateSimulationSettings({ ...context.settings, introductionDate }, ids);
             const nodes = new Map(), links = new Map();
             let targets = [], members;
             if (id === "seed-containment") targets = [settings.seedRegion];
@@ -1956,10 +1926,10 @@
               members = selection.members;
             }
             if (id === "temporary-standstill") targets = ids;
-            const startDate = uniqueDates.find((date) => date.getTime() >= response);
+            const startDate = presetDailyDates.find((time) => time >= response);
             let detail = "All movements stay open.";
-            if (startDate && members) {
-              for (const row of loadedCSVData) {
+            if (startDate !== undefined && members) {
+              for (const row of presetDailyData) {
                 const time = row.time.getTime();
                 if (time < response || !(+row.AANTAL > 0) || !roster.has(row.COROP_LEV) || !roster.has(row.COROP_AFN) ||
                   !window.herdlinkPresetTools.isCommunityCordonRoute(members, row.COROP_LEV, row.COROP_AFN)) continue;
@@ -1974,15 +1944,46 @@
               detail = `Exports close on ${new Date(response).toISOString().slice(0, 10)} for ${targets.length} region${targets.length === 1 ? "" : "s"}: ${targets.join(", ")}.`;
               if (id === "temporary-standstill") detail += ` Reopening: ${new Date(response + standstillDays * 86400000).toISOString().slice(0, 10)}.`;
             }
-            if (id !== "open-trade" && !startDate) detail = "The response falls beyond the displayed timeline; recorded trade stays open.";
-            applyScenario(nodes, links, settings, preset.label);
-            return { label: preset.label, detail, communityScale: id === "seed-community" ? communityScale : null,
-              presetKey: window.herdlinkPresetTools.presetSettingsKey(id, context.presetSettings),
-              scenario: { datasetKey: currentTimeSpan, dates: uniqueDates.map((date) => date.toISOString()), settings,
+            if (id !== "open-trade" && startDate === undefined) detail = "The response falls beyond the daily coverage; recorded trade stays open.";
+            return { label: preset.label, detail, targets, presetSettings, communityScale: id === "seed-community" ? communityScale : null,
+              presetKey: window.herdlinkPresetTools.presetSettingsKey(id, presetSettings),
+              scenario: { schemaVersion: 3, provenance: getSimulationProvenance(), datasetKey: currentTimeSpan, dates: uniqueDates.map((date) => date.toISOString()), settings,
                 nodeInterventions: Array.from(nodes, ([time, changes]) =>
                   [time, Array.from(changes, ([region, directions]) => [region, { ...directions }])]),
                 linkInterventions: Array.from(links, ([time, changes]) => [time, Array.from(changes)]),
               } };
+          }
+
+          function loadPreset(id) {
+            if (areScenarioControlsDisabled()) throw new Error("Wait for the current network operation to finish before loading a preset.");
+            const result = buildPresetScenario(id);
+            const { settings, nodeInterventions, linkInterventions } = validateScenario(result.scenario);
+            applyScenario(nodeInterventions, linkInterventions, settings, result.label);
+            return result;
+          }
+
+          function evaluateComparisonScenario(configuration) {
+            if (areScenarioControlsDisabled()) throw new Error("Wait for the current network operation to finish.");
+            const result = configuration.scenario
+              ? { label: configuration.label, scenario: configuration.scenario, detail: "Saved model settings and restriction schedule." }
+              : buildPresetScenario(configuration.presetId, Object.fromEntries(Object.entries(configuration).filter(([key]) => key !== "presetId")));
+            const { settings, nodeInterventions, linkInterventions } = validateScenario(result.scenario);
+            const definitions = getComparisonMetricDefinitions(appDataMode);
+            const ids = collectSimulationRegionIds(loadedCSVData);
+            let series;
+            if (appDataMode === "simulation") {
+              const trajectory = buildSimulationTrajectory(settings, { nodeInterventions, linkInterventions });
+              series = buildComparisonSeries(uniqueDates, ids, definitions,
+                (key) => trajectory.frameByKey[key]?.summary, (key) => trajectory.frameByKey[key]?.nodeStates);
+            } else {
+              const stats = computeTemporalNetworkStats(uniqueDates, { data: loadedCSVData, nodeInterventions, linkInterventions, store: false });
+              series = buildComparisonSeries(uniqueDates, ids, definitions,
+                (key) => ({ ...stats.global[key], ...stats.global[key]?.communityScales?.[communityScale] }), (key) => stats.node[key]);
+            }
+            return { label: result.label, detail: result.detail, targets: result.targets, settings, series,
+              interventionEvents: getComparisonInterventionEvents(uniqueDates, ids, appDataMode, nodeInterventions, linkInterventions,
+                presetDailyDates.at(-1) + 86400000),
+            };
           }
 
           function getComparisonData() {
@@ -2012,14 +2013,15 @@
             const settings = mode === "simulation" ? simulationState.trajectory?.settings : null;
             const settingsKey = JSON.stringify(settings);
             let cache = comparisonDataCache.get(mode);
-            if (!cache || cache.data !== loadedCSVData || cache.datesKey !== datesKey || cache.settingsKey !== settingsKey) {
-              cache = { data: loadedCSVData, datesKey, settingsKey };
+            if (!cache || cache.data !== loadedCSVData || cache.dailyData !== presetDailyData || cache.datesKey !== datesKey || cache.settingsKey !== settingsKey) {
+              cache = { data: loadedCSVData, dailyData: presetDailyData, datesKey, settingsKey };
               comparisonDataCache.set(mode, cache);
             }
             const interventionsKey = JSON.stringify([simulationNodeInterventions, simulationLinkInterventions],
               (_, value) => value instanceof Map ? Array.from(value) : value);
             if (cache.eventsKey !== interventionsKey) {
-              cache.interventionEvents = getComparisonInterventionEvents(uniqueDates, ids, mode);
+              cache.interventionEvents = getComparisonInterventionEvents(uniqueDates, ids, mode, simulationNodeInterventions, simulationLinkInterventions,
+                (presetDailyDates.at(-1) ?? uniqueDates.at(-1).getTime()) + 86400000);
               cache.eventsKey = interventionsKey;
             }
             if (mode === "simulation") {
@@ -2028,7 +2030,7 @@
               const project = (value) => buildComparisonSeries(uniqueDates, ids, definitions,
                 (key) => value.frameByKey[key]?.summary,
                 (key) => value.frameByKey[key]?.nodeStates);
-              if (!cache.original) {
+              {
                 cache.original = getOriginalSimulationSeries(settings,
                   !simulationNodeInterventions.size && !simulationLinkInterventions.size ? trajectory : null);
               }
@@ -2112,11 +2114,11 @@
                 target: getNodeId(link.target),
                 ledgerWeight: link.ledgerWeight,
                 riskLoad: 0,
-                sourcePrevalence: 0,
-                targetPrevalence: 0,
+                sourcePrevalence: frame.nodeStates[getNodeId(link.source)]?.prevalence ?? null,
+                targetPrevalence: frame.nodeStates[getNodeId(link.target)]?.prevalence ?? null,
               };
               link.weight = link.simulation.riskLoad;
-              link.disabled = disabledLinkKeys.has(key);
+              link.disabled = disabledLinkKeys.has(key) && !(simLink?.riskLoad > 0);
             });
 
             enabledLinks = allLinks.filter((link) => !link.disabled && link.weight > 0);
@@ -2144,6 +2146,8 @@
               N: frame.summary.N,
               prevalence: frame.summary.prevalence,
               newInfections: frame.summary.newInfections,
+              contactInfections: frame.summary.contactInfections,
+              movementInfections: frame.summary.movementInfections,
             }));
           }
 
@@ -2152,7 +2156,7 @@
             if (!frame) return;
             const summary = frame.summary;
             const peak = d3.max(
-              simulationState.trajectory.frames,
+              [simulationState.trajectory.initialFrame, ...simulationState.trajectory.dailyFrames],
               (item) => item.summary.prevalence,
             );
             const rows = [
@@ -2185,7 +2189,7 @@
               displayElement.innerHTML = `
                 <i class="fa-solid fa-virus"></i> Simulation Prevalence:
                 <span class="current-sr">${formatPct(summary.prevalence)}</span>
-                <span class="initial-sr">(peak ${formatPct(peak || 0)})</span>
+                <span class="initial-sr">(peak ${formatPct(peak)})</span>
               `;
               const currentSpan = displayElement.querySelector(".current-sr");
               const initialSpan = displayElement.querySelector(".initial-sr");
@@ -2195,7 +2199,7 @@
                 );
               }
               if (initialSpan) {
-                initialSpan.style.color = simulationPrevalenceTextScale(peak || 0);
+                initialSpan.style.color = simulationPrevalenceTextScale(peak);
               }
             }
           }
@@ -2368,6 +2372,62 @@
             }
           }
 
+          function renderSimulationIncidenceChart() {
+            if (selectedNodeData) return;
+            const data = getSimulationSeries();
+            if (!data.length) return;
+            const container = d3.select("#simulationIncidence");
+            const node = container.node();
+            const current = simulationState.currentFrame;
+            const period = { daily: "Daily", weekly: "Weekly", monthly: "Monthly", yearly: "Yearly" }[currentTimeSpan];
+            const sources = [
+              { key: "contactInfections", label: "Contact", color: "#72e4d4" },
+              { key: "movementInfections", label: "Movement", color: "#f1c77b" },
+            ];
+            container.select(".simulation-incidence-period").text(`${period} totals`);
+            container.selectAll(".simulation-incidence-summary").data([null]).join("div")
+              .attr("class", "simulation-incidence-summary")
+              .html(sources.map((source) => `<span style="--source-color:${source.color}">
+                <i aria-hidden="true"></i>${source.label}<strong>${formatSmall(current.summary[source.key])}</strong>
+              </span>`).join(""));
+            const margin = { top: 68, right: 32, bottom: 30, left: 36 };
+            const width = Math.max(10, node.clientWidth - margin.left - margin.right);
+            const height = Math.max(10, node.clientHeight - margin.top - margin.bottom);
+            const svg = container.selectAll("svg.simulation-incidence-chart").data([null]).join("svg")
+              .attr("class", "simulation-incidence-chart").attr("role", "img")
+              .attr("aria-label", `New Infections, ${period.toLowerCase()} totals. Selected interval: contact ${formatSmall(current.summary.contactInfections)}, movement ${formatSmall(current.summary.movementInfections)} units.`)
+              .attr("width", node.clientWidth).attr("height", node.clientHeight);
+            const g = svg.selectAll("g.chart").data([null]).join("g").attr("class", "chart")
+              .attr("transform", `translate(${margin.left},${margin.top})`);
+            const x = d3.scaleTime().domain(d3.extent(data, (point) => point.date)).range([0, width]);
+            const y = d3.scaleLinear().domain([0, d3.max(data, (point) => point.newInfections) || 1])
+              .nice().range([height, 0]);
+            const stacked = d3.stack().keys(sources.map((source) => source.key))(data);
+            const area = d3.area().x((point) => x(point.data.date)).y0((point) => y(point[0])).y1((point) => y(point[1]));
+            const line = d3.line().x((point) => x(point.data.date)).y((point) => y(point[1]));
+            const areas = g.selectAll("g.simulation-incidence-areas").data([null]).join("g")
+              .attr("class", "simulation-incidence-areas");
+            areas.selectAll("path.simulation-incidence-area").data(stacked, (series) => series.key).join("path")
+              .attr("class", "simulation-incidence-area").attr("fill", (series, index) => sources[index].color)
+              .attr("fill-opacity", 0.28).attr("d", area);
+            areas.selectAll("path.simulation-incidence-line").data(stacked, (series) => series.key).join("path")
+              .attr("class", "simulation-incidence-line").attr("fill", "none")
+              .attr("stroke", (series, index) => sources[index].color).attr("stroke-width", 1.5).attr("d", line);
+            g.selectAll("g.y-grid").data([null]).join("g").attr("class", "y-grid")
+              .call(d3.axisLeft(y).ticks(3).tickSize(-width).tickFormat(d3.format("~s")))
+              .call((axis) => axis.select(".domain").remove());
+            g.selectAll("g.x-axis").data([null]).join("g").attr("class", "x-axis")
+              .attr("transform", `translate(0,${height})`)
+              .call(d3.axisBottom(x).ticks(4).tickFormat(d3.timeFormat("%b %Y")));
+            const marker = g.selectAll("g.simulation-marker-layer").data([null]).join("g")
+              .attr("class", "simulation-marker-layer");
+            renderSimulationDateMarker(marker, { x, date: current.date, height });
+            marker.selectAll("circle.simulation-incidence-point").data(sources, (source) => source.key).join("circle")
+              .attr("class", "simulation-incidence-point").attr("cx", x(current.date))
+              .attr("cy", (source, index) => y(index === 0 ? current.summary.contactInfections : current.summary.newInfections))
+              .attr("r", 3).attr("fill", theme.surface).attr("stroke", (source) => source.color).attr("stroke-width", 1.5);
+          }
+
           function renderSimulationNodeStatsChart() {
             const frame = simulationState.currentFrame;
             if (!frame || selectedNodeData) return;
@@ -2407,7 +2467,11 @@
             svg.selectAll(".simulation-panel-title").remove();
 
             const data = Object.entries(frame.nodeStates)
-              .map(([id, state]) => ({ id, ...state, statnaam: getStatnaam(id) }))
+              .map(([id, state]) => ({
+                id, ...state, statnaam: getStatnaam(id),
+                color: d3.interpolateRgb(theme.surface, getSimulationPartitionColor(getSimulationPartitionKey(id)))(0.65),
+              }))
+              .filter((state) => state.N > 0)
               .sort((a, b) => b.prevalence - a.prevalence)
               .slice(0, 12);
             const x = d3
@@ -2445,7 +2509,7 @@
               .attr("height", y.bandwidth())
               .attr("rx", 3)
               .attr("width", 0)
-              .attr("fill", (d) => simulationPrevalenceScale(d.prevalence));
+              .attr("fill", (d) => d.color);
             entered
               .append("text")
               .attr("y", y.bandwidth() / 2 + 4)
@@ -2461,8 +2525,10 @@
                 transitionSelection(selection)
                   .attr("height", y.bandwidth())
                   .attr("width", (d) => x(d.prevalence))
-                  .attr("fill", (d) => simulationPrevalenceScale(d.prevalence)),
+                  .attr("fill", (d) => d.color),
               );
+            mergedBars.selectAll("title").data((d) => [d]).join("title")
+              .text((d) => `${d.id} · ${d.statnaam} · ${getSimulationPartitionDisplayKey(getSimulationPartitionKey(d.id))}: ${formatPct(d.prevalence)} infectious`);
             mergedBars
               .select("text")
               .attr("y", y.bandwidth() / 2 + 4)
@@ -2490,7 +2556,7 @@
                       Math.max(padding, Math.min(width - padding, barEnd - padding)),
                     )
                     .attr("text-anchor", "end")
-                    .style("fill", getReadablePrevalenceTextColor(d.prevalence));
+                    .style("fill", getReadableFillTextColor(d.color));
                 }
               });
             bars
@@ -2510,9 +2576,17 @@
           }
 
           function renderSimulationSpatialLegend(svg, x, y) {
+            const maximum = simulationPrevalenceScale.domain()[1];
+            const gradient = svg.selectAll("defs.simulation-spatial-defs")
+              .data([null]).join("defs").attr("class", "simulation-spatial-defs")
+              .selectAll("linearGradient").data([null]).join("linearGradient")
+              .attr("id", "simulation-spatial-prevalence-gradient");
+            gradient.selectAll("stop").data([0, 0.25, 0.5, 0.75, 1]).join("stop")
+              .attr("offset", (value) => `${value * 100}%`)
+              .attr("stop-color", (value) => simulationPrevalenceScale(value * maximum));
             const items = [
-              { label: "Prevalence", type: "fill", color: "#a5f0df" },
-              { label: "Exposure flow", type: "line", color: "#f1c77b" },
+              { label: `Prevalence · 0–${formatPct(maximum)}`, type: "fill", color: "url(#simulation-spatial-prevalence-gradient)" },
+              { label: "Attributed entries", type: "line", color: "#f1c77b" },
               { label: "New cases", type: "circle", color: theme.accent },
             ];
             const legend = svg
@@ -2599,7 +2673,7 @@
                   x: point.x,
                   y: point.y,
                   coords: point.coords,
-                  prevalence: state.prevalence || 0,
+                  prevalence: state.prevalence,
                   infectious: state.I || 0,
                   newInfections: state.newInfections || 0,
                   incomingExposure: state.incomingExposure || 0,
@@ -2739,7 +2813,7 @@
             const bubbleRadius = d3
               .scaleSqrt()
               .domain([0, d3.max(spatialNodes, (item) => item.newInfections) || 1])
-              .range([2.5, 11]);
+              .range([0, 11]);
 
             const regions = g
               .selectAll("path.simulation-spatial-region")
@@ -2753,12 +2827,19 @@
               .attr("fill", (feature) => {
                 const state = frame.nodeStates[feature.properties.statcode];
                 return state
-                  ? simulationPrevalenceScale(state.prevalence || 0)
+                  ? simulationPrevalenceScale(state.prevalence)
                   : theme.surface;
               })
               .attr("stroke", "rgba(255,255,255,0.85)")
               .attr("stroke-width", 0.7)
               .attr("opacity", 0.86);
+            g.selectAll("path.simulation-spatial-region").selectAll("title")
+              .data((feature) => [feature]).join("title")
+              .text((feature) => {
+                const id = feature.properties.statcode;
+                const state = frame.nodeStates[id];
+                return `${id} · ${getStatnaam(id)}: ${state?.prevalence == null ? "No population denominator" : `${formatPct(state.prevalence)} infectious`}`;
+              });
             regions.exit().remove();
 
             const flowPath = (item) => {
@@ -2789,21 +2870,20 @@
               .attr("class", "simulation-spatial-flow")
               .attr("fill", "none")
               .attr("stroke-linecap", "round")
-              .attr("stroke", (item) =>
-                simulationPrevalenceScale(item.sourcePrevalence || 0),
-              )
+              .attr("stroke", simulationCompartmentColors.E)
               .attr("stroke-width", 0)
               .attr("opacity", 0)
               .merge(flowPaths)
               .call((selection) =>
                 transitionSelection(selection)
                   .attr("d", flowPath)
-                  .attr("stroke", (item) =>
-                    simulationPrevalenceScale(item.sourcePrevalence || 0),
-                  )
+                  .attr("stroke", simulationCompartmentColors.E)
                   .attr("stroke-width", (item) => flowWidth(item.riskLoad))
-                  .attr("opacity", 0.45),
+                  .attr("opacity", 0.7),
               );
+            flowLayer.selectAll("path.simulation-spatial-flow").selectAll("title")
+              .data((item) => [item]).join("title")
+              .text((item) => `${item.source} → ${item.target}: ${formatSmall(item.riskLoad)} attributed infection entries`);
             flowPaths
               .exit()
               .call((selection) =>
@@ -2823,7 +2903,7 @@
               .attr("cx", (item) => item.x)
               .attr("cy", (item) => item.y)
               .attr("r", 0)
-              .attr("fill", (item) => simulationPrevalenceScale(item.prevalence))
+              .attr("fill", theme.accent)
               .attr("stroke", theme.onAccent)
               .attr("stroke-width", 0.7)
               .attr("opacity", 0.88)
@@ -2833,10 +2913,11 @@
                   .attr("cx", (item) => item.x)
                   .attr("cy", (item) => item.y)
                   .attr("r", (item) => bubbleRadius(item.newInfections))
-                  .attr("fill", (item) =>
-                    simulationPrevalenceScale(item.prevalence),
-                  ),
+                  .attr("fill", theme.accent),
               );
+            g.selectAll("circle.simulation-spatial-bubble").selectAll("title")
+              .data((item) => [item]).join("title")
+              .text((item) => `${item.id} · ${getStatnaam(item.id)}: ${formatSmall(item.newInfections)} new infection entries`);
             bubbles
               .exit()
               .call((selection) =>
@@ -2944,7 +3025,7 @@
               partition.nodeCount += 1;
             });
             partitions.forEach((partition) => {
-              partition.prevalence = partition.N ? partition.I / partition.N : 0;
+              partition.prevalence = partition.N > 0 ? partition.I / partition.N : null;
               partition.members.sort((a, b) => {
                 const aNum = parseInt(String(a).replace("CR", ""), 10);
                 const bNum = parseInt(String(b).replace("CR", ""), 10);
@@ -3622,7 +3703,7 @@
                 <div style="opacity:0.85;">
                   Partition: ${getSimulationPartitionDisplayKey(stats.key)}
                   &nbsp; Nodes: ${partition.nodeCount}
-                  &nbsp; P prevalence: ${formatPct(partition.prevalence || 0)}
+                  &nbsp; P prevalence: ${formatPct(partition.prevalence)}
                   &nbsp; Cross load: ${formatPct(total ? crossTotal / total : 0)}
                 </div>
               `;
@@ -3691,9 +3772,15 @@
           }
 
           function renderSimulationCompartmentInsight(g, width, height, state) {
+            if (state.N === 0) {
+              g.selectAll("*").remove();
+              renderEmpty(g, width, height, "No resident population");
+              return;
+            }
+            g.selectAll(".empty-message").remove();
             const data = ["S", "E", "I", "R"].map((key) => ({
               key,
-              value: state.N ? state[key] / state.N : 0,
+              value: state.N > 0 ? state[key] / state.N : null,
             }));
             const x = d3
               .scaleBand()
@@ -3771,8 +3858,8 @@
             const data = [
               {
                 key: "P prev",
-                value: partition.prevalence || 0,
-                color: simulationPrevalenceScale(partition.prevalence || 0),
+                value: partition.prevalence,
+                color: simulationPrevalenceScale(partition.prevalence),
               },
               {
                 key: "Focal I",
@@ -4163,7 +4250,7 @@
                 0,
                 d3.max(series, (d) =>
                   Math.max(
-                    d.prevalence || 0,
+                    d.prevalence,
                     d.exposedShare || 0,
                     d.recoveredShare || 0,
                   ),
@@ -4335,10 +4422,16 @@
           }
 
           function renderSimulationPanels() {
-            if (!isSimulationModeActive()) return;
+            if (!isSimulationModeActive() || !simulationState.currentFrame) return;
+            const daily = simulationState.trajectory.dailyTrajectory || simulationState.trajectory;
+            const prevalenceMax = d3.max([daily.initialFrame, ...daily.frames],
+              (frame) => d3.max(Object.values(frame.nodeStates), (state) => state.prevalence));
+            simulationPrevalenceScale.domain([0, prevalenceMax || 1]);
+            simulationPrevalenceTextScale.domain([0, prevalenceMax || 1]);
             renderSimulationNodeControls();
             renderSimulationStatsContainer();
             renderSimulationGlobalStatsChart();
+            renderSimulationIncidenceChart();
             renderSimulationNodeStatsChart();
             renderSimulationSpatialPatternPanel();
             updateSCCs();
@@ -4353,12 +4446,14 @@
             d3.selectAll(
               [
                 "svg.simulation-global-chart",
+                "svg.simulation-incidence-chart",
                 "svg.simulation-node-chart",
                 "svg.simulation-spatial-chart",
                 "svg.simulation-partition-chart",
                 "svg.simulation-focus-chart",
               ].join(", "),
             ).remove();
+            d3.selectAll(".simulation-incidence-summary").remove();
             d3.selectAll("g.trade-donut.simulation-donut").remove();
             d3.selectAll(
               ".simulation-chart-legend, .simulation-panel-title, .simulation-panel-heading",
@@ -4498,7 +4593,7 @@
 
           function setSimulationInputsDisabled(disabled) {
             ensureSimulationControls()
-              .querySelectorAll("input, select")
+              .querySelectorAll(".simulation-control-grid input, .simulation-control-grid select, .simulation-population input, .simulation-population select, .simulation-population button")
               .forEach((element) => {
                 element.disabled = disabled || (element.id === "simulationIntroductionDate" && !getPresetSettings().ready);
               });
@@ -4545,6 +4640,7 @@
             nodeColor.domain(Array.from(new Set(Object.values(partition))).sort((a, b) => a - b));
             updateSCCs();
             if (isSimulationModeActive()) {
+              renderSimulationNodeStatsChart();
               if (selectedNodeData) updateTradeNodeInsight(window.currentSelectedTradeNodeInsight);
               return;
             }
@@ -4622,6 +4718,8 @@
               if (!(await stage(34, "contacts", "Building movement contacts"))) return;
               if (!(await stage(48, "states", "Integrating compartment states"))) return;
               trajectory = buildSimulationTrajectory(settings);
+              const errorMessage = document.getElementById("simulationSettingsError");
+              if (errorMessage) errorMessage.textContent = "";
               if (!(await stage(78, "frames", "Building replay ledger"))) return;
 
               simulationState = {
@@ -4649,6 +4747,8 @@
               if (runId !== simulationRunId) return;
               simulationState.status = "error";
               comparisonDataError = `The simulation could not be calculated: ${error.message || error}`;
+              const errorMessage = document.getElementById("simulationSettingsError");
+              if (errorMessage) errorMessage.textContent = comparisonDataError;
               finishModePanelsRendering();
               hideSimulationOverlay();
               setSimulationInputsDisabled(false);
@@ -4759,7 +4859,27 @@
             const panel = ensureSimulationControls();
             if (!panel.dataset.bound) {
               panel.dataset.bound = "true";
-              panel.querySelectorAll("input, select").forEach((element) => {
+              const populationError = (error) => { panel.querySelector(".simulation-settings-error").textContent = error.message || "The population file could not be loaded."; };
+              panel.querySelector("#simulationPopulationImport").addEventListener("change", async (event) => {
+                const file = event.target.files?.[0];
+                if (!file) return;
+                try {
+                  let product;
+                  try { product = JSON.parse(await file.text()); }
+                  catch { throw new Error("Choose a valid population JSON file."); }
+                  importSimulationPopulation(product);
+                } catch (error) { populationError(error); }
+                finally { event.target.value = ""; }
+              });
+              panel.querySelector("#simulationPopulationScenario").addEventListener("change", (event) => {
+                try { importSimulationPopulation(simulationInventoryPackage, event.target.value); }
+                catch (error) { syncSimulationPopulationControls(); populationError(error); }
+              });
+              panel.querySelector("#simulationPopulationSynthetic").addEventListener("click", () => {
+                try { useSyntheticSimulationPopulation(); }
+                catch (error) { populationError(error); }
+              });
+              panel.querySelectorAll(".simulation-control-grid input, .simulation-control-grid select").forEach((element) => {
                 if (element.id === "simulationIntroductionDate") {
                   element.addEventListener("change", () => {
                     const value = element.value;
@@ -4780,6 +4900,22 @@
                   return;
                 }
                 const handleSettingChange = () => {
+                  element.setCustomValidity("");
+                  panel.querySelector(".simulation-settings-error").textContent = "";
+                  if (["simulationInitialPct", "simulationInitialExposedPct", "simulationInitialRecoveredPct", "simulationSeedRegion"].includes(element.id)) simulationInitialStates = null;
+                  try {
+                    if (element.id === "simulationInitializationConvention") setSimulationInitializationConvention(element.value);
+                    readSimulationSettings();
+                  } catch (error) {
+                    if (element.id === "simulationInitializationConvention") syncSimulationPopulationControls();
+                    element.setCustomValidity(error.message);
+                    comparisonDataError = error.message;
+                    simulationState.status = "error";
+                    cancelSimulationRecompute();
+                    panel.querySelector(".simulation-settings-error").textContent = error.message;
+                    window.herdlinkComparison?.refresh();
+                    return;
+                  }
                   scheduleSimulationRecompute("Recomputing simulation");
                 };
                 element.addEventListener("change", handleSettingChange);
@@ -5259,34 +5395,148 @@
               ? spectralRadius / ledgerBaselineSpectralRadius : 0;
           }
 
+          function getTradeConcentrationData(links) {
+            const volumes = new Map();
+            for (const link of links) {
+              if (link.disabled || !Number.isFinite(link.weight) || link.weight <= 0) continue;
+              const key = getLinkKey(link.source, link.target);
+              volumes.set(key, (volumes.get(key) || 0) + link.weight);
+            }
+            const ranked = [...volumes.values()].sort((a, b) => b - a);
+            const total = ranked.reduce((sum, value) => sum + value, 0);
+            if (!ranked.length) return { points: [], routeCount: 0, total: 0, topFiveShare: null, coverage: null };
+            let cumulative = 0;
+            const points = [{ routeShare: 0, volumeShare: 0, routeCount: 0 }];
+            ranked.forEach((value, index) => {
+              cumulative += value;
+              points.push({ routeShare: (index + 1) / ranked.length, volumeShare: cumulative / total, routeCount: index + 1 });
+            });
+            return { points, routeCount: ranked.length, total,
+              topFiveShare: points[Math.min(5, ranked.length)].volumeShare,
+              coverage: points.find((point) => point.volumeShare >= 0.8) };
+          }
+
+          function renderTradeConcentrationChart() {
+            if (isSimulationModeActive() || selectedNodeData) return;
+            const data = getTradeConcentrationData(allLinks);
+            const container = d3.select("#tradeConcentration");
+            const node = container.node();
+            container.select(".trade-concentration-roster").text(`${data.routeCount} routes`);
+            container.selectAll(".trade-concentration-summary").data([null]).join("div")
+              .attr("class", "trade-concentration-summary")
+              .html(`<span>Top 5<strong>${formatPct(data.topFiveShare)}</strong></span>
+                <span>80% volume<strong>${data.coverage ? `${data.coverage.routeCount} routes` : "—"}</strong></span>
+                <span class="trade-concentration-reference"><i aria-hidden="true"></i>Equal share</span>`);
+            const margin = { top: 74, right: 24, bottom: 42, left: 42 };
+            const width = Math.max(10, node.clientWidth - margin.left - margin.right);
+            const height = Math.max(10, node.clientHeight - margin.top - margin.bottom);
+            const svg = container.selectAll("svg.trade-concentration-chart").data([null]).join("svg")
+              .attr("class", "trade-concentration-chart").attr("role", "img")
+              .attr("aria-label", `Trade Concentration on ${d3.timeFormat("%d %b %Y")(window.currentDate)}. ${data.routeCount} allowed routes. Top five carry ${formatPct(data.topFiveShare)} of volume. ${data.coverage ? `${data.coverage.routeCount} routes carry at least 80% of volume.` : "No allowed trade volume."}`)
+              .attr("width", node.clientWidth).attr("height", node.clientHeight);
+            const g = svg.selectAll("g.chart").data([null]).join("g").attr("class", "chart")
+              .attr("transform", `translate(${margin.left},${margin.top})`);
+            if (!data.routeCount) {
+              g.selectAll("*").interrupt().remove();
+              renderEmpty(g, width, height, "No allowed trade volume");
+              return;
+            }
+            g.selectAll(".empty-message").remove();
+            const x = d3.scaleLinear().domain([0, 1]).range([0, width]);
+            const y = d3.scaleLinear().domain([0, 1]).range([height, 0]);
+            const line = d3.line().x((point) => x(point.routeShare)).y((point) => y(point.volumeShare));
+            const area = d3.area().x((point) => x(point.routeShare))
+              .y0((point) => y(point.routeShare)).y1((point) => y(point.volumeShare));
+            g.selectAll("g.y-grid").data([null]).join("g").attr("class", "y-grid")
+              .call(d3.axisLeft(y).ticks(3).tickSize(-width).tickFormat(d3.format(".0%")))
+              .call((axis) => axis.select(".domain").remove());
+            g.selectAll("g.x-axis").data([null]).join("g").attr("class", "x-axis")
+              .attr("transform", `translate(0,${height})`)
+              .call(d3.axisBottom(x).ticks(4).tickFormat(d3.format(".0%")));
+            g.selectAll("text.trade-concentration-x-label").data([null]).join("text")
+              .attr("class", "trade-concentration-x-label").attr("x", width / 2).attr("y", height + 31)
+              .attr("text-anchor", "middle").text("Share of routes, busiest first →");
+            g.selectAll("text.trade-concentration-y-label").data([null]).join("text")
+              .attr("class", "trade-concentration-y-label").attr("x", 0).attr("y", -9).text("Volume share");
+            g.selectAll("line.trade-concentration-equal").data([null]).join("line")
+              .attr("class", "trade-concentration-equal").attr("x1", 0).attr("y1", height)
+              .attr("x2", width).attr("y2", 0).attr("stroke", theme.muted)
+              .attr("stroke-dasharray", "4 4").attr("stroke-opacity", 0.65);
+            g.selectAll("path.trade-concentration-area").data([data.points]).join("path")
+              .attr("class", "trade-concentration-area").attr("fill", "#f1c77b").attr("fill-opacity", 0.13)
+              .attr("d", area);
+            g.selectAll("path.trade-concentration-curve").data([data.points]).join("path")
+              .attr("class", "trade-concentration-curve").attr("fill", "none")
+              .attr("stroke", "#f1c77b").attr("stroke-width", 2).attr("d", line);
+            const point = g.selectAll("circle.trade-concentration-point").data([data.coverage]).join("circle")
+              .attr("class", "trade-concentration-point").attr("cx", (point) => x(point.routeShare))
+              .attr("cy", (point) => y(point.volumeShare)).attr("r", 4)
+              .attr("fill", theme.surface).attr("stroke", "#f1c77b").attr("stroke-width", 1.5);
+            point.selectAll("title").data([data.coverage]).join("title")
+              .text((point) => `${point.routeCount} of ${data.routeCount} routes carry ${formatPct(point.volumeShare)} of volume`);
+          }
+
+          function renderGlobalDateCallout(svg, x, y, date, width, height) {
+            let group = svg.select("g.current-date-annotation");
+            const created = group.empty();
+            if (created) group = svg.append("g").attr("class", "current-date-annotation");
+            const note = group.selectAll("g.annotation-note").data([null]).join("g")
+              .attr("class", "annotation-note");
+            const content = note.selectAll("g.annotation-note-content").data([null]).join("g")
+              .attr("class", "annotation-note-content");
+            content.selectAll("text").data([
+              { label: "Current Date", className: "annotation-note-title", y: 0 },
+              { label: d3.timeFormat("%d-%m-%Y")(date), className: "annotation-note-label", y: 18 },
+            ]).join("text")
+              .attr("class", (d) => d.className)
+              .attr("x", 0).attr("y", (d) => d.y)
+              .attr("font-weight", (d) => d.y === 0 ? 600 : 400)
+              .style("font-family", (d) => d.y === 0 ? null : "var(--font-data)")
+              .text((d) => d.label);
+            const bounds = content.node().getBBox();
+            const noteWidth = bounds.width + 12, noteHeight = bounds.height + 8;
+            content.attr("transform", `translate(${6 - bounds.x},${4 - bounds.y})`);
+            note.selectAll("rect.annotation-note-bg").data([null]).join("rect")
+              .attr("class", "annotation-note-bg").attr("width", noteWidth).attr("height", noteHeight)
+              .attr("rx", 4).attr("ry", 4).lower();
+            const position = getNetworkCalloutPosition(x, y, noteWidth, noteHeight, width, height);
+            const edgeX = clampNumber(x, position.x, position.x + noteWidth);
+            const edgeY = clampNumber(y, position.y, position.y + noteHeight);
+            const connector = group.selectAll("path.annotation-connector").data([null]).join("path")
+              .attr("class", "annotation-connector").attr("fill", "none")
+              .attr("stroke", theme.muted).attr("stroke-width", 1).lower();
+            const marker = group.selectAll("circle.annotation-subject").data([null]).join("circle")
+              .attr("class", "annotation-subject").attr("r", 5)
+              .attr("fill", "none").attr("stroke", theme.accent).attr("stroke-width", 1);
+            const update = (selection) => created ? selection : transitionSelection(selection);
+            update(note).attr("transform", `translate(${position.x},${position.y})`);
+            update(marker).attr("cx", x).attr("cy", y);
+            update(connector).attr("d", `M${x},${y}L${edgeX},${edgeY}`);
+            group.raise();
+          }
+
           function updateGlobalStatsChart(selectedStat) {
             if (isSimulationModeActive() && simulationState.trajectory) {
               renderSimulationGlobalStatsChart();
+              renderSimulationIncidenceChart();
               return;
             }
 
+            renderTradeConcentrationChart();
+
             const container = d3.select("#globalStats");
-            let svg = container.select("svg");
-            const margin = { top: 40, right: 30, bottom: 40, left: 10 };
-            let width, height;
-            if (svg.empty()) {
-              const containerNode = container.node();
-              width = containerNode.clientWidth - margin.left - margin.right;
-              height = containerNode.clientHeight - margin.top - margin.bottom;
-              svg = container
-                .append("svg")
-                .attr("width", width + margin.left + margin.right)
-                .attr("height", height + margin.top + margin.bottom)
-                .append("g")
-                .attr("transform", `translate(${margin.left},${margin.top})`);
-            } else {
-              const containerNode = container.node();
-              width = containerNode.clientWidth - margin.left - margin.right;
-              height = containerNode.clientHeight - margin.top - margin.bottom;
-              svg
-                .attr("width", width + margin.left + margin.right)
-                .attr("height", height + margin.top + margin.bottom);
-            }
+            const containerNode = container.node();
+            if (!containerNode.clientWidth || !containerNode.clientHeight) return;
+            const controls = document.getElementById("globalStatsControls");
+            const margin = { top: controls.offsetTop + controls.offsetHeight + 10, right: 30, bottom: 40, left: 10 };
+            const width = containerNode.clientWidth - margin.left - margin.right;
+            const height = containerNode.clientHeight - margin.top - margin.bottom;
+            let svgContainer = container.select("svg");
+            if (svgContainer.empty()) svgContainer = container.append("svg");
+            svgContainer.attr("width", containerNode.clientWidth).attr("height", containerNode.clientHeight);
+            const svg = svgContainer.selectAll("g.global-stats-plot").data([null]).join("g")
+              .attr("class", "global-stats-plot")
+              .attr("transform", `translate(${margin.left},${margin.top})`);
     
             // Extract and sort the data from global allTemporalStats.
             // Each datum is { date: Date, value: <number> }.
@@ -5325,83 +5575,7 @@
               (d) => d.date.getTime() === window.currentDate.getTime(),
             );
             if (currentDatum) {
-              const newTransform = `translate(${x(currentDatum.date)},${y(currentDatum.value)})`;
-    
-              // Compute transformed x and y positions.
-              const xPos = x(currentDatum.date);
-              const yPos = y(currentDatum.value);
-    
-              // Compute offset for the annotation based on the current value.
-              const offsets = getAnnotationOffset(xPos, yPos, width, height);
-    
-              const annotationData = [
-                {
-                  note: {
-                    title: "Current Date",
-                    label: d3.timeFormat("%d-%m-%Y")(window.currentDate),
-                    bgPadding: { top: 4, left: 6, right: 6, bottom: 4 },
-                  },
-                  className: "current-date-annotation",
-                  x: 0,
-                  y: 0,
-                  dx: offsets.dx,
-                  dy: offsets.dy,
-                  subject: {
-                    radius: 5,
-                    radiusPadding: 5,
-                  },
-                },
-              ];
-    
-              const currentAnno = d3
-                .annotation()
-                .type(currentDateAnnoType)
-                .notePadding(10)
-                .annotations(annotationData);
-    
-              let currentDateAnnoGroup = svg.select("g.current-date-annotation");
-              if (currentDateAnnoGroup.empty()) {
-                // Create the group with the correct transform and call the annotation generator.
-                currentDateAnnoGroup = svg
-                  .append("g")
-                  .attr("class", "current-date-annotation")
-                  .attr("transform", newTransform);
-                currentDateAnnoGroup.call(currentAnno);
-                currentDateAnnoGroup
-                  .selectAll(".current-date-annotation .annotation-note text")
-                  .attr("fill", theme.text);
-                currentDateAnnoGroup
-                  .selectAll("rect.annotation-note-bg")
-                  .attr("fill", theme.elevated)
-                  .attr("fill-opacity", 0.8)
-                  .attr("rx", 4)
-                  .attr("ry", 4);
-                currentDateAnnoGroup.raise();
-              } else {
-                // Capture the old transform.
-                const oldTransform = currentDateAnnoGroup.attr("transform");
-                // Transition the transform attribute on the regular selection.
-                currentDateAnnoGroup
-                  .transition()
-                  .duration(300)
-                  .attrTween("transform", function () {
-                    return d3.interpolateString(oldTransform, newTransform);
-                  })
-                  .on("end", function () {
-                    // After transition, call the annotation generator on the normal selection.
-                    const sel = d3.select(this);
-                    sel.call(currentAnno);
-                    // Reapply styles after re-rendering the annotation.
-                    sel.selectAll(".annotation-note text").attr("fill", theme.text);
-                    sel
-                      .selectAll("rect.annotation-note-bg")
-                      .attr("fill", theme.elevated)
-                      .attr("fill-opacity", 0.8)
-                      .attr("rx", 4)
-                      .attr("ry", 4);
-                    sel.raise();
-                  });
-              }
+              renderGlobalDateCallout(svg, x(currentDatum.date), y(currentDatum.value), window.currentDate, width, height);
             }
     
             // Define axes.
@@ -6187,6 +6361,8 @@
                 numComponents: numComponents,
                 ...communityStatsForDate(date),
                 spectralRadius: spectralRadius,
+                inDegree: Object.values(nodeStats).reduce((sum, node) => sum + node.inDegree, 0),
+                outDegree: Object.values(nodeStats).reduce((sum, node) => sum + node.outDegree, 0),
               };
     
               const key = date.toISOString();
@@ -7435,12 +7611,12 @@
           function getRadarValuesForNode(d) {
             if (isSimulationModeActive()) {
               const state = simulationState.currentFrame?.nodeStates[d.id];
-              if (!state) return null;
+              if (!state || state.N === 0) return null;
               return [
-                state.N ? state.S / state.N : 0,
-                state.exposedShare || 0,
-                state.prevalence || 0,
-                state.recoveredShare || 0,
+                state.N > 0 ? state.S / state.N : null,
+                state.exposedShare,
+                state.prevalence,
+                state.recoveredShare,
                 Math.min(1, (state.incomingExposure + state.outgoingPressure) / Math.max(1, state.N)),
               ];
             }
@@ -7610,43 +7786,13 @@
               heroLabel: simulation ? "Exposure load" : "Trade volume", hero: simulation ? formatSmall(d.weight) : formatCount(d.weight),
               rows: simulation ? [
                 { label: "Ledger animals", value: formatCount(d.simulation?.ledgerWeight ?? d.ledgerWeight ?? 0) },
-                { label: "Source prevalence", value: formatPct(d.simulation?.sourcePrevalence || 0), color: simulationCompartmentColors.I },
-                { label: "Target prevalence", value: formatPct(d.simulation?.targetPrevalence || 0), color: simulationCompartmentColors.I },
+                { label: "Source prevalence", value: formatPct(d.simulation?.sourcePrevalence), color: simulationCompartmentColors.I },
+                { label: "Target prevalence", value: formatPct(d.simulation?.targetPrevalence), color: simulationCompartmentColors.I },
               ] : [{ label: "Unit", value: "Animals" }],
             };
             renderNetworkCallout(annotationGroup, midX, midY, info);
           }
 
-          // Helper function: Adjust dx, dy based on node position relative to SVG bounds.
-          function getAnnotationOffset(x, y, svgWidth, svgHeight, amount = 50) {
-            let dx = amount; // default offset
-            let dy = -amount; // default offset above the node
-    
-            // Horizontal adjustment:
-            if (x < svgWidth * 0.3) {
-              // Node is near left edge: place annotation to the right.
-              dx = amount;
-            } else if (x > svgWidth * 0.7) {
-              // Node is near right edge: place annotation to the left.
-              dx = -amount;
-            } else {
-              dx = 0; // Centered horizontally.
-            }
-    
-            // Vertical adjustment:
-            if (y < svgHeight * 0.4) {
-              // Node is near top edge: place annotation below.
-              dy = amount;
-            } else if (y > svgHeight * 0.6) {
-              // Node is near bottom edge: place annotation above.
-              dy = -amount;
-            } else {
-              dy = -amount; // default above node.
-            }
-    
-            return { dx, dy };
-          }
-    
           function getAnnotationOffsetMidPoint(
             x,
             y,
@@ -7682,13 +7828,13 @@
               },
               {
                 metric: "pageRank", code: "I", name: "Infectious Burden", role: "Infectious Burden", icon: "fa-magnet",
-                text: "The infectious model population in the region at the end of this step, measured in synthetic population units.",
+                text: "The infectious model population in the region at the end of this step, measured in the selected population units.",
                 method: "Infectious compartment count",
               },
               {
                 metric: "eigenvector", code: "P/I", name: "Pressure per Infectious", role: "Pressure per Infectious", icon: "fa-tower-broadcast",
-                text: "Outgoing movement pressure relative to the infectious population at the end of the step.",
-                method: "Outgoing pressure / max(1, infectious population at step end)",
+                text: "External movement pressure per infectious model unit-day over the displayed period.",
+                method: "Summed daily outgoing pressure / summed daily infectious population at day start; undefined for zero infectious unit-days",
               },
             ];
             return [
@@ -7869,7 +8015,7 @@
                       </div>
                       <p class="hotspot-info-subtitle">
                         ${simulation
-                          ? "Rings mark up to three regions with positive scores for each metric in this simulation step. Movement pressure measures exposure carried between regions using infectious shares at step start. Prevalence and burden describe the population at step end."
+                          ? "Rings mark up to three regions with positive scores for each metric in this simulation step. Movement pressure sums daily exposure between regions. Prevalence and burden describe the population at the displayed period end."
                           : "Rings mark up to three regions with positive eligible scores on allowed routes between regions at this date. Sink highlights regions receiving imports; Amplifier highlights regions connected to influential partners."}
                         Each metric has a distinct color and ring pattern, shared with the legend.
                       </p>
@@ -8393,11 +8539,11 @@
 
             const focalId = selectedNodeData.id;
             const simulationMode = isSimulationModeActive();
-            const localLabel = simulationMode ? "Local Transmission" : "Local Trades";
-            const outgoingLabel = simulationMode ? "Outgoing Pressure" : "Outgoing Trades";
-            const incomingLabel = simulationMode ? "Incoming Exposure" : "Incoming Trades";
+            const localLabel = "Local Movements";
+            const outgoingLabel = simulationMode ? "Outgoing Entries" : "Outgoing Trades";
+            const incomingLabel = simulationMode ? "Incoming Entries" : "Incoming Trades";
             const date = getCurrentSliderDate();
-            const unavailable = getSimulationLinkAvailability(date);
+            const unavailable = getDisplayedLinkAvailability(date);
             const permissions = getSimulationNodePermissions(date);
             const available = (link) => !unavailable.has(getLinkKey(link.source, link.target));
             const hasRoute = (link) => getNodeId(link.source) !== getNodeId(link.target) &&
@@ -8437,20 +8583,14 @@
                   const partnerId = section === "outgoing" ? targetId : sourceId;
                   const partnerName = getStatnaam(partnerId);
                   const reasons = [];
-                  if (!available(link)) reasons.push("link unavailable on this date");
-                  if (permissions.get(sourceId)?.exports === false) reasons.push("source exports disabled");
-                  if (permissions.get(targetId)?.imports === false) reasons.push("destination imports disabled");
-                  const state = link.simulation || {};
-                  const prevalence =
-                    section === "outgoing"
-                      ? state.targetPrevalence
-                      : state.sourcePrevalence;
-                  const barWidth = simulationMode ? Math.min(
-                    50,
-                    Math.max(2, (prevalence || 0) * 180),
-                  ) : maxDistance > 0 ? 50 * distances.get(link) / maxDistance : 0;
+                  const restriction = getDisplayedLinkRestrictionCount(getLinkKey(sourceId, targetId), date);
+                  if (restriction.closed) reasons.push(`route closed on ${restriction.closed} of ${restriction.days} days`);
+                  if (permissions.get(sourceId)?.exports === false) reasons.push("source exports blocked at period start");
+                  if (permissions.get(targetId)?.imports === false) reasons.push("destination imports blocked at period start");
+                  const prevalence = simulationState.currentFrame?.nodeStates[partnerId]?.prevalence;
+                  const barWidth = simulationMode ? (Number.isFinite(prevalence) ? Math.min(50, Math.max(2, prevalence * 180)) : 0) : maxDistance > 0 ? 50 * distances.get(link) / maxDistance : 0;
                   const partner = allNodes.find((node) => node.id === partnerId);
-                  const barColor = simulationMode ? simulationPrevalenceScale(prevalence || 0)
+                  const barColor = simulationMode ? simulationPrevalenceScale(prevalence)
                     : partner ? nodeColor(partner.community) : theme.muted;
                   const icon =
                     sourceId === targetId
@@ -8469,7 +8609,7 @@
                               <rect x="0" y="0" width="${barWidth}" height="10" fill="${barColor}"></rect>
                             </svg>
                           </span>
-                          <span class="trade-route-label">[${partnerId}] ${partnerName}${reasons.length ? `<small class="simulation-link-status">Blocked: ${reasons.join("; ")}</small>` : ""}</span>
+                          <span class="trade-route-label">[${partnerId}] ${partnerName}${reasons.length ? `<small class="simulation-link-status">Controls: ${reasons.join("; ")}</small>` : ""}</span>
                         </span>
                         <span class="trade-volume">${simulationMode ? formatSmall(link.weight) : formatCount(link.weight)}</span>
                       </div>
@@ -8496,7 +8636,7 @@
                 </button>
                 <div class="trade-info-header">
                   <span class="simulation-focus-region-name" title="[${focalId}] ${selectedNodeData.statnaam}"><i class="fa-solid fa-location-crosshairs"></i> [${focalId}] ${selectedNodeData.statnaam}</span>
-                  ${simulationMode ? `<span class="simulation-focus-pill">Prev ${formatPct(state.prevalence || 0)}</span>` : ""}
+                  ${simulationMode ? `<span class="simulation-focus-pill">Prev ${formatPct(state.prevalence)}</span>` : ""}
                 </div>
               </div>
               <div id="simulationDateLinkControls" class="trade-sections" ${showNodeControls ? "hidden" : ""}>
@@ -8549,6 +8689,14 @@
               controlSwitch.dataset.tip = showNodes ? "Switch to links on this date" : "Switch to imports and exports";
               document.getElementById("simulationDateLinkControls").hidden = showNodes;
               renderSimulationNodeControls();
+            });
+            d3.selectAll(".trade-checkbox").each(function () {
+              const key = getLinkKey(this.dataset.source, this.dataset.target);
+              const { closed, days } = getDisplayedLinkRestrictionCount(key, date);
+              const partial = closed > 0 && closed < days;
+              this.dataset.partial = String(partial);
+              this.indeterminate = partial;
+              if (partial) this.checked = false;
             });
             attachTradeCheckboxListeners();
             if (areNetworkControlsLocked()) {
@@ -9726,13 +9874,18 @@
           function recordSimulationLinkCheckboxes() {
             const date = getCurrentSliderDate();
             if (!date) return;
-            const disabledKeys = getSimulationLinkAvailability(date);
+            const disabledKeys = getDisplayedLinkAvailability(date);
+            const interval = getSimulationDisplayInterval(date);
             let changed = false;
             d3.selectAll(".trade-checkbox").each(function () {
               const key = getLinkKey(this.dataset.source, this.dataset.target);
+              if (this.indeterminate) return;
               const disabled = !this.checked;
-              if (disabled !== disabledKeys.has(key)) {
-                setSimulationLinkIntervention(key, disabled, date);
+              if (disabled !== disabledKeys.has(key) || this.dataset.partial === "true") {
+                for (let time = interval.start; time < interval.end; time += 86400000) {
+                  setSimulationLinkIntervention(key, disabled, new Date(time));
+                }
+                networkStatsDirtyDates.add(date.getTime());
                 changed = true;
               }
             });
@@ -9748,7 +9901,7 @@
               d3.selectAll(`.trade-checkbox[data-section='${section}']`).property(
                 "checked",
                 checked,
-              );
+              ).property("indeterminate", false);
     
               recordSimulationLinkCheckboxes();
     
@@ -9789,12 +9942,12 @@
                 .selectAll(`.trade-checkbox[data-section='${section}']`)
                 .nodes();
               // If every individual checkbox is checked, then the header is checked.
-              const allChecked = Array.from(checkboxes).every((cb) => cb.checked);
+              const allChecked = Array.from(checkboxes).every((cb) => cb.checked && !cb.indeterminate);
               d3.select(
                 `.trade-header-checkbox[data-section='${section}']`,
               )
                 .property("checked", allChecked)
-                .property("indeterminate", !allChecked && checkboxes.some((cb) => cb.checked));
+                .property("indeterminate", !allChecked && checkboxes.some((cb) => cb.checked || cb.indeterminate));
             });
           }
     
@@ -9809,7 +9962,8 @@
     
             const disabledKeys = getDisabledLinkKeys(getCurrentSliderDate());
             allLinks.forEach((link) => {
-              link.disabled = disabledKeys.has(getLinkKey(link.source, link.target));
+              link.disabled = disabledKeys.has(getLinkKey(link.source, link.target)) &&
+                (!isSimulationModeActive() || !(link.simulation?.riskLoad > 0));
             });
             enabledLinks = allLinks.filter((link) => !link.disabled && link.weight > 0);
     
@@ -11421,7 +11575,8 @@
 
               const introductionTime = trajectory.settings.introductionDate
                 ? Date.parse(trajectory.settings.introductionDate) : frames[0].date.getTime();
-              const index = frames.findIndex((frame) => frame.date.getTime() >= introductionTime);
+              const index = frames.findIndex((frame) => frame.date.getTime() <= introductionTime &&
+                introductionTime < frame.intervalEnd.getTime());
               const marker = lane.querySelector(".simulation-timeline-introduction");
               marker.hidden = index < 0;
               if (index >= 0) {
@@ -11503,7 +11658,7 @@
               const arc = d3.arc().innerRadius(innerRadius).outerRadius(outerRadius);
               let startAngle = 0;
               ["S", "E", "I", "R"].forEach((key) => {
-                const share = state.N ? state[key] / state.N : 0;
+                const share = state.N > 0 ? state[key] / state.N : null;
                 const endAngle = startAngle + 2 * Math.PI * share;
                 donutGroup
                   .append("path")
@@ -12635,7 +12790,7 @@
             }
             svg.attr("width", width).attr("height", height).attr("viewBox", `0 0 ${width} ${height}`);
             svg.selectAll("title").data([null]).join("title")
-              .text(simulation ? "Directed exposure flows between COROP regions" : "Directed trade flows between COROP regions");
+              .text(simulation ? "Attributed infection entries between COROP regions" : "Directed trade flows between COROP regions");
             const plot = svg.selectAll("g.community-flow-plot")
               .data([geometry.rosterKey], (key) => key).join(
                 (enter) => enter.append("g").attr("class", "community-flow-plot")
@@ -12709,7 +12864,7 @@
               .attr("class", "community-flow-node").attr("tabindex", 0).attr("role", "img").attr("data-region", (node) => node.id)
               .attr("transform", (node) => `rotate(${geometry.nodesById.get(node.id).x * 180 / Math.PI - 90}) translate(${radius},0)`)
               .style("color", (node) => getTradeCommunityColor(node.key))
-              .attr("aria-label", (node) => `${node.id}, ${getStatnaam(node.id)}, ${getTradeCommunityLabel(node.key)}. Incoming ${formatSmall(node.incoming)}, outgoing ${formatSmall(node.outgoing)}, local ${formatSmall(node.local)} ${simulation ? "exposure" : "animals"}.`);
+              .attr("aria-label", (node) => `${node.id}, ${getStatnaam(node.id)}, ${getTradeCommunityLabel(node.key)}. Incoming ${formatSmall(node.incoming)}, outgoing ${formatSmall(node.outgoing)}, local ${formatSmall(node.local)} ${simulation ? "infection entries" : "animals"}.`);
             nodes.selectAll("circle.community-flow-hit").data((node) => [node]).join("circle")
               .attr("class", "community-flow-hit").attr("r", 7).attr("fill", "transparent")
               .style("stroke", "none").style("filter", "none");
@@ -12731,7 +12886,7 @@
               .attr("class", "community-flow-detail community-flow-caption").attr("x", width / 2)
               .attr("y", height - 21).attr("text-anchor", "middle")
               .attr("display", compact ? "none" : null);
-            const summary = `${formatSmall(data.total)} ${simulation ? "exposure" : "animals"} · ${data.activeCount}/${data.nodes.length} active · ${data.total > 0 ? `${(100 * data.local / data.total).toFixed(1)}%` : "—"} local`;
+            const summary = `${formatSmall(data.total)} ${simulation ? "infection entries" : "animals"} · ${data.activeCount}/${data.nodes.length} active · ${data.total > 0 ? `${(100 * data.local / data.total).toFixed(1)}%` : "—"} local`;
             function highlight(id) {
               const node = data.nodes.find((item) => item.id === id);
               svg.classed("has-highlight", !!node).attr("data-highlighted", node ? id : null);
@@ -12742,7 +12897,7 @@
               }
               paths.classed("is-highlighted", (flow) => !!node && (flow.source === id || flow.target === id));
               nodes.classed("is-highlighted", (item) => !!node && partners.has(item.id));
-              caption.text(node ? `${node.id} · ${getStatnaam(node.id)}` : `${data.nodes.length} COROP regions · ${data.flows.length} ${simulation ? "exposure" : "trade"} flows`);
+              caption.text(node ? `${node.id} · ${getStatnaam(node.id)}` : `${data.nodes.length} COROP regions · ${data.flows.length} ${simulation ? "attributed entry" : "trade"} flows`);
               detail.text(node ? `In ${formatSmall(node.incoming)} · Out ${formatSmall(node.outgoing)} · Local ${formatSmall(node.local)}`
                 : summary);
             }
@@ -13690,7 +13845,7 @@
               !window.isComparisonOverlayOpen?.() &&
               !screenshotInProgress && !window.isIntroOverlayOpen?.() && !event.defaultPrevented && !event.altKey && !event.ctrlKey && !event.metaKey &&
               !event.target?.closest("input, select, textarea, [contenteditable]:not([contenteditable='false'])") &&
-              !(event.target?.closest("button, [role='button'], [role='switch']") && [" ", "Enter"].includes(event.key));
+              !(event.target?.closest("button, summary, [role='button'], [role='switch']") && [" ", "Enter"].includes(event.key));
           }
     
           // Helper function to remove existing document-level listeners for time controls.
@@ -14847,16 +15002,26 @@
             true,
           );
 
+          window.herdlinkHasPrivatePopulation = () => window.herdlinkSimulation.isPrivatePopulation(simulationPopulation) ||
+            window.herdlinkSimulation.isPrivatePopulation(simulationState.settings?.population);
+
           window.herdlinkComparison = {
             canOpen: () => !screenshotInProgress,
-            read: () => ({
-              ...getComparisonData(),
-              datasetKey: currentTimeSpan,
-              datasetLabel: currentTimeSpan ? `${currentTimeSpan[0].toUpperCase()}${currentTimeSpan.slice(1)} trade` : "Animal trade network",
-              modeSwitchDisabled: !canSwitchAppDataMode(),
-              scenarioContext: getScenarioContext(),
-            }),
-            loadPreset, captureScenario, loadScenario, setPresetSettings,
+            read: () => {
+              const data = getComparisonData();
+              try {
+                return { ...data, datasetKey: currentTimeSpan,
+                  datasetLabel: currentTimeSpan ? `${currentTimeSpan[0].toUpperCase()}${currentTimeSpan.slice(1)} trade` : "Animal trade network",
+                  modeSwitchDisabled: !canSwitchAppDataMode(), scenarioContext: getScenarioContext() };
+              } catch (error) {
+                const presetSettings = getPresetSettings();
+                return { ...data, status: "error", message: error.message, scenarioContext: {
+                  controlsValid: false, disabled: areScenarioControlsDisabled() || !presetSettings.ready,
+                  datasetKey: currentTimeSpan, presetSettings, presets: [],
+                } };
+              }
+            },
+            loadPreset, evaluateComparisonScenario, captureScenario, loadScenario, setPresetSettings, importSimulationPopulation, useSyntheticSimulationPopulation,
             getMode: () => appDataMode,
             setMode: setAppDataMode,
             prepare: () => {

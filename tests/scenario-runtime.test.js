@@ -2,31 +2,33 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import vm from "node:vm";
+import * as simulationEngine from "../src/runtime/simulation-engine.js";
+import * as simulationPopulation from "../src/runtime/simulation-population.js";
+import { createHash } from "node:crypto";
 import * as presetTools from "../src/runtime/intervention-presets.js";
 
 const source = readFileSync(new URL("../src/runtime/herdlink-runtime.js", import.meta.url), "utf8");
 const functions = [
   "getNodeId", "getLinkKey", "getStatnaam", "getTradeRecordsByDate", "clampNumber",
-  "readSimulationSettings", "collectSimulationRegionIds", "buildSimulationLedger",
-  "estimateSimulationHoldings", "getSimulationFrameSummary", "buildSimulationTrajectory",
+  "syncSimulationPopulationControls", "applySimulationPopulation", "importSimulationPopulation", "useSyntheticSimulationPopulation", "setSimulationInitializationConvention", "readSimulationSettings", "collectSimulationRegionIds", "buildSimulationTrajectory",
   "getSimulationLinkAvailability", "getSimulationNodePermissions", "applySimulationNodePermissions", "getDisabledLinkKeys",
   "getComparisonMetricDefinitions", "buildComparisonSeries", "getOriginalSimulationSeries",
   "areNetworkControlsLocked", "areScenarioControlsDisabled", "getScenarioContext",
   "getPresetSettings", "setPresetSettings", "getNetworkPresetGraph", "getNetworkPresetSelection",
   "syncSimulationIntroductionControl", "getSimulationPopulationForDate", "ensurePresetDailyData",
-  "validateScenario", "captureScenario", "applyScenario", "loadScenario", "loadPreset", "recomputeSimulationTrajectory",
+  "getSimulationProvenance", "validateScenario", "captureScenario", "applyScenario", "loadScenario", "buildPresetScenario", "loadPreset", "evaluateComparisonScenario", "getComparisonInterventionEvents", "getSimulationRestrictionTimeline", "recomputeSimulationTrajectory",
 ].map((name) => {
   const match = source.match(new RegExp(`^([ ]*)(?:async )?function ${name}\\([^]*?^\\1}`, "m"));
   assert.ok(match, name);
   return match[0];
 }).join("\n");
-const settings = { model: "SEIR", seedRegion: "CR01", initialPct: 1, beta: 0.32, movementBeta: 0.08, sigma: 0.22, gamma: 0.15 };
+const settings = { initializationConvention: "prevalence-shares", initialExposedPct: 0, initialRecoveredPct: 0, omega: 0.02, model: "SEIR", seedRegion: "CR01", initialPct: 1, beta: 0.32, movementBeta: 0.08, sigma: 0.22, gamma: 0.15 };
 const presetIds = ["open-trade", "seed-containment", "partner-ring", "seed-community", "hub-controls", "trade-bottlenecks", "temporary-standstill"];
 const dayMs = 86400000;
-const controls = { model: "Model", seedRegion: "SeedRegion", initialPct: "InitialPct", beta: "Beta", movementBeta: "MovementBeta", sigma: "Sigma", gamma: "Gamma" };
+const controls = { model: "Model", seedRegion: "SeedRegion", initialPct: "InitialPct", initialExposedPct: "InitialExposedPct", initialRecoveredPct: "InitialRecoveredPct", omega: "Omega", beta: "Beta", movementBeta: "MovementBeta", sigma: "Sigma", gamma: "Gamma" };
 const plain = (value) => JSON.parse(JSON.stringify(value, (_, item) => item instanceof Map ? [...item] : item));
 
-function runtime(parameters = {}, steps = 24) {
+function runtime(parameters = {}, steps = 24, initialize = true) {
   const elements = Object.fromEntries(Object.entries(controls).map(([key, suffix]) => {
     let value = String(({ ...settings, ...parameters })[key]);
     return [`simulation${suffix}`, { get value() { return value; }, set value(next) { value = String(next); } }];
@@ -47,7 +49,10 @@ function runtime(parameters = {}, steps = 24) {
   const applied = [];
   const recomputes = [];
   const context = vm.createContext({
-    Date, Map, Set, loadedCSVData, uniqueDates, presetDailyData, presetDailyDates, presetDailyDataError: null,
+    Date, Map, Set, structuredClone, loadedCSVData, uniqueDates, presetDailyData, presetDailyDates, presetDailyDataError: null,
+    presetDailyDataHash: createHash("sha256").update(JSON.stringify(presetDailyData)).digest("hex"),
+    dailySimulationCache: new Map(), simulationPopulationSource: null, simulationInitialStates: null,
+    simulationPopulation: null, simulationInventoryPackage: null, simulationInitializationConvention: "prevalence-shares",
     presetTargetBudget: 3, presetResponseDays: 7, presetStandstillDays: 14,
     simulationIntroductionDate: null, simulationPresetHoldings: null, presetDailyDataPromise: null,
     currentTimeSpan: "weekly", nlLabelPoints: null,
@@ -60,7 +65,7 @@ function runtime(parameters = {}, steps = 24) {
     simulationState: { status: "idle" }, appDataMode: "trade", appModeSwitchLocked: false,
     simulationRecomputeTimer: null, simulationRunId: 0, screenshotInProgress: false,
     networkStatsDirtyDates: new Set(), networkStatsDirtyFrom: null, comparisonDataError: null,
-    window: { herdlinkPresetTools: presetTools, currentDate: uniqueDates[0], herdlinkComparison: { refresh() {} } },
+    window: { herdlinkSimulation: { ...simulationEngine, ...simulationPopulation }, herdlinkPresetTools: presetTools, currentDate: uniqueDates[0], herdlinkComparison: { refresh() {} } },
     document: { getElementById: (id) => id === "mainContainer" ? { closest: () => inert } : elements[id] },
     ensureSimulationControls() {}, applyNetworkControlChanges: (label) => applied.push(label),
     isSimulationModeActive: () => context.appDataMode === "simulation",
@@ -74,6 +79,11 @@ function runtime(parameters = {}, steps = 24) {
     },
   });
   vm.runInContext(functions, context);
+  vm.runInContext(source.match(/window\.herdlinkHasPrivatePopulation =[^]*?;/)[0], context);
+  if (initialize) {
+    context.simulationIntroductionDate = context.getPresetSettings().introductionDate;
+    context.simulationPresetHoldings = context.getSimulationPopulationForDate(context.simulationIntroductionDate);
+  }
   return { context, elements, applied, recomputes, setInert: (value) => { inert = value; } };
 }
 
@@ -108,6 +118,7 @@ test("presets replace complete schedules and preserve disease controls and displ
     const before = plain(context.readSimulationSettings());
     const result = context.loadPreset(id);
     assert.equal(typeof result.detail, "string");
+    assert.equal(result.scenario.schemaVersion, 3);
     assert.equal(applied.length, 1);
     assert.equal(context.appDataMode, mode);
     const after = plain(context.readSimulationSettings());
@@ -161,7 +172,7 @@ test("shared introduction applies immediately while target count and absolute re
   assert.deepEqual(recomputes, []);
   const draft = plain(context.getPresetSettings());
   for (const patch of [
-    { introductionDate: "2020-02-30" }, { introductionDate: "2019-12-31" }, { introductionDate: "2021-01-01" },
+    { introductionDate: "2020-02-30" }, { introductionDate: "2018-12-31" }, { introductionDate: "2021-01-01" },
     { targetBudget: 0 }, { targetBudget: 41 }, { targetBudget: 1.5 }, { targetBudget: "3" },
     { introductionDate: "2020-03-01", targetBudget: -1 }, { extra: 1 },
   ]) {
@@ -235,7 +246,12 @@ test("custom timing and target count prepare the next load without changing appl
     assert.equal(result.presetKey, presetTools.presetSettingsKey("temporary-standstill", context.getPresetSettings()));
     assert.match(context.getScenarioContext().presets.at(-1).duration, /5 calendar days/);
     const run = context.buildSimulationTrajectory(context.readSimulationSettings());
-    assert.deepEqual(Array.from(run.frames.slice(0, 3), (frame) => frame.linkStates.has("CR01-CR02")), [true, false, true]);
+    for (const date of ["2020-01-03", "2020-01-04", "2020-01-08", "2020-01-09"]) {
+      const frame = run.dailyFrames.find((frame) => frame.key.startsWith(date));
+      assert.equal(frame.linkStates.has("CR01-CR02"), date < "2020-01-04" || date >= "2020-01-09");
+    }
+    assert.equal(run.frames[0].linkStates.get("CR01-CR02").ledgerWeight, 300);
+    assert.equal(run.frames[1].linkStates.get("CR01-CR02").ledgerWeight, 600);
   }
 });
 
@@ -304,7 +320,7 @@ test("custom response delays define the half-open daily tracing window", () => {
 });
 
 test("the first daily-history fetch initializes one shared introduction and reuses its request", async () => {
-  const { context, elements } = runtime();
+  const { context, elements } = runtime({}, 24, false);
   const records = context.presetDailyData;
   context.presetDailyData = null;
   context.presetDailyDates = [];
@@ -328,7 +344,7 @@ test("the first daily-history fetch initializes one shared introduction and reus
 });
 
 test("history loaded before the displayed ledger initializes settings when that ledger arrives", async () => {
-  const { context, elements } = runtime();
+  const { context, elements } = runtime({}, 24, false);
   const records = context.presetDailyData;
   const displayData = context.loadedCSVData;
   const dates = context.uniqueDates;
@@ -356,7 +372,7 @@ test("history loaded before the displayed ledger initializes settings when that 
 
 test("population initialization reports failures, commits settings together, and retries with cached history", async () => {
   for (const cached of [false, true]) {
-    const { context } = runtime();
+    const { context } = runtime({}, 24, false);
     const records = context.presetDailyData;
     if (!cached) {
       context.presetDailyData = null;
@@ -397,7 +413,7 @@ test("population initialization reports failures, commits settings together, and
 });
 
 test("failed history fetches preserve the date and allow a successful retry", async () => {
-  const { context } = runtime();
+  const { context } = runtime({}, 24, false);
   const records = context.presetDailyData;
   context.presetDailyData = null;
   context.presetDailyDates = [];
@@ -428,6 +444,7 @@ test("saved population key order reuses results while changed populations recalc
     assert.equal(applied.length, calls);
     assert.equal(context.networkStatsDirtyFrom, null);
     saved.settings.holdings.CR01 += saved.settings.holdings.CR01 < 10000 ? 1 : -1;
+    saved.settings.population.values = { ...saved.settings.holdings };
     context.loadScenario(saved);
     assert.equal(applied.length, calls + 1);
     assert.equal(context.readSimulationSettings().holdings.CR01, saved.settings.holdings.CR01);
@@ -437,14 +454,16 @@ test("saved population key order reuses results while changed populations recalc
 test("historical selectors require complete coverage and unavailable daily data leaves schedules intact", () => {
   const { context } = runtime();
   context.loadPreset("seed-containment");
-  const saved = plain(context.captureScenario());
+  const appliedState = () => plain({ settings: context.readSimulationSettings(),
+    nodes: context.simulationNodeInterventions, links: context.simulationLinkInterventions });
+  const saved = appliedState();
   context.presetDailyData = context.presetDailyData.filter((row) => +row.time >= Date.UTC(2019, 6, 1));
   context.presetDailyDates = context.presetDailyDates.filter((time) => time >= Date.UTC(2019, 6, 1));
   const choices = context.getScenarioContext().presets;
   for (const id of ["seed-community", "hub-controls", "trade-bottlenecks"]) {
     assert.match(choices.find((preset) => preset.id === id).disabledReason, /365 preceding days/);
     assert.throws(() => context.loadPreset(id), /365 preceding days/);
-    assert.deepEqual(plain(context.captureScenario()), saved);
+    assert.deepEqual(appliedState(), saved);
   }
   for (const id of ["open-trade", "seed-containment", "partner-ring", "temporary-standstill"]) {
     assert.equal(choices.find((preset) => preset.id === id).disabledReason, null);
@@ -453,11 +472,11 @@ test("historical selectors require complete coverage and unavailable daily data 
   context.presetDailyDataError = "Daily history could not be loaded.";
   for (const id of presetIds) {
     assert.throws(() => context.loadPreset(id), /could not be loaded/);
-    assert.deepEqual(plain(context.captureScenario()), saved);
+    assert.deepEqual(appliedState(), saved);
   }
 });
 
-test("a resolution with a shorter date range preserves the applied introduction and requires a valid preset date", () => {
+test("a shorter display calendar preserves daily introduction bounds and the complete daily trajectory", () => {
   const { context, applied } = runtime({}, [0, 7, 14, 21, 28]);
   context.setPresetSettings({ introductionDate: "2020-01-28" });
   context.loadPreset("seed-containment");
@@ -465,35 +484,42 @@ test("a resolution with a shorter date range preserves the applied introduction 
   const nodesBefore = plain(context.simulationNodeInterventions);
   const linksBefore = plain(context.simulationLinkInterventions);
   const calls = applied.length;
+  const before = context.buildSimulationTrajectory(context.readSimulationSettings());
   context.uniqueDates = context.uniqueDates.slice(0, 2);
   context.loadedCSVData = context.loadedCSVData.filter((row) => +row.time <= +context.uniqueDates.at(-1));
   const contextAfter = context.getScenarioContext();
   assert.equal(contextAfter.presetSettings.introductionDate, "2020-01-28");
-  assert.equal(contextAfter.presetSettings.maxIntroductionDate, "2020-01-08");
+  assert.equal(contextAfter.presetSettings.minIntroductionDate, "2019-01-01");
+  assert.equal(contextAfter.presetSettings.maxIntroductionDate, "2020-01-29");
   for (const preset of contextAfter.presets) {
-    assert.match(preset.disabledReason, /introduction date|recorded|timeline/i);
-    assert.throws(() => context.loadPreset(preset.id), /introduction date|recorded|timeline/i);
-    assert.deepEqual(plain(context.readSimulationSettings()), settingsBefore);
-    assert.deepEqual(plain(context.simulationNodeInterventions), nodesBefore);
-    assert.deepEqual(plain(context.simulationLinkInterventions), linksBefore);
-    assert.equal(applied.length, calls);
+    assert.equal(preset.disabledReason, null);
   }
+  assert.deepEqual(plain(context.readSimulationSettings()), settingsBefore);
+  assert.deepEqual(plain(context.simulationNodeInterventions), nodesBefore);
+  assert.deepEqual(plain(context.simulationLinkInterventions), linksBefore);
+  assert.equal(applied.length, calls);
+  const after = context.buildSimulationTrajectory(context.readSimulationSettings());
+  assert.equal(after.dailyTrajectory, before.dailyTrajectory);
+  assert.equal(after.frames.length, 2);
+  assert.equal(after.initialFrame.key, "2020-01-28T00:00:00.000Z");
 });
 
-test("saved introductions restore the shared control and legacy scenarios use their first recorded date", () => {
+test("saved daily introductions restore the shared control and per-record scenarios require an explicit model choice", () => {
   const { context, elements } = runtime();
   const legacy = plain(context.captureScenario());
+  legacy.schemaVersion = 1;
+  delete legacy.provenance;
   delete legacy.settings.introductionDate;
   context.loadPreset("seed-containment");
   const saved = plain(context.captureScenario());
   context.setPresetSettings({ introductionDate: "2020-02-01" });
   context.loadScenario(saved);
   assert.equal(context.getPresetSettings().introductionDate, saved.settings.introductionDate);
+  assert.equal(elements.simulationIntroductionDate.value, saved.settings.introductionDate);
   context.setPresetSettings({ introductionDate: "2020-03-01" });
-  context.loadScenario(legacy);
-  assert.equal(context.simulationIntroductionDate, "2020-01-01");
-  assert.equal(elements.simulationIntroductionDate.value, "2020-01-01");
-  assert.deepEqual(plain(context.readSimulationSettings()), { ...legacy.settings, introductionDate: "2020-01-01" });
+  const before = plain(context.captureScenario());
+  assert.throws(() => context.loadScenario(legacy), /complete population reference/);
+  assert.deepEqual(plain(context.captureScenario()), before);
 });
 
 test("Trace Ring uses observed daily outgoing contacts throughout its calendar window", () => {
@@ -535,22 +561,25 @@ test("historical rankings ignore future trade, disease parameters, prior restric
 
 test("Cordon closes outgoing boundaries while preserving internal, inbound and local routes", () => {
   const { context } = runtime({}, [0, 2, 7, 10, 14]);
-  context.loadedCSVData = context.uniqueDates.flatMap((time, index) => [
+  const introduction = Date.parse("2020-01-01");
+  const dailyMovements = Array.from({ length: 15 }, (_, day) => day).flatMap((day) => [
     ["CR01", "CR02", 100], ["CR02", "CR01", 25], ["CR01", "CR01", 9], ["CR03", "CR03", 6],
-    ["CR03", "CR02", 15], ...(index === 3 ? [] : [["CR02", "CR03", 20]]),
-  ].map(([COROP_LEV, COROP_AFN, AANTAL]) => ({ time, COROP_LEV, COROP_AFN, AANTAL })));
+    ["CR03", "CR02", 15], ...(day === 10 ? [] : [["CR02", "CR03", 20]]),
+  ].map(([COROP_LEV, COROP_AFN, AANTAL]) => ({ time: new Date(introduction + day * dayMs), COROP_LEV, COROP_AFN, AANTAL })));
+  context.presetDailyData = [...context.presetDailyData.filter((row) => +row.time < introduction), ...dailyMovements];
+  context.presetDailyDataHash = createHash("sha256").update(JSON.stringify(context.presetDailyData)).digest("hex");
+  context.loadedCSVData = dailyMovements.filter((row) => context.uniqueDates.some((date) => +date === +row.time));
   context.loadPreset("open-trade");
   const parameters = context.readSimulationSettings();
   const original = context.buildSimulationTrajectory(parameters);
   const result = context.loadPreset("seed-community");
   assert.equal(context.simulationNodeInterventions.size, 0);
-  assert.deepEqual(plain(result.scenario.linkInterventions), [
-    [context.uniqueDates[2].getTime(), [["CR02-CR03", true]]],
-    [context.uniqueDates[4].getTime(), [["CR02-CR03", true]]],
-  ]);
+  assert.deepEqual(plain(result.scenario.linkInterventions), [7, 8, 9, 11, 12, 13, 14]
+    .map((day) => [introduction + day * dayMs, [["CR02-CR03", true]]]));
   const intervention = context.buildSimulationTrajectory(parameters);
-  assert.deepEqual(plain(intervention.frames.slice(0, 2)), plain(original.frames.slice(0, 2)));
-  for (const frame of intervention.frames.slice(2)) {
+  const beforeResponse = (frame) => +frame.date < introduction + 7 * dayMs;
+  assert.deepEqual(plain(intervention.dailyFrames.filter(beforeResponse)), plain(original.dailyFrames.filter(beforeResponse)));
+  for (const frame of intervention.dailyFrames.filter((frame) => !beforeResponse(frame))) {
     assert.equal(frame.linkStates.has("CR02-CR03"), false);
     for (const [key, weight] of [["CR01-CR02", 100], ["CR02-CR01", 25], ["CR03-CR02", 15], ["CR01-CR01", 9], ["CR03-CR03", 6]]) {
       assert.equal(frame.linkStates.get(key).ledgerWeight, weight);
@@ -583,7 +612,7 @@ test("responses and standstill duration use exact calendar dates across models a
         assert.equal(schedule.get(intro + 7 * dayMs).size, 40);
         assert.equal(schedule.get(intro + 21 * dayMs).get("CR01").exports, true);
         const run = context.buildSimulationTrajectory(context.readSimulationSettings());
-        for (const frame of run.frames) {
+        for (const frame of run.dailyFrames) {
           const closed = +frame.date >= intro + 7 * dayMs && +frame.date < intro + 21 * dayMs;
           assert.equal(frame.linkStates.has("CR01-CR02"), !closed);
         }
@@ -592,23 +621,31 @@ test("responses and standstill duration use exact calendar dates across models a
   }
 });
 
-test("introduction waits for its first recorded date and historical population stays fixed across presets", () => {
+test("initial state is recorded at the exact introduction boundary and populations stay fixed across presets", () => {
   const { context } = runtime({}, [0, 2, 4, 8, 13, 21, 28]);
   context.setPresetSettings({ introductionDate: "2020-01-04" });
   context.loadPreset("open-trade");
   const parameters = context.readSimulationSettings();
   const baseline = context.buildSimulationTrajectory(parameters);
-  for (const frame of baseline.frames.slice(0, 2)) {
+  const introduction = Date.parse("2020-01-04");
+  for (const frame of baseline.dailyFrames.filter((frame) => +frame.date < introduction)) {
     assert.equal(frame.summary.I, 0);
     assert.equal(frame.summary.E, 0);
     assert.equal(frame.summary.cumulativeInfections, 0);
   }
-  assert.ok(baseline.frames[2].nodeStates.CR01.I > 0);
+  assert.equal(baseline.initialFrame.date.getTime(), introduction);
+  assert.equal(baseline.initialFrame.intervalEnd.getTime(), introduction);
+  assert.equal(baseline.initialFrame.nodeStates.CR01.I, parameters.holdings.CR01 * parameters.initialPct / 100);
+  assert.equal(baseline.initialFrame.summary.cumulativeInfections, 0);
+  assert.equal(context.uniqueDates.some((date) => +date === introduction), false);
+  assert.ok(baseline.dailyFrames.find((frame) => +frame.date === introduction).nodeStates.CR01.I > 0);
+  const beforeResponse = (frame) => +frame.date < introduction + 7 * dayMs;
   for (const id of presetIds) {
     context.loadPreset(id);
     assert.deepEqual(plain(context.readSimulationSettings().holdings), plain(parameters.holdings));
     const run = context.buildSimulationTrajectory(context.readSimulationSettings());
-    assert.deepEqual(plain(run.frames.slice(0, 4)), plain(baseline.frames.slice(0, 4)), id);
+    assert.deepEqual(plain(run.initialFrame), plain(baseline.initialFrame), id);
+    assert.deepEqual(plain(run.dailyFrames.filter(beforeResponse)), plain(baseline.dailyFrames.filter(beforeResponse)), id);
   }
 });
 
@@ -622,6 +659,32 @@ test("future response schedules preserve recorded trade and disease when the hor
     assert.deepEqual(plain(run.frames), plain(original.frames), id);
     assert.doesNotThrow(() => context.captureScenario());
   }
+});
+
+test("restriction presets retain imported populations, initial states and provenance", () => {
+  const { context } = runtime();
+  const saved = plain(context.captureScenario());
+  saved.settings.holdings.CR01 = 20000;
+  saved.settings.initialPct = 0;
+  saved.settings.initialStates = Object.fromEntries(Object.entries(saved.settings.holdings).map(([id, N]) =>
+    [id, { S: N - (id === "CR01" ? 15 : 0), E: id === "CR01" ? 5 : 0, I: id === "CR01" ? 10 : 0, R: 0 }]));
+  saved.settings.initializationConvention = "absolute-counts";
+  saved.settings.population = simulationPopulation.createDeclaredSyntheticPopulationSnapshot({ ids: Object.keys(saved.settings.holdings), values: saved.settings.holdings, id: "declared-synthetic-population", referenceTime: "2020-01-01" });
+  saved.provenance.population = { kind: saved.settings.population.kind, reference: saved.settings.population.reference };
+  context.loadScenario(saved);
+  for (const id of presetIds) {
+    context.loadPreset(id);
+    const snapshot = plain(context.captureScenario());
+    assert.deepEqual(snapshot.settings, saved.settings, id);
+    assert.deepEqual(snapshot.provenance.population, saved.provenance.population, id);
+    assert.doesNotThrow(() => context.buildSimulationTrajectory(snapshot.settings));
+  }
+  context.setPresetSettings({ introductionDate: "2020-01-05" });
+  const shifted = plain(context.captureScenario());
+  assert.deepEqual(shifted.settings.holdings, saved.settings.holdings);
+  assert.deepEqual(shifted.settings.initialStates, saved.settings.initialStates);
+  assert.deepEqual(shifted.provenance.population, saved.provenance.population);
+  assert.equal(context.buildSimulationTrajectory(shifted.settings).initialFrame.date.toISOString(), "2020-01-05T00:00:00.000Z");
 });
 
 
@@ -656,6 +719,45 @@ test("scenario loading recalculates changed settings, pending statistics and fai
   context.loadPreset("open-trade");
   assert.equal(applied.length, 3);
   assert.equal(context.comparisonDataError, null);
+});
+
+test("a saved scenario restores valid controls when the current inputs cannot be evaluated", () => {
+  const { context, elements, applied } = runtime();
+  elements.simulationSettingsError = { textContent: "" };
+  context.loadPreset("seed-containment");
+  const saved = plain(context.captureScenario());
+  for (const [suffix, value] of [["Beta", ""], ["Gamma", "-1"], ["Sigma", "invalid"], ["Omega", "2"], ["SeedRegion", "CR99"]]) {
+    const input = elements[`simulation${suffix}`];
+    input.value = value;
+    elements.simulationSettingsError.textContent = "Invalid controls";
+    let validity = "Input is invalid";
+    input.setCustomValidity = (message) => { validity = message; };
+    assert.throws(() => context.readSimulationSettings());
+    const calls = applied.length;
+    assert.doesNotThrow(() => context.loadScenario(saved));
+    assert.equal(applied.length, calls + 1);
+    assert.equal(validity, "");
+    assert.equal(elements.simulationSettingsError.textContent, "");
+    assert.deepEqual(plain(context.captureScenario()), saved);
+  }
+});
+
+test("saved daily scenarios retain their dynamics when loaded with another display calendar", () => {
+  const { context, applied } = runtime();
+  context.loadPreset("seed-containment");
+  const saved = plain(context.captureScenario());
+  const before = context.buildSimulationTrajectory(context.readSimulationSettings());
+  const calls = applied.length;
+  context.networkStatsDirtyFrom = null;
+  context.currentTimeSpan = "monthly";
+  context.uniqueDates = ["2020-01-01", "2020-02-01", "2020-03-01"].map((date) => new Date(date));
+  assert.doesNotThrow(() => context.loadScenario(saved));
+  const restored = plain(context.captureScenario());
+  assert.deepEqual(restored, { ...saved, datasetKey: "monthly", dates: context.uniqueDates.map((date) => date.toISOString()) });
+  assert.equal(applied.length, calls);
+  const after = context.buildSimulationTrajectory(context.readSimulationSettings());
+  assert.equal(after.frames.length, 3);
+  assert.equal(after.dailyTrajectory, before.dailyTrajectory);
 });
 
 test("scenario loads reuse matching schedules regardless of date, region, route and permission order", () => {
@@ -694,7 +796,7 @@ test("scenario loads reuse matching schedules regardless of date, region, route 
   }
 });
 
-test("saved scenarios restore live settings and off-sample schedules atomically without changing mode", () => {
+test("saved scenarios restore complete settings, daily route restrictions and future node permissions atomically", () => {
   const { context, elements, applied } = runtime();
   const dates = context.uniqueDates;
   const before = dates[0].getTime() - 86400000;
@@ -702,18 +804,17 @@ test("saved scenarios restore live settings and off-sample schedules atomically 
   const after = dates.at(-1).getTime() + 86400000;
   context.simulationNodeInterventions.set(before, new Map([["CR02", { imports: false }]]));
   context.simulationNodeInterventions.set(between, new Map([["CR02", { imports: true, exports: false }]]));
-  context.simulationLinkInterventions.set(after, new Map([["CR01-CR01", true]]));
+  context.simulationNodeInterventions.set(after, new Map([["CR02", { exports: true }]]));
+  context.simulationLinkInterventions.set(between, new Map([["CR01-CR01", true]]));
   const saved = plain(context.captureScenario());
   context.loadPreset("open-trade");
   for (const model of ["SIR", "SIS", "SEIR", "SEIRS"]) {
-    saved.settings = { model, seedRegion: "CR03", initialPct: 2, beta: 0, movementBeta: 0, sigma: 0, gamma: 0 };
+    saved.settings = { ...saved.settings, model, seedRegion: "CR03", initialPct: 2, beta: 0, movementBeta: 0, sigma: 0, gamma: 0 };
     const calls = applied.length;
     context.loadScenario(saved);
     assert.equal(applied.length, calls + 1);
     assert.equal(context.appDataMode, "trade");
-    assert.deepEqual(plain(context.captureScenario()), {
-      ...saved, settings: { ...saved.settings, introductionDate: saved.dates[0].slice(0, 10) },
-    });
+    assert.deepEqual(plain(context.captureScenario()), saved);
     assert.equal(elements.simulationModel.value, model);
     assert.equal(elements.simulationSeedRegion.value, "CR03");
   }
@@ -726,11 +827,11 @@ test("invalid snapshots and locked actions cannot change settings or schedules",
   context.loadPreset("seed-containment");
   const saved = plain(context.captureScenario());
   const invalid = [
-    (item) => { item.schemaVersion = 2; }, (item) => { item.datasetKey = "daily"; },
-    (item) => { item.dates.reverse(); }, (item) => { item.dates.pop(); },
+    (item) => { item.schemaVersion = 1; }, (item) => { item.schemaVersion = 2; }, (item) => { item.datasetKey = "hourly"; },
+    (item) => { item.dates.reverse(); }, (item) => { item.dates[1] = item.dates[0]; },
     (item) => { delete item.dates[0]; },
     (item) => { item.settings.model = "SI"; }, (item) => { item.settings.seedRegion = "CR99"; },
-    ...["initialPct", "beta", "movementBeta", "sigma", "gamma"].flatMap((key) => [
+    ...["initialPct", "initialExposedPct", "initialRecoveredPct", "beta", "movementBeta", "sigma", "gamma", "omega"].flatMap((key) => [
       (item) => { item.settings[key] = -1; }, (item) => { item.settings[key] = Infinity; },
       (item) => { item.settings[key] = "0.1"; },
     ]),
@@ -742,6 +843,11 @@ test("invalid snapshots and locked actions cannot change settings or schedules",
     (item) => { delete item.settings.holdings.CR01; },
     (item) => { item.settings.holdings.CR99 = 450; },
     (item) => { item.settings.gamma = 2; }, (item) => { item.settings.extra = 1; },
+    (item) => { item.provenance.movementData.contentHash = "0".repeat(64); },
+    (item) => { item.provenance.population.unit = "animals"; },
+    (item) => { item.provenance.engine.id = "unrecognized"; },
+    (item) => { item.provenance.evidence.disease = "validated"; },
+    (item) => { item.settings.population.reference.geographyVersion = "wrong-geography"; },
     (item) => { item.nodeInterventions[0][0] = 0.1; },
     (item) => { item.nodeInterventions.push(item.nodeInterventions[0]); },
     (item) => { item.nodeInterventions[0][1].push(item.nodeInterventions[0][1][0]); },
@@ -751,6 +857,8 @@ test("invalid snapshots and locked actions cannot change settings or schedules",
     (item) => { item.linkInterventions = [[0, [["CR01-CR02", false]]]]; },
     (item) => { item.linkInterventions = [[0, [["CR01-CR99", true]]]]; },
     (item) => { item.linkInterventions = [[0, []]]; },
+    (item) => { item.linkInterventions = [[context.presetDailyDates[0] - dayMs, [["CR01-CR02", true]]]]; },
+    (item) => { item.linkInterventions = [[context.presetDailyDates.at(-1) + dayMs, [["CR01-CR02", true]]]]; },
   ];
   const calls = applied.length;
   for (const mutate of invalid) {
@@ -800,4 +908,169 @@ test("calculation failures publish error state and simulation retries can recove
   await context.recomputeSimulationTrajectory();
   assert.equal(context.simulationState.status, "ready");
   assert.equal(context.comparisonDataError, null);
+});
+
+function populationProduct(context, accessClass = "public") {
+  const ids = Object.keys(context.readSimulationSettings().holdings);
+  return {
+    schemaVersion: 1, kind: "population-product",
+    reference: {
+      id: "fabricated-inventory", measure: "point-occupied-stock", countUnit: "animal",
+      timeReference: { kind: "instant", date: "2018-01-01" }, geographyVersion: "fixture-regions-2018",
+      movementGeography: "COROP", geographicAttribution: "animal-site", accessClass,
+      evidence: "assumption-based-reference", assumptions: ["A fabricated fixed population is used for this test."],
+    },
+    scenarios: [
+      { id: "first", values: Object.fromEntries(ids.map((id) => [id, 1000])) },
+      { id: "second", values: Object.fromEntries(ids.map((id) => [id, id === "CR01" ? 2000 : 1000])) },
+    ],
+  };
+}
+
+test("a population product preserves exact reference and scenario values across dates, presets and display bins", () => {
+  const { context } = runtime({}, 12);
+  const product = populationProduct(context);
+  context.importSimulationPopulation(product);
+  const original = plain(context.captureScenario());
+  assert.equal(original.schemaVersion, 3);
+  assert.deepEqual(original.settings.population.reference, product.reference);
+  assert.deepEqual(original.provenance.evidence, { population: "assumption-based-reference", movement: "recorded-ledger", disease: "illustrative", diseaseValidation: "not-assessed" });
+  assert.deepEqual(original.settings.holdings, product.scenarios[0].values);
+  context.setPresetSettings({ introductionDate: "2020-01-05" });
+  context.loadPreset("seed-containment");
+  context.uniqueDates = [context.uniqueDates[0], context.uniqueDates.at(-1)];
+  const changed = plain(context.captureScenario());
+  assert.deepEqual(changed.settings.population, original.settings.population);
+  const run = context.buildSimulationTrajectory(changed.settings);
+  assert.equal(run.initialFrame.nodeStates.CR01.N, 1000);
+  context.loadScenario(original);
+  assert.deepEqual(plain(context.captureScenario()).settings, original.settings);
+  context.importSimulationPopulation(product, "second");
+  const second = context.buildSimulationTrajectory(context.readSimulationSettings());
+  assert.equal(second.initialFrame.nodeStates.CR01.N, 2000);
+  assert.equal(second.initialFrame.nodeStates.CR01.I, 20);
+  assert.notEqual(second.identity, run.identity);
+  product.scenarios[1].values.CR01 = 1;
+  assert.equal(context.readSimulationSettings().holdings.CR01, 2000);
+  context.useSyntheticSimulationPopulation();
+  assert.equal(context.readSimulationSettings().population.kind, "synthetic");
+  assert.equal(context.simulationInventoryPackage, null);
+});
+
+test("count initialization preserves absolute states across population scenarios and rejects insufficient stock", () => {
+  const { context, applied } = runtime({}, 12);
+  const product = populationProduct(context);
+  context.importSimulationPopulation(product);
+  context.setSimulationInitializationConvention("absolute-counts");
+  assert.equal(context.readSimulationSettings().initialStates.CR01.I, 10);
+  context.importSimulationPopulation(product, "second");
+  const countSettings = context.readSimulationSettings();
+  assert.equal(countSettings.initializationConvention, "absolute-counts");
+  assert.equal(countSettings.initialStates.CR01.I, 10);
+  assert.equal(countSettings.initialStates.CR01.S, 1990);
+  context.loadPreset("seed-containment");
+  context.networkStatsDirtyFrom = null;
+  const calls = applied.length;
+  context.loadPreset("seed-containment");
+  assert.equal(applied.length, calls);
+  const before = plain(context.captureScenario());
+  const tooSmall = structuredClone(product);
+  tooSmall.scenarios[0].values.CR01 = 5;
+  assert.throws(() => context.importSimulationPopulation(tooSmall));
+  assert.deepEqual(plain(context.captureScenario()), before);
+  context.setSimulationInitializationConvention("prevalence-shares");
+  const shares = context.readSimulationSettings();
+  assert.equal(shares.initialPct, 0.5);
+  assert.equal(shares.initialStates, undefined);
+});
+
+test("invalid products do not replace the active population or schedules", () => {
+  const { context } = runtime({}, 12);
+  context.loadPreset("seed-containment");
+  const before = plain(context.captureScenario());
+  for (const mutate of [
+    (product) => { product.scenarios[0].values.CR01 = -1; },
+    (product) => { delete product.scenarios[0].values.CR02; },
+    (product) => { product.scenarios[0].values.CR99 = 10; },
+    (product) => { product.scenarios[0].values.CR01 = 0; },
+    (product) => { product.reference.movementGeography = "another-geography"; },
+  ]) {
+    const product = populationProduct(context);
+    mutate(product);
+    assert.throws(() => context.importSimulationPopulation(product));
+    assert.deepEqual(plain(context.captureScenario()), before);
+  }
+});
+
+test("private population comparisons stay in memory and zero regions retain undefined prevalence", () => {
+  const { context } = runtime({}, 12);
+  const product = populationProduct(context, "private");
+  for (const scenario of product.scenarios) scenario.values.CR40 = 0;
+  context.importSimulationPopulation(product);
+  assert.equal(context.getScenarioContext().privatePopulation, true);
+  assert.equal(context.window.herdlinkHasPrivatePopulation(), true);
+  const captured = context.captureScenario();
+  assert.equal(captured.settings.population.reference.accessClass, "private");
+  const trajectory = context.buildSimulationTrajectory(captured.settings);
+  assert.equal(trajectory.frames.at(-1).nodeStates.CR40.prevalence, null);
+  const series = context.getOriginalSimulationSeries(captured.settings);
+  assert.equal(series.nodes.CR40.at(-1).prevalence, null);
+  assert.equal(series.nodes.CR40.at(-1).N, 0);
+  context.simulationState.settings = captured.settings;
+  context.useSyntheticSimulationPopulation();
+  assert.equal(context.readSimulationSettings().population.kind, "synthetic");
+  assert.equal(context.window.herdlinkHasPrivatePopulation(), true);
+  context.simulationState.settings = context.readSimulationSettings();
+  assert.equal(context.window.herdlinkHasPrivatePopulation(), false);
+});
+
+test("population import retains final reference fields and drops source record attachments", () => {
+  const { context } = runtime({}, 12);
+  const product = populationProduct(context);
+  const reference = structuredClone(product.reference);
+  const sourceOnly = [{ id: "source-row-marker", value: 17 }];
+  product.sourceRecords = sourceOnly;
+  product.reference.sourceRecords = sourceOnly;
+  product.reference.timeReference.sourceRecords = sourceOnly;
+  product.scenarios[0].sourceRecords = sourceOnly;
+  context.importSimulationPopulation(product);
+  assert.deepEqual(plain(context.readSimulationSettings().population.reference), reference);
+  assert.deepEqual(Object.keys(context.simulationInventoryPackage).sort(), ["kind", "reference", "scenarios", "schemaVersion"]);
+  assert.doesNotMatch(JSON.stringify(context.simulationInventoryPackage), /source-row-marker|sourceRecords/);
+  assert.doesNotMatch(JSON.stringify(context.captureScenario()), /source-row-marker|sourceRecords/);
+});
+
+test("three scenario evaluations keep live settings and restrictions fixed while varying targets and response timing", () => {
+  const { context, applied } = runtime();
+  context.appDataMode = "simulation";
+  context.simulationState.status = "ready";
+  context.loadPreset("partner-ring");
+  const before = plain(context.captureScenario());
+  const presetSettings = plain(context.getPresetSettings());
+  const appliedCount = applied.length;
+  const configurations = [0, 7, 14].map((responseDays) => ({
+    presetId: "seed-containment", responseDays, targetBudget: 3, standstillDays: 14,
+  }));
+  const results = configurations.map((config) => context.evaluateComparisonScenario(config));
+  for (const [index, result] of results.entries()) {
+    assert.deepEqual(plain(result.settings), plain(results[0].settings));
+    assert.equal(result.series.global.length, context.uniqueDates.length);
+    assert.equal(result.interventionEvents[0].events[0].date, new Date(Date.parse(result.settings.introductionDate) + configurations[index].responseDays * dayMs).toISOString());
+    assert.deepEqual(plain(result.targets), ["CR01"]);
+  }
+  assert.notDeepEqual(plain(results[0].series.global), plain(results[2].series.global));
+  const targets = [1, 3, 5].map((targetBudget) => context.buildPresetScenario("hub-controls", { targetBudget }));
+  assert.deepEqual(targets.map((result) => result.targets.length), [1, 3, 3]);
+  assert.deepEqual(plain(targets[0].targets), plain(targets[2].targets.slice(0, 1)));
+  const snapshot = targets[0].scenario;
+  const saved = context.evaluateComparisonScenario({ label: "Saved hub scenario", scenario: snapshot });
+  const direct = context.evaluateComparisonScenario({ ...configurations[1], presetId: "hub-controls", targetBudget: 1 });
+  assert.deepEqual(plain(saved.series), plain(direct.series));
+  assert.equal(saved.label, "Saved hub scenario");
+  assert.deepEqual(plain(context.captureScenario()), before);
+  assert.deepEqual(plain(context.getPresetSettings()), presetSettings);
+  assert.equal(applied.length, appliedCount);
+  for (const overrides of [{ targetBudget: 0 }, { responseDays: -1 }, { responseDays: 366 }, { standstillDays: 0 }, { unknown: 3 }]) {
+    assert.throws(() => context.buildPresetScenario("hub-controls", overrides), /Invalid comparison setting/);
+  }
 });

@@ -1,4 +1,7 @@
 export async function downloadAppScreenshot(filename) {
+  if (window.herdlinkHasPrivatePopulation?.() || document.querySelector('#comparisonOverlay[open][data-private-population="true"]')) {
+    throw new Error("Screenshots are unavailable while a private population is loaded.");
+  }
   const { domToPng } = await import("modern-screenshot");
   await document.fonts.ready;
 

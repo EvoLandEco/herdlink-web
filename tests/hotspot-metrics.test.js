@@ -2,6 +2,8 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import vm from "node:vm";
+import * as simulationEngine from "../src/runtime/simulation-engine.js";
+import * as simulationPopulation from "../src/runtime/simulation-population.js";
 
 const source = readFileSync(new URL("../src/runtime/herdlink-runtime.js", import.meta.url), "utf8");
 function extractFunction(name) {
@@ -107,13 +109,27 @@ test("weighted PageRank satisfies the transition equations regardless of volume 
   }
 });
 
-const settings = { model: "SIR", seedRegion: "CR35", initialPct: 5, beta: 0.3, movementBeta: 2, gamma: 0.1, sigma: 0.3 };
+const settings = {
+  initializationConvention: "prevalence-shares",
+  model: "SIR", seedRegion: "CR35", introductionDate: "2020-01-01", initialPct: 5,
+  beta: 0.3, movementBeta: 2, gamma: 0.1, sigma: 0.3,
+  holdings: Object.fromEntries(Array.from({ length: 40 }, (_, i) => {
+    const id = `CR${String(i + 1).padStart(2, "0")}`;
+    return [id, id === "CR35" ? 10000 : 450];
+  })),
+};
+settings.population = simulationPopulation.createDeclaredSyntheticPopulationSnapshot({
+  ids: Object.keys(settings.holdings), values: settings.holdings,
+  id: "fabricated-hotspots", referenceTime: settings.introductionDate, geographyVersion: "COROP",
+});
 function simulation(permission = "exports") {
   const dates = Array.from({ length: 6 }, (_, index) => new Date(Date.UTC(2020, 0, index + 1)));
   const records = dates.flatMap((time) => [["CR35", "CR35", 500], ["CR35", "CR02", 100], ["CR02", "CR35", 50], ["CR02", "CR02", 80]]
     .map(([COROP_LEV, COROP_AFN, AANTAL]) => ({ time, COROP_LEV, COROP_AFN, AANTAL })));
   const context = vm.createContext({
     Date, Map, Set, uniqueDates: dates, loadedCSVData: records,
+    presetDailyData: records, presetDailyDates: dates.map(Number), dailySimulationCache: new Map(),
+    window: { herdlinkSimulation: { ...simulationEngine, ...simulationPopulation } },
     simulationRegionIdsByDataset: new WeakMap(), simulationLinkInterventions: new Map(),
     simulationNodeInterventions: new Map([[dates[2].getTime(), new Map([["CR35", { [permission]: false }]])]]),
     metricNames: ["inDegree", "outDegree", "betweenness", "pageRank", "eigenvector"],
@@ -124,7 +140,7 @@ function simulation(permission = "exports") {
   });
   vm.runInContext([
     "getNodeId", "getLinkKey", "getSimulationLinkAvailability", "getDisabledLinkKeys", "applySimulationNodePermissions",
-    "collectSimulationRegionIds", "buildSimulationLedger", "estimateSimulationHoldings", "getSimulationFrameSummary", "buildSimulationTrajectory",
+    "collectSimulationRegionIds", "buildSimulationTrajectory",
   ].map(extractFunction).join("\n"), context);
   return { context, trajectory: context.buildSimulationTrajectory(settings) };
 }
@@ -150,7 +166,11 @@ test("simulation flow metrics respect persistent export and import controls with
   const first = trajectory.frames[0];
   near(first.nodeStates.CR35.outgoingPressure, 100 * 0.05 * settings.movementBeta);
   assert.equal(first.nodeStates.CR35.incomingExposure, 0);
-  assert.ok(first.linkStates.get("CR35-CR35").riskLoad > 500 * 0.05 * settings.movementBeta);
+  const local = first.linkStates.get("CR35-CR35");
+  near(local.movementPressure, 500 * 0.05 * settings.movementBeta);
+  near(local.riskLoad, first.nodeStates.CR35.newInfections);
+  near(local.riskLoad, local.contactAttributedInfections + local.movementAttributedInfections);
+  assert.equal(first.nodeStates.CR02.rtProxy, null);
 });
 
 test("within-region movement stays local when contact transmission or susceptible population is zero", () => {
@@ -162,7 +182,9 @@ test("within-region movement stays local when contact transmission or susceptibl
         assert.equal(link.local, link.source === link.target);
       });
       const local = frame.linkStates.get("CR35-CR35");
-      assert.ok(local.riskLoad > 0);
+      assert.ok(local.movementPressure > 0);
+      if (parameters.initialPct === 100) assert.equal(local.riskLoad, 0);
+      else assert.ok(local.riskLoad > 0);
       assert.equal(local.ledgerWeight, 500);
     }
   }
@@ -185,4 +207,13 @@ test("local and external movement retain the compartment trajectory under export
       });
     });
   });
+});
+
+test("movement pressure ratios use daily start infectious units when the end state is zero", () => {
+  const { context } = simulation();
+  const first = context.buildSimulationTrajectory({ ...settings, beta: 0, initialPct: 100, gamma: 1 }).frames[0];
+  assert.equal(first.nodeStates.CR35.I, 0);
+  assert.ok(first.nodeStates.CR35.outgoingPressure > 0);
+  near(first.nodeStates.CR35.rtProxy, first.nodeStates.CR35.outgoingPressure / settings.holdings.CR35);
+  assert.equal(first.nodeStates.CR02.rtProxy, null);
 });

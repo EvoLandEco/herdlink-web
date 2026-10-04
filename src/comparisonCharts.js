@@ -14,6 +14,15 @@ export function pairComparisonSeries(dates, original, intervention, metric) {
   }));
 }
 
+export function topComparisonRegions(regions, original, metric, count = 3) {
+  return regions.map((region) => {
+    const peak = (original[region.id] || []).reduce((highest, frame) =>
+      Number.isFinite(frame[metric]) ? Math.max(highest, frame[metric]) : highest, -Infinity);
+    return { ...region, peak };
+  }).filter((region) => Number.isFinite(region.peak))
+    .sort((a, b) => b.peak - a.peak || a.id.localeCompare(b.id)).slice(0, count);
+}
+
 export function formatComparisonValue(value, format = "decimal") {
   if (!Number.isFinite(value)) return "—";
   const magnitude = Math.abs(value);
@@ -50,18 +59,21 @@ export function nearestComparisonDate(dates, timestamp) {
   return timestamp - Date.parse(dates[low - 1]) <= Date.parse(dates[low]) - timestamp ? low - 1 : low;
 }
 
-export function getComparisonIntroduction(date, dates) {
+export function getComparisonIntroduction(date, dates, coverage) {
   const timestamp = Date.parse(date);
-  if (!Number.isFinite(timestamp) || !dates.length) return null;
+  const start = Date.parse(coverage?.start), end = Date.parse(coverage?.end);
+  if (!Number.isFinite(timestamp) || !Number.isFinite(start) || !Number.isFinite(end) ||
+      !dates.length || timestamp < start || timestamp >= end) return null;
   let low = 0;
   let high = dates.length;
   while (low < high) {
     const middle = Math.floor((low + high) / 2);
-    if (Date.parse(dates[middle]) < timestamp) low = middle + 1;
+    if (Date.parse(dates[middle]) <= timestamp) low = middle + 1;
     else high = middle;
   }
-  return low === dates.length ? null : {
-    date: new Date(timestamp).toISOString(), recordedDate: dates[low], index: low,
+  const index = low - 1;
+  return index < 0 ? null : {
+    date: new Date(timestamp).toISOString(), displayDate: dates[index], index,
   };
 }
 
@@ -94,17 +106,22 @@ export function groupComparisonEvents(groups, dates, trackWidth, positionForDate
   }));
 }
 
-export function buildComparisonChart(points, width = 640, height = 198) {
-  const values = points.flatMap((point) => [point.original, point.intervention]).filter(Number.isFinite);
-  if (!points.length || !values.length) return null;
+export function comparisonChartDomain(scalePoints) {
+  const values = scalePoints.flatMap((point) => [point.original, point.intervention]).filter(Number.isFinite);
+  if (!values.length) return null;
+  const minimum = Math.min(0, ...values);
+  const maximum = Math.max(0, ...values);
+  return { minimum, maximum: maximum === minimum ? 1 : maximum };
+}
 
-  const plot = { left: 64, right: width - 16, top: 12, bottom: height - 28 };
+export function buildComparisonChart(points, width = 640, height = 198, compact = false, scalePoints = points, domain = comparisonChartDomain(scalePoints)) {
+  if (!points.length || !domain) return null;
+
+  const plot = { left: 64, right: width - 16, top: compact ? 6 : 12, bottom: height - (compact ? 8 : 28) };
   const dates = points.map((point) => Date.parse(point.date));
   const start = Math.min(...dates);
   const end = Math.max(...dates);
-  const minimum = Math.min(0, ...values);
-  const maximum = Math.max(0, ...values);
-  const ceiling = maximum === minimum ? 1 : maximum;
+  const { minimum, maximum: ceiling } = domain;
   const x = (timestamp) => end === start
     ? (plot.left + plot.right) / 2
     : plot.left + (timestamp - start) / (end - start) * (plot.right - plot.left);

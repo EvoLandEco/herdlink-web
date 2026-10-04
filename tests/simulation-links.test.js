@@ -2,6 +2,8 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import vm from "node:vm";
+import * as simulationEngine from "../src/runtime/simulation-engine.js";
+import * as simulationPopulation from "../src/runtime/simulation-population.js";
 
 const source = readFileSync(
   new URL("../src/runtime/herdlink-runtime.js", import.meta.url),
@@ -15,13 +17,12 @@ function extractFunction(name) {
 
 const functions = [
   "isSimulationModeActive", "getNodeId", "getLinkKey", "getDisabledLinkKeys", "getTradeRecordsByDate",
-  "setSimulationLinkIntervention", "getSimulationLinkAvailability",
+  "setSimulationLinkIntervention", "getSimulationLinkAvailability", "getSimulationDisplayInterval", "getDisplayedLinkAvailability",
   "setSimulationNodeIntervention", "getSimulationNodePermissions", "applySimulationNodePermissions",
   "getSimulationRestrictionTimeline",
   "setAllSimulationNodePermissions",
   "setTradeEdgeScales", "collectSimulationRegionIds",
-  "buildSimulationLedger", "estimateSimulationHoldings",
-  "getSimulationFrameSummary", "buildSimulationTrajectory", "applySimulationFrame",
+  "buildSimulationTrajectory", "applySimulationFrame",
   "initNodesAndLinks", "restoreLinks", "getSimulationTrajectoryPath", "setAppDataMode", "cancelSimulationRecompute",
   "applyNetworkControlChanges", "refreshNetworkControlStats", "computeTemporalNetworkStats",
   "computeMaxTemporalNetworkStats", "computeSimpleStats", "computeNumberOfConnectedComponents",
@@ -29,18 +30,20 @@ const functions = [
 ].map(extractFunction).join("\n");
 
 const settings = {
-  model: "SIR", seedRegion: "CR01", initialPct: 5,
+  initializationConvention: "prevalence-shares",
+  model: "SIR", seedRegion: "CR01", initialPct: 5, introductionDate: "2020-01-01",
   beta: 0, movementBeta: 2, gamma: 0, sigma: 0.3,
 };
 
 function runtime(edges = [["CR01", "CR02", 1000], ["CR02", "CR01", 100], ["CR02", "CR03", 100]]) {
-  const uniqueDates = Array.from({ length: 6 }, (_, i) => new Date(Date.UTC(2020, 0, 1 + i * 7)));
+  const uniqueDates = Array.from({ length: 6 }, (_, i) => new Date(Date.UTC(2020, 0, 1 + i)));
   const loadedCSVData = uniqueDates.flatMap((time) => edges.map(([COROP_LEV, COROP_AFN, AANTAL]) => ({
     COROP_LEV, COROP_AFN, AANTAL, time,
   })));
   const values = (items, accessor = (item) => item) => Array.from(items, accessor);
   const context = vm.createContext({
     Date, Map, Set, uniqueDates, loadedCSVData,
+    presetDailyData: loadedCSVData, presetDailyDates: uniqueDates.map(Number), dailySimulationCache: new Map(),
     simulationRegionIdsByDataset: new WeakMap(),
     tradeRecordsByDataset: new WeakMap(),
     originalLedgerStatsByDataset: new WeakMap(), tradeCommunityTimeline: null, communityScale: "broad",
@@ -48,7 +51,7 @@ function runtime(edges = [["CR01", "CR02", 1000], ["CR02", "CR01", 100], ["CR02"
     simulationState: {}, simulationLinkInterventions: new Map(),
     simulationNodeInterventions: new Map(),
     networkStatsDirtyDates: new Set(), networkStatsDirtyFrom: null, ledgerBaselineSpectralRadius: 0,
-    window: { currentDate: uniqueDates[0] }, tradeIntensity: null, exposureIntensity: null,
+    window: { currentDate: uniqueDates[0], herdlinkSimulation: { ...simulationEngine, ...simulationPopulation } }, tradeIntensity: null, exposureIntensity: null,
     computeSpectralRadius: () => 0, computeHotSpotMetrics: () => ({}),
     setLedgerHotspotsMax: () => {},
     metricNames: ["inDegree", "outDegree", "betweenness", "pageRank", "eigenvector"],
@@ -65,6 +68,14 @@ function runtime(edges = [["CR01", "CR02", 1000], ["CR02", "CR01", 100], ["CR02"
   context.initNodesAndLinks(loadedCSVData.filter((row) => row.time === uniqueDates[0]));
   context.computeTemporalNetworkStats();
   return context;
+}
+
+function settingsFor(context) {
+  const ids = context.collectSimulationRegionIds(context.presetDailyData);
+  const holdings = Object.fromEntries(ids.map((id) => [id, 1000]));
+  return { ...settings, holdings, population: simulationPopulation.createDeclaredSyntheticPopulationSnapshot({
+    ids, values: holdings, id: "fabricated-links", referenceTime: settings.introductionDate, geographyVersion: "COROP",
+  }) };
 }
 
 function toggle(context, sourceId, targetId, disabled, date = context.uniqueDates[0]) {
@@ -97,7 +108,7 @@ function prepareModeSwitching(context) {
     },
     recomputeSimulationTrajectory: () => {
       context.simulationState = {
-        status: "ready", trajectory: context.buildSimulationTrajectory(settings),
+        status: "ready", trajectory: context.buildSimulationTrajectory(settingsFor(context)),
       };
       context.refreshCurrentNetworkFrame();
     },
@@ -117,7 +128,7 @@ test("network and simulation modes share dated controls while preserving ledger 
   prepareModeSwitching(context);
   const dates = context.uniqueDates;
   const rawLedger = snapshot(context.loadedCSVData);
-  const baseline = context.buildSimulationTrajectory(settings);
+  const baseline = context.buildSimulationTrajectory(settingsFor(context));
   assert.equal(context.setAppDataMode("trade"), true);
 
   toggle(context, "CR01", "CR02", true, dates[2]);
@@ -153,7 +164,7 @@ test("network and simulation modes share dated controls while preserving ledger 
   context.setSimulationNodeIntervention("CR01", "imports", false, dates[4]);
   const linkSchedule = snapshot(context.simulationLinkInterventions);
   const nodeSchedule = snapshot(context.simulationNodeInterventions);
-  const combined = context.buildSimulationTrajectory(settings);
+  const combined = context.buildSimulationTrajectory(settingsFor(context));
   assert.equal(context.setAppDataMode("trade"), true);
   assert.equal(snapshot(context.simulationLinkInterventions), linkSchedule);
   assert.equal(snapshot(context.simulationNodeInterventions), nodeSchedule);
@@ -281,7 +292,7 @@ test("restrictions preserve the raw spectral baseline across partial and full st
 });
 
 function recordTrajectoryPath(context, points) {
-  context.simulationState.trajectory = context.buildSimulationTrajectory(settings);
+  context.simulationState.trajectory = context.buildSimulationTrajectory(settingsFor(context));
   const calls = [];
   let curve;
   const generator = (segment) => {
@@ -378,7 +389,7 @@ test("restriction timelines handle empty schedules and a restriction at a single
 test("the selected seed region alone starts infected", () => {
   const context = runtime([["CR01", "CR35", 1000], ["CR35", "CR02", 100]]);
   for (const seedRegion of ["CR35", "CR01", "CR02"]) {
-    const trajectory = context.buildSimulationTrajectory({ ...settings, seedRegion, movementBeta: 0 });
+    const trajectory = context.buildSimulationTrajectory({ ...settingsFor(context), seedRegion, movementBeta: 0 });
     assert.deepEqual(Array.from(trajectory.seedIds), [seedRegion]);
     const states = trajectory.frames[0].nodeStates;
     assert.deepEqual(Object.keys(states).filter((id) => states[id].I > 0), [seedRegion]);
@@ -423,7 +434,7 @@ test("consecutive and final intervention boundaries connect every frame without 
   });
 });
 
-test("unchanged node restrictions and edits outside sampled dates keep trajectory curves smooth", () => {
+test("unchanged restrictions keep curves smooth and noncalendar route dates are rejected", () => {
   const context = runtime();
   const points = context.uniqueDates.map((date, id) => ({ date, id }));
   const expected = { path: "M1", calls: [["smooth", [0, 1, 2, 3, 4, 5]]] };
@@ -434,10 +445,10 @@ test("unchanged node restrictions and edits outside sampled dates keep trajector
 
   context.simulationNodeInterventions.clear();
   toggle(context, "CR01", "CR02", true, new Date(context.uniqueDates[1].getTime() + 1));
-  assert.deepEqual(recordTrajectoryPath(context, points), expected);
+  assert.throws(() => recordTrajectoryPath(context, points), /valid UTC midnight/);
 });
 
-test("simulation folds each dated event once and charts reuse only changed restriction boundaries", () => {
+test("simulation stores effective restriction boundaries and charts reuse them", () => {
   const context = runtime();
   const dates = context.uniqueDates;
   context.setAllSimulationNodePermissions("exports", false, dates[1]);
@@ -445,15 +456,10 @@ test("simulation folds each dated event once and charts reuse only changed restr
   toggle(context, "CR01", "CR02", true, dates[2]);
   context.setAllSimulationNodePermissions("exports", true, dates[4]);
 
-  let appliedEvents = 0;
-  const applyPermissions = context.applySimulationNodePermissions;
-  context.applySimulationNodePermissions = (...args) => {
-    appliedEvents += 1;
-    return applyPermissions(...args);
-  };
-  const trajectory = context.buildSimulationTrajectory(settings);
-  assert.equal(appliedEvents, 3);
+  const trajectory = context.buildSimulationTrajectory(settingsFor(context));
   assert.deepEqual(Array.from(trajectory.boundaryIndices), [1, 4]);
+  for (const frame of trajectory.frames.slice(1, 4)) assert.equal(frame.linkStates.size, 0);
+  assert.ok(trajectory.frames[4].linkStates.get("CR01-CR02").movementPressure > 0);
   context.simulationState.trajectory = trajectory;
   context.getDisabledLinkKeys = context.getSimulationNodePermissions = () => {
     throw new Error("Chart rendering must not recompute restrictions");
@@ -467,18 +473,17 @@ test("simulation folds each dated event once and charts reuse only changed restr
   const points = dates.map((date, id) => ({ date, id }));
   assert.equal(context.getSimulationTrajectoryPath(points, generator), "MMMM");
   assert.deepEqual(segments, [[0, 1], [1, 2, 3], [3, 4], [4, 5]]);
-  assert.equal(appliedEvents, 3);
 });
 
 test("link availability changes one date and removing the edit reproduces the baseline", () => {
   const context = runtime();
-  const baseline = context.buildSimulationTrajectory(settings);
+  const baseline = context.buildSimulationTrajectory(settingsFor(context));
   assert.deepEqual(Array.from(baseline.seedIds), ["CR01"]);
   assert.ok(baseline.frames[0].nodeStates.CR02.newInfections > 0);
   assert.ok(baseline.frames[1].nodeStates.CR03.newInfections > 0);
 
   toggle(context, "CR01", "CR02", true);
-  const blocked = context.buildSimulationTrajectory(settings);
+  const blocked = context.buildSimulationTrajectory(settingsFor(context));
   assert.deepEqual(blocked.holdings, baseline.holdings);
   assert.deepEqual(blocked.seedIds, baseline.seedIds);
   assert.equal(blocked.frames[0].nodeStates.CR02.I, 0);
@@ -494,14 +499,14 @@ test("link availability changes one date and removing the edit reproduces the ba
 
   toggle(context, "CR01", "CR02", false);
   assert.equal(context.simulationLinkInterventions.size, 0);
-  assert.equal(snapshot(context.buildSimulationTrajectory(settings)), snapshot(baseline));
+  assert.equal(snapshot(context.buildSimulationTrajectory(settingsFor(context))), snapshot(baseline));
 });
 
 test("a date-specific link edit preserves earlier frames and affects later infections", () => {
   const context = runtime();
-  const baseline = context.buildSimulationTrajectory(settings);
+  const baseline = context.buildSimulationTrajectory(settingsFor(context));
   toggle(context, "CR01", "CR02", true, context.uniqueDates[2]);
-  const blocked = context.buildSimulationTrajectory(settings);
+  const blocked = context.buildSimulationTrajectory(settingsFor(context));
 
   assert.equal(snapshot(blocked.frames.slice(0, 2)), snapshot(baseline.frames.slice(0, 2)));
   assert.deepEqual(blocked.holdings, baseline.holdings);
@@ -517,14 +522,14 @@ test("a date-specific link edit preserves earlier frames and affects later infec
 
 test("node exports stay restricted for every partner, including a route first seen on a future date", () => {
   const context = runtime();
-  context.loadedCSVData = context.loadedCSVData.concat({
+  context.presetDailyData = context.loadedCSVData = context.loadedCSVData.concat({
     COROP_LEV: "CR01", COROP_AFN: "CR41", AANTAL: 100,
     time: context.uniqueDates[4],
   });
-  const baseline = context.buildSimulationTrajectory(settings);
+  const baseline = context.buildSimulationTrajectory(settingsFor(context));
   assert.ok(baseline.frames[4].linkStates.get("CR01-CR41").riskLoad > 0);
   context.setSimulationNodeIntervention("CR01", "exports", false, context.uniqueDates[2]);
-  const blocked = context.buildSimulationTrajectory(settings);
+  const blocked = context.buildSimulationTrajectory(settingsFor(context));
 
   assert.equal(snapshot(blocked.frames.slice(0, 2)), snapshot(baseline.frames.slice(0, 2)));
   for (const frame of blocked.frames.slice(2)) {
@@ -543,7 +548,7 @@ test("node exports stay restricted for every partner, including a route first se
 test("node imports restrict every source without stopping the node's exports", () => {
   const context = runtime();
   context.setSimulationNodeIntervention("CR02", "imports", false, context.uniqueDates[2]);
-  const blocked = context.buildSimulationTrajectory(settings);
+  const blocked = context.buildSimulationTrajectory(settingsFor(context));
   for (const frame of blocked.frames.slice(2)) {
     const disabled = context.getDisabledLinkKeys(frame.date);
     for (const id of blocked.ids) {
@@ -562,14 +567,14 @@ for (const mode of ["trade", "simulation"]) {
     for (const direction of ["exports", "imports"]) {
       const context = runtime();
       context.appDataMode = mode;
-      context.loadedCSVData = context.loadedCSVData.concat({
+      context.presetDailyData = context.loadedCSVData = context.loadedCSVData.concat({
         COROP_LEV: "CR01", COROP_AFN: "CR41", AANTAL: 100,
         time: context.uniqueDates[4],
       });
-      const baseline = context.buildSimulationTrajectory(settings);
+      const baseline = context.buildSimulationTrajectory(settingsFor(context));
       assert.ok(baseline.frames[4].linkStates.get("CR01-CR41").riskLoad > 0);
       context.setAllSimulationNodePermissions(direction, false, context.uniqueDates[2]);
-      const blocked = context.buildSimulationTrajectory(settings);
+      const blocked = context.buildSimulationTrajectory(settingsFor(context));
       const otherDirection = direction === "exports" ? "imports" : "exports";
 
       assert.equal(snapshot(blocked.frames.slice(0, 2)), snapshot(baseline.frames.slice(0, 2)));
@@ -597,12 +602,12 @@ test("bulk reopening preserves history, independent imports, date availability, 
   context.setSimulationNodeIntervention("CR01", "exports", false, dates[5]);
   toggle(context, "CR02", "CR03", true, dates[4]);
   context.setAllSimulationNodePermissions("exports", false, dates[2]);
-  const blocked = context.buildSimulationTrajectory(settings);
+  const blocked = context.buildSimulationTrajectory(settingsFor(context));
   const dateAvailability = snapshot(context.simulationLinkInterventions);
   const futureRestriction = snapshot(context.simulationNodeInterventions.get(dates[5].getTime()));
 
   context.setAllSimulationNodePermissions("exports", true, dates[4]);
-  const reopened = context.buildSimulationTrajectory(settings);
+  const reopened = context.buildSimulationTrajectory(settingsFor(context));
   assert.equal(snapshot(reopened.frames.slice(0, 4)), snapshot(blocked.frames.slice(0, 4)));
   assert.equal(snapshot(context.simulationLinkInterventions), dateAvailability);
   assert.equal(snapshot(context.simulationNodeInterventions.get(dates[5].getTime())), futureRestriction);
@@ -621,12 +626,12 @@ test("bulk reopening preserves history, independent imports, date availability, 
 
 test("re-enabling exports preserves restriction history and leaves imports independently restricted", () => {
   const context = runtime();
-  const baseline = context.buildSimulationTrajectory(settings);
+  const baseline = context.buildSimulationTrajectory(settingsFor(context));
   context.setSimulationNodeIntervention("CR01", "exports", false, context.uniqueDates[2]);
   context.setSimulationNodeIntervention("CR01", "imports", false, context.uniqueDates[3]);
-  const blocked = context.buildSimulationTrajectory(settings);
+  const blocked = context.buildSimulationTrajectory(settingsFor(context));
   context.setSimulationNodeIntervention("CR01", "exports", true, context.uniqueDates[4]);
-  const reopened = context.buildSimulationTrajectory(settings);
+  const reopened = context.buildSimulationTrajectory(settingsFor(context));
 
   assert.equal(snapshot(reopened.frames.slice(0, 4)), snapshot(blocked.frames.slice(0, 4)));
   for (const frame of reopened.frames.slice(4)) {
@@ -663,7 +668,7 @@ for (const mode of ["trade", "simulation"]) {
     const context = runtime();
     context.appDataMode = mode;
     const rawLedger = snapshot(context.loadedCSVData);
-    const baseline = context.buildSimulationTrajectory(settings);
+    const baseline = context.buildSimulationTrajectory(settingsFor(context));
     toggle(context, "CR01", "CR02", true, context.uniqueDates[1]);
     context.setSimulationNodeIntervention("CR02", "imports", false, context.uniqueDates[1]);
     context.setSimulationNodeIntervention("CR02", "imports", true, context.uniqueDates[2]);
@@ -671,7 +676,7 @@ for (const mode of ["trade", "simulation"]) {
     context.setSimulationNodeIntervention("CR03", "exports", false, context.uniqueDates[4]);
     context.window.currentDate = context.uniqueDates[3];
     assert.equal(context.getDisabledLinkKeys(context.window.currentDate).size, 0);
-    context.simulationState.trajectory = context.buildSimulationTrajectory(settings);
+    context.simulationState.trajectory = context.buildSimulationTrajectory(settingsFor(context));
     assert.notEqual(snapshot(context.simulationState.trajectory), snapshot(baseline));
     context.refreshNetworkControlStats();
     assert.ok(context.uniqueDates.some((date) =>
@@ -686,7 +691,7 @@ for (const mode of ["trade", "simulation"]) {
       updateTradeDistribution: () => gravityRenders.push("network"),
       scheduleSimulationRecompute: (reason) => {
         recomputes.push(reason);
-        context.simulationState.trajectory = context.buildSimulationTrajectory(settings);
+        context.simulationState.trajectory = context.buildSimulationTrajectory(settingsFor(context));
       },
     });
     context.d3.selectAll = () => ({ property() {} });
@@ -712,7 +717,7 @@ for (const mode of ["trade", "simulation"]) {
     }
     assert.ok(context.uniqueDates.every((date) =>
       context.window.allTemporalStats[date.toISOString()].totalTradeVolume === 1200));
-    assert.equal(snapshot(context.buildSimulationTrajectory(settings)), snapshot(baseline));
+    assert.equal(snapshot(context.buildSimulationTrajectory(settingsFor(context))), snapshot(baseline));
     if (mode === "simulation") {
       assert.equal(snapshot(context.simulationState.trajectory), snapshot(baseline));
     }
@@ -729,11 +734,11 @@ test("backdated and same-date availability edits leave other dates independent",
   toggle(context, "CR02", "CR03", true, d3);
   toggle(context, "CR02", "CR03", true, d5);
   toggle(context, "CR01", "CR02", true, d1);
-  const before = context.buildSimulationTrajectory(settings);
+  const before = context.buildSimulationTrajectory(settingsFor(context));
   toggle(context, "CR01", "CR02", false, d2);
   toggle(context, "CR02", "CR03", false, d2);
   toggle(context, "CR01", "CR02", false, d0);
-  const after = context.buildSimulationTrajectory(settings);
+  const after = context.buildSimulationTrajectory(settingsFor(context));
   const expected = [[], ["CR01-CR02"], [], ["CR02-CR03"], ["CR01-CR02"], ["CR02-CR03"]];
   context.uniqueDates.forEach((date, index) => {
     assert.deepEqual(Array.from(context.getDisabledLinkKeys(date)).sort(), expected[index]);
@@ -781,23 +786,26 @@ test("restriction start dates span redundant events and reset after reopening", 
   assert.equal(permission.importsSince, dates[2].getTime());
 });
 
-test("a node intervention between frame dates first affects the next frame", () => {
+test("a node intervention inside a display bin operates on its exact daily boundary", () => {
   const context = runtime();
-  const baseline = context.buildSimulationTrajectory(settings);
-  const between = new Date((context.uniqueDates[1].getTime() + context.uniqueDates[2].getTime()) / 2);
-  context.setSimulationNodeIntervention("CR01", "exports", false, between);
-  const blocked = context.buildSimulationTrajectory(settings);
-  assert.equal(snapshot(blocked.frames.slice(0, 2)), snapshot(baseline.frames.slice(0, 2)));
-  for (const frame of blocked.frames.slice(2)) {
+  const days = context.uniqueDates;
+  context.uniqueDates = [days[0], days[3]];
+  const baseline = context.buildSimulationTrajectory(settingsFor(context));
+  context.setSimulationNodeIntervention("CR01", "exports", false, days[2]);
+  const blocked = context.buildSimulationTrajectory(settingsFor(context));
+  assert.equal(snapshot(blocked.dailyFrames.slice(0, 2)), snapshot(baseline.dailyFrames.slice(0, 2)));
+  for (const frame of blocked.dailyFrames.slice(2)) {
     assert.equal(frame.linkStates.has("CR01-CR02"), false);
     assert.equal(frame.nodeStates.CR02.incomingExposure, 0);
   }
-  assert.ok(blocked.frames[2].nodeStates.CR02.I < baseline.frames[2].nodeStates.CR02.I);
+  assert.ok(blocked.frames[0].nodeStates.CR02.incomingExposure > 0);
+  assert.equal(blocked.frames[1].nodeStates.CR02.incomingExposure, 0);
+  assert.ok(blocked.frames[0].nodeStates.CR02.I < baseline.frames[0].nodeStates.CR02.I);
 });
 
 test("node movement restrictions preserve local transmission and self-loop movements", () => {
   const context = runtime([["CR01", "CR01", 1000]]);
-  const localSettings = { ...settings, beta: 0.3 };
+  const localSettings = { ...settingsFor(context), beta: 0.3 };
   const baseline = context.buildSimulationTrajectory(localSettings);
   assert.ok(baseline.frames[0].nodeStates.CR01.newInfections > 0);
   assert.equal(baseline.frames[0].nodeStates.CR01.incomingExposure, 0);
@@ -810,10 +818,17 @@ test("node movement restrictions preserve local transmission and self-loop movem
   toggle(context, "CR01", "CR01", true, context.uniqueDates[2]);
   const blocked = context.buildSimulationTrajectory(localSettings);
   assert.equal(snapshot(blocked.frames.slice(0, 2)), snapshot(baseline.frames.slice(0, 2)));
-  assert.equal(blocked.frames[2].nodeStates.CR01.newInfections, 0);
-  assert.equal(blocked.frames[2].nodeStates.CR01.incomingExposure, 0);
-  assert.equal(blocked.frames[2].linkStates.has("CR01-CR01"), false);
-  assert.equal(blocked.frames[2].nodeStates.CR01.I, blocked.frames[1].nodeStates.CR01.I);
+  const state = blocked.frames[2].nodeStates.CR01;
+  const contact = blocked.frames[2].linkStates.get("CR01-CR01");
+  const before = blocked.frames[1].nodeStates.CR01;
+  const expectedContactEntries = before.S * -Math.expm1(-localSettings.beta * before.I / before.N);
+  assert.ok(Math.abs(state.newInfections - expectedContactEntries) < 1e-10);
+  assert.ok(state.newInfections > 0);
+  assert.equal(state.incomingExposure, 0);
+  assert.equal(contact.movementPressure, 0);
+  assert.equal(contact.ledgerWeight, 0);
+  assert.equal(contact.riskLoad, state.newInfections);
+  assert.ok(state.I > before.I);
   assert.ok(blocked.frames[3].nodeStates.CR01.newInfections > 0);
   assert.ok(blocked.frames[3].linkStates.get("CR01-CR01").riskLoad > 0);
   toggle(context, "CR01", "CR01", false, context.uniqueDates[2]);
@@ -826,7 +841,7 @@ test("replay applies both intervention scopes and restores flags when stepping b
   toggle(context, "CR01", "CR01", true, context.uniqueDates[2]);
   context.setSimulationNodeIntervention("CR02", "exports", false, context.uniqueDates[3]);
   context.setSimulationNodeIntervention("CR02", "exports", true, context.uniqueDates[5]);
-  context.simulationState.trajectory = context.buildSimulationTrajectory(settings);
+  context.simulationState.trajectory = context.buildSimulationTrajectory(settingsFor(context));
   for (const index of [0, 2, 4, 5, 3, 1]) {
     const date = context.uniqueDates[index];
     context.window.currentDate = date;
@@ -856,7 +871,7 @@ test("all compartment models conserve model population with restricted links", (
   context.setSimulationNodeIntervention("CR03", "imports", false, context.uniqueDates[3]);
   context.setSimulationNodeIntervention("CR02", "exports", true, context.uniqueDates[4]);
   for (const model of ["SIR", "SIS", "SEIR", "SEIRS"]) {
-    const trajectory = context.buildSimulationTrajectory({ ...settings, model, beta: 0.4, gamma: 0.2 });
+    const trajectory = context.buildSimulationTrajectory({ ...settingsFor(context), model, beta: 0.4, gamma: 0.2 });
     for (const frame of trajectory.frames) {
       for (const [id, state] of Object.entries(frame.nodeStates)) {
         assert.equal(state.N, trajectory.holdings.get(id));
@@ -868,35 +883,45 @@ test("all compartment models conserve model population with restricted links", (
   }
 });
 
-test("explicit simulation populations reject missing, zero and nonfinite entries", () => {
+test("explicit simulation populations reject invalid entries and changes outside the reference", () => {
   const context = runtime();
-  const population = Object.fromEntries(context.buildSimulationTrajectory(settings).holdings);
-  for (const value of [undefined, 0, -1, NaN, Infinity]) {
+  assert.throws(() => context.buildSimulationTrajectory(settings), /Model population/);
+  const population = settingsFor(context).holdings;
+  for (const value of [undefined, -1, NaN, Infinity]) {
     assert.throws(() => context.buildSimulationTrajectory({
-      ...settings, holdings: { ...population, CR01: value },
-    }), /Model population for CR01 must be a positive finite number/);
+      ...settingsFor(context), holdings: { ...population, CR01: value },
+    }), /Model population for CR01/);
   }
+  assert.throws(() => context.buildSimulationTrajectory({
+    ...settingsFor(context), holdings: { ...population, CR01: 0 },
+  }), /snapshot does not match/);
 });
 
-test("nonfinite movement weights leave model populations and compartments finite", () => {
+test("nonfinite movement weights are rejected before a cached trajectory can be reused", () => {
   const context = runtime();
-  const expected = snapshot(context.buildSimulationTrajectory(settings));
-  context.loadedCSVData.push({ time: context.uniqueDates[0], COROP_LEV: "CR01", COROP_AFN: "CR02", AANTAL: Infinity });
-  assert.equal(snapshot(context.buildSimulationTrajectory(settings)), expected);
+  const baseline = context.buildSimulationTrajectory(settingsFor(context));
+  const expected = snapshot(baseline);
+  context.presetDailyData.push({ time: context.uniqueDates[0], COROP_LEV: "CR01", COROP_AFN: "CR02", AANTAL: Infinity });
+  assert.throws(() => context.buildSimulationTrajectory(settingsFor(context)), /Movement weight.*finite/);
+  assert.equal(snapshot(baseline), expected);
 });
 
-test("simulation edge colors retain a valid zero logarithmic endpoint", () => {
+test("simulation edge colors use attributed entries with a valid zero logarithmic endpoint", () => {
   const context = runtime([["CR01", "CR02", 1000], ["CR01", "CR03", 8000]]);
-  context.simulationState.trajectory = context.buildSimulationTrajectory({ ...settings, movementBeta: 0.02 });
+  context.simulationState.trajectory = context.buildSimulationTrajectory({ ...settingsFor(context), movementBeta: 0.02 });
   context.applySimulationFrame(context.uniqueDates[0]);
-  assert.deepEqual(Array.from(context.enabledLinks, (link) => link.weight).sort((a, b) => a - b), [1, 8]);
+  const expected = [1, 8].map((pressure) => 1000 * -Math.expm1(-pressure / 1000));
+  const actual = Array.from(context.enabledLinks, (link) => link.weight).sort((a, b) => a - b);
+  expected.forEach((value, index) => assert.ok(Math.abs(actual[index] - value) < 1e-10));
+  assert.deepEqual(Array.from(context.edgeExtent), expected.map(Math.log));
+  context.setTradeEdgeScales([{ weight: 1 }, { weight: 8 }]);
   assert.deepEqual(Array.from(context.edgeExtent), [0, Math.log(8)]);
 });
 
 test("zero transition and transmission rates freeze all compartment models", () => {
   const context = runtime([["CR01", "CR01", 500], ["CR01", "CR02", 1000]]);
   for (const model of ["SIR", "SIS", "SEIR", "SEIRS"]) {
-    const trajectory = context.buildSimulationTrajectory({ ...settings, model, beta: 0, movementBeta: 0, gamma: 0, sigma: 0 });
+    const trajectory = context.buildSimulationTrajectory({ ...settingsFor(context), model, beta: 0, movementBeta: 0, gamma: 0, sigma: 0 });
     const first = trajectory.frames[0];
     for (const frame of trajectory.frames) {
       assert.equal(snapshot(frame.nodeStates), snapshot(first.nodeStates));
@@ -906,10 +931,10 @@ test("zero transition and transmission rates freeze all compartment models", () 
   }
 });
 
-test("blocking every movement and local route preserves earlier states and stops new infections", () => {
+test("blocking all movements stops new entries when contact transmission is zero", () => {
   for (const model of ["SIR", "SIS", "SEIR", "SEIRS"]) {
     const context = runtime([["CR01", "CR01", 500], ["CR01", "CR02", 1000]]);
-    const parameters = { ...settings, model, beta: 2, movementBeta: 2, gamma: 0, sigma: 0 };
+    const parameters = { ...settingsFor(context), model, beta: 0, movementBeta: 2, gamma: 0, sigma: 0 };
     const baseline = context.buildSimulationTrajectory(parameters);
     const block = () => {
       context.setAllSimulationNodePermissions("exports", false, context.uniqueDates[2]);

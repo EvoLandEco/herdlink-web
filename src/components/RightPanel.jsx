@@ -50,6 +50,20 @@ export function RightPanel() {
           <InfoButton label="Global metric guide" tipKey="globalMetric" />
         </div>
       </div>
+      <div id="simulationIncidence" className="simulation-incidence-panel">
+        <div className="simulation-incidence-heading panel-title-label">
+          <span className="panel-label-text"><i className="fa-solid fa-chart-line" aria-hidden="true"></i>New Infections</span>
+          <span className="simulation-incidence-period"></span>
+          <InfoButton label="New Infections guide" tipKey="simulationIncidence" />
+        </div>
+      </div>
+      <div id="tradeConcentration" className="trade-concentration-panel">
+        <div className="trade-concentration-heading panel-title-label">
+          <span className="panel-label-text"><i className="fa-solid fa-chart-area" aria-hidden="true"></i>Trade Concentration</span>
+          <span className="trade-concentration-roster"></span>
+          <InfoButton label="Trade concentration guide" tipKey="tradeConcentration" />
+        </div>
+      </div>
       <div id="nodeStats" className="node-stats-chart">
         <div id="nodeStatsControls">
           <label htmlFor="nodeStatSelect">

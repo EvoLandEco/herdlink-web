@@ -42,11 +42,11 @@ const presets = ["open-trade", "seed-containment", "partner-ring", "seed-communi
   disabledReason: id === "seed-community" ? "Requires 365 days of history." : null,
 }));
 const scenarioContext = () => ({
-  mode: "trade", presets, settings: { model: "SEIR" }, seedLabel: "CR35",
+  mode: "trade", controlsValid: true, presets, settings: { model: "SEIR" }, seedLabel: "CR35",
   presetSettings: { ready: true, introductionDate: "2020-01-01", targetBudget: 3, responseDays: 7, standstillDays: 14 },
 });
 
-test("preset buttons retain availability and selection while settings live in Custom", () => {
+test("preset buttons retain availability and selection", () => {
   const render = renderer("ScenarioPresets");
   const loaded = [];
   const props = { context: scenarioContext(), activePresetId: "seed-containment", onLoadPreset: (id) => loaded.push(id), Info };
@@ -64,11 +64,11 @@ test("preset buttons retain availability and selection while settings live in Cu
   assert.ok(render(props).filter((node) => node.type === "button").every((node) => node.props.disabled));
 });
 
-test("Custom hosts independent validated target and timing inputs alongside saved slots", () => {
-  const render = renderer("ScenarioLibrary");
+test("preset settings validate target and timing inputs independently", () => {
+  const render = renderer("ScenarioPresetSettings");
   const context = scenarioContext();
   const patches = [];
-  const props = { id: "custom", open: true, context, slots: [null, null, null], Info,
+  const props = { context, Info,
     onChangePresetSettings: (patch) => {
       patches.push(JSON.parse(JSON.stringify(patch)));
       Object.assign(context.presetSettings, patch);
@@ -87,13 +87,12 @@ test("Custom hosts independent validated target and timing inputs alongside save
     assert.ok(card.props.icon);
     assert.ok(card.props.rows.length >= 2);
     assert.match(JSON.stringify([card.children, card.props.rows]), explanation);
-    assert.match(card.props.footer, /next time you load a preset/);
+    assert.match(card.props.footer, /Reapplies the selected preset after a short pause/);
   }
   for (const mode of ["trade", "simulation"]) {
     context.mode = mode;
     const all = render(props);
     assert.equal(all.some((node) => node.props.type === "date" || node.type === "time"), false);
-    assert.equal(all.filter((node) => node.props.type === "text").length, 3);
     assert.equal(new Set(controls().map((node) => node.props.id)).size, 3);
     for (const input of controls()) {
       assert.ok(all.some((node) => node.props.htmlFor === input.props.id));
@@ -121,15 +120,13 @@ test("Custom hosts independent validated target and timing inputs alongside save
   assert.deepEqual(controls().map((node) => node.props.value), [5, 0, 30]);
   context.disabled = true;
   assert.ok(render(props).filter((node) => ["button", "input"].includes(node.type)).every((node) => node.props.disabled));
-  props.open = false;
-  assert.equal(render(props)[0].props.hidden, true);
 });
 
-test("Custom steppers follow canonical limits and replace drafts independently", () => {
-  const render = renderer("ScenarioLibrary");
+test("preset steppers follow canonical limits and replace drafts independently", () => {
+  const render = renderer("ScenarioPresetSettings");
   const context = scenarioContext();
   const patches = [];
-  const props = { id: "custom", open: true, context, slots: [null, null, null], Info,
+  const props = { context, Info,
     onChangePresetSettings: (patch) => {
       patches.push(JSON.parse(JSON.stringify(patch)));
       Object.assign(context.presetSettings, patch);
@@ -194,4 +191,49 @@ test("Custom steppers follow canonical limits and replace drafts independently",
     assert.equal(button(action, label).props.disabled, true);
   }
   assert.ok(inputs().every((node) => node.props.disabled));
+});
+
+
+test("population scenarios load across display resolutions and retain incompatible records", () => {
+  const render = renderer("ScenarioLibrary");
+  const context = { ...scenarioContext(), datasetKey: "daily" };
+  const slot = (name, schemaVersion, datasetKey) => ({ name, savedAt: "2020-01-01T00:00:00Z",
+    scenario: { schemaVersion, datasetKey, settings: { model: "SEIR", seedRegion: "CR35" } } });
+  const loaded = [];
+  const props = { id: "custom", open: true, context, Info,
+    slots: [slot("Weekly scenario", 3, "weekly"), slot("Record scenario", 1, "daily"), null],
+    onLoadScenario: (index) => loaded.push(index) };
+  const all = render(props);
+  assert.equal(all.filter((node) => node.props.type === "text").length, 3);
+  assert.equal(all.filter((node) => node.props.type === "number").length, 0);
+  const button = (label) => all.find((node) => node.props["aria-label"] === label);
+  assert.equal(button("Load Weekly scenario").props.disabled, false);
+  button("Load Weekly scenario").props.onClick();
+  assert.deepEqual(loaded, [0]);
+  assert.equal(button("Load Record scenario").props.disabled, true);
+  assert.equal(button("Load Scenario 3").props.disabled, true);
+  assert.ok(all.some((node) => node.children.includes("Population reference missing. Choose a population to create a runnable scenario.")));
+  props.open = false;
+  assert.equal(render(props)[0].props.hidden, true);
+});
+
+test("saved scenarios can repair invalid controls while editing and busy operations stay locked", () => {
+  const render = renderer("ScenarioLibrary");
+  const context = { ...scenarioContext(), datasetKey: "monthly", controlsValid: false, disabled: false, presets: [] };
+  const props = { id: "custom", open: true, context, Info, slots: [{
+    name: "Valid scenario", savedAt: "2020-01-01T00:00:00Z",
+    scenario: { schemaVersion: 3, datasetKey: "weekly", settings: { model: "SEIR", seedRegion: "CR35" } },
+  }, null, null] };
+  const load = () => render(props).find((node) => node.props["aria-label"] === "Load Valid scenario");
+  assert.equal(load().props.disabled, false);
+  assert.ok(render(props).filter((node) => node.type === "input").every((node) => node.props.disabled));
+  assert.ok(render(props).filter((node) => node.type === "button" && !node.props["aria-label"].startsWith("Load ")).every((node) => node.props.disabled));
+  context.disabled = true;
+  assert.equal(load().props.disabled, true);
+  context.controlsValid = true;
+  assert.equal(load().props.disabled, true);
+  context.disabled = false;
+  assert.equal(load().props.disabled, false);
+  props.context = null;
+  assert.equal(load().props.disabled, true);
 });

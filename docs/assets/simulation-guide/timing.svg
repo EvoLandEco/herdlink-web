@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!DOCTYPE svg
+  PUBLIC '-//W3C//DTD SVG 1.0//EN'
+  'http://www.w3.org/TR/2001/REC-SVG-20010904/DTD/svg10.dtd'>
+<svg width="487.27559055118115" height="195" preserveAspectRatio="xMinYMin meet" viewBox="0 0 487 195" xmlns="http://www.w3.org/2000/svg" version="1.0" fill-rule="evenodd" xmlns:xlink="http://www.w3.org/1999/xlink">
+	<title>...</title>
+	<desc>...</desc>
+	<clipPath id="clip">
+		<rect x="0" y="0" width="487.27559055118115" height="195"/>
+	</clipPath>
+	<g id="group" transform="scale(1,-1) translate(0,-195)" style="clip-path: url(#clip)">
+		<g transform="">
+			<text x="0" y="154" style="font-family: Body-Bold; font-size: 9px;fill: rgb(12%,20%,24%); stroke:none;" transform="translate(0,308) scale(1,-1)">Historical selection</text>
+			<text x="0" y="110" style="font-family: Body-Bold; font-size: 9px;fill: rgb(12%,20%,24%); stroke:none;" transform="translate(0,220) scale(1,-1)">Trace Ring window</text>
+			<text x="0" y="66" style="font-family: Body-Bold; font-size: 9px;fill: rgb(12%,20%,24%); stroke:none;" transform="translate(0,132) scale(1,-1)">Standstill closure</text>
+			<path d="M 155,47 L 155,168 Z" style="stroke: rgb(78%,84%,86%); stroke-linecap: butt; stroke-width: 1; stroke-dasharray: 3, 3;"/>
+			<text x="134.857666015625" y="29" style="font-family: Body; font-size: 9px;fill: rgb(32%,40%,45%); stroke:none;" transform="translate(0,58) scale(1,-1)">t0 − 365 d</text>
+			<path d="M 279,47 L 279,168 Z" style="stroke: rgb(78%,84%,86%); stroke-linecap: butt; stroke-width: 1; stroke-dasharray: 3, 3;"/>
+			<text x="275.2470703125" y="29" style="font-family: Body; font-size: 9px;fill: rgb(32%,40%,45%); stroke:none;" transform="translate(0,58) scale(1,-1)">t0</text>
+			<path d="M 353,47 L 353,168 Z" style="stroke: rgb(78%,84%,86%); stroke-linecap: butt; stroke-width: 1; stroke-dasharray: 3, 3;"/>
+			<text x="349.2470703125" y="29" style="font-family: Body; font-size: 9px;fill: rgb(32%,40%,45%); stroke:none;" transform="translate(0,58) scale(1,-1)">td</text>
+			<path d="M 460,47 L 460,168 Z" style="stroke: rgb(78%,84%,86%); stroke-linecap: butt; stroke-width: 1; stroke-dasharray: 3, 3;"/>
+			<text x="448.615966796875" y="29" style="font-family: Body; font-size: 9px;fill: rgb(32%,40%,45%); stroke:none;" transform="translate(0,58) scale(1,-1)">td + L</text>
+			<rect x="155" y="145" width="124" height="20" style="stroke: none; stroke-linecap: butt; stroke-width: 1; fill: rgb(8%,48%,46%); fill-rule: evenodd;"/>
+			<text x="182.584423828125" y="151" style="font-family: Body; font-size: 8.2px;fill: rgb(100%,100%,100%); stroke:none;" transform="translate(0,302) scale(1,-1)">Before introduction</text>
+			<rect x="279" y="101" width="74" height="20" style="stroke: none; stroke-linecap: butt; stroke-width: 1; fill: rgb(47%,33%,65%); fill-rule: evenodd;"/>
+			<text x="301.639990234375" y="107" style="font-family: Body; font-size: 8.2px;fill: rgb(100%,100%,100%); stroke:none;" transform="translate(0,214) scale(1,-1)">Delay Δ</text>
+			<rect x="353" y="57" width="107" height="20" style="stroke: none; stroke-linecap: butt; stroke-width: 1; fill: rgb(70%,41%,20%); fill-rule: evenodd;"/>
+			<text x="387.583544921875" y="63" style="font-family: Body; font-size: 8.2px;fill: rgb(100%,100%,100%); stroke:none;" transform="translate(0,126) scale(1,-1)">Duration L</text>
+			<text x="151.50534898652808" y="5" style="font-family: Body; font-size: 8.5px;fill: rgb(32%,40%,45%); stroke:none;" transform="translate(0,10) scale(1,-1)">Schematic intervals; lengths are not proportional.</text>
+		</g>
+	</g>
+</svg>

@@ -9,9 +9,31 @@ import {
   groupComparisonEvents,
   nearestComparisonDate,
   pairComparisonSeries,
+  topComparisonRegions,
 } from "../src/comparisonCharts.js";
 
 const dates = ["2020-01-01", "2020-01-02", "2020-01-05"];
+
+test("top regions use original timeline peaks, stable ties and finite results", () => {
+  const regions = ["CR07", "CR06", "CR05", "CR04", "CR03", "CR02", "CR01"].map((id) => ({ id, name: id }));
+  const original = Object.fromEntries(regions.map((region, index) => [region.id, [
+    { date: dates[0], value: 0 }, { date: dates[1], value: index },
+  ]]));
+  original.CR07 = [{ date: dates[0], value: null }, { date: dates[1], value: NaN }];
+  original.CR06 = [{ date: dates[0], value: -3 }, { date: dates[1], value: -2 }];
+  original.CR05[1].value = Infinity;
+  original.CR04[1].value = 5;
+  const before = structuredClone(original);
+  const ranked = topComparisonRegions(regions, original, "value");
+  const expected = [["CR01", 6], ["CR02", 5], ["CR04", 5], ["CR03", 4], ["CR05", 0]];
+  assert.deepEqual(ranked.map(({ id, peak }) => [id, peak]), expected.slice(0, 3));
+  for (let count = 1; count <= 5; count++) {
+    assert.deepEqual(topComparisonRegions(regions, original, "value", count).map(({ id, peak }) => [id, peak]), expected.slice(0, count));
+  }
+  assert.deepEqual(topComparisonRegions(regions, original, "missing"), []);
+  assert.deepEqual(topComparisonRegions([regions[1]], original, "value").map(({ peak }) => peak), [-2]);
+  assert.deepEqual(original, before);
+});
 
 test("paired trajectories align by date and preserve missing results", () => {
   const points = pairComparisonSeries(dates,
@@ -57,23 +79,26 @@ test("date inspection finds the nearest recorded date without scanning a daily t
   assert.ok(reads < 30, `A pointer move read ${reads} dates`);
 });
 
-test("introduction markers use the first recorded date at or after the actual introduction", () => {
+test("introduction markers select the containing display period within observed coverage", () => {
+  const coverage = { start: "2020-01-01", end: "2020-01-08" };
   for (const [date, index] of [
-    ["2019-12-01", 0], ["2020-01-01", 0], ["2020-01-01T12:00:00Z", 1],
-    ["2020-01-02", 1], ["2020-01-02T12:00:00Z", 2], ["2020-01-05", 2],
+    ["2020-01-01", 0], ["2020-01-01T12:00:00Z", 0],
+    ["2020-01-02", 1], ["2020-01-02T12:00:00Z", 1], ["2020-01-05", 2], ["2020-01-07", 2],
   ]) {
-    assert.deepEqual(getComparisonIntroduction(date, dates), {
-      date: new Date(date).toISOString(), recordedDate: dates[index], index,
+    assert.deepEqual(getComparisonIntroduction(date, dates, coverage), {
+      date: new Date(date).toISOString(), displayDate: dates[index], index,
     });
   }
-  for (const date of [undefined, null, "", "invalid", "2020-01-05T00:00:01Z", "2021-01-01"]) {
-    assert.equal(getComparisonIntroduction(date, dates), null);
+  for (const date of [undefined, null, "", "invalid", "2019-12-31", "2020-01-08", "2021-01-01"]) {
+    assert.equal(getComparisonIntroduction(date, dates, coverage), null);
   }
-  assert.equal(getComparisonIntroduction(dates[0], []), null);
-  assert.deepEqual(getComparisonIntroduction("2019-12-31T23:00:00-01:00", [dates[0]]), {
-    date: "2020-01-01T00:00:00.000Z", recordedDate: dates[0], index: 0,
+  assert.equal(getComparisonIntroduction(dates[0], [], coverage), null);
+  assert.equal(getComparisonIntroduction(dates[0], dates), null);
+  assert.deepEqual(getComparisonIntroduction("2019-12-31T23:00:00-01:00", [dates[0]], coverage), {
+    date: "2020-01-01T00:00:00.000Z", displayDate: dates[0], index: 0,
   });
-  assert.equal(getComparisonIntroduction("2020-01-02", [dates[0]]), null);
+  assert.equal(getComparisonIntroduction("2020-01-02", [dates[0]], coverage).index, 0);
+  assert.equal(getComparisonIntroduction("2020-01-01", dates.slice(1), coverage), null);
 
   const daily = Array.from({ length: 1200 }, (_, index) => new Date(Date.UTC(2020, 0, index + 1)).toISOString());
   let reads = 0;
@@ -81,8 +106,21 @@ test("introduction markers use the first recorded date at or after the actual in
     if (/^\d+$/.test(String(key))) reads++;
     return Reflect.get(target, key);
   } });
-  assert.equal(getComparisonIntroduction(new Date(Date.parse(daily[900]) + 1).toISOString(), tracked).index, 901);
+  assert.equal(getComparisonIntroduction(new Date(Date.parse(daily[900]) + 1).toISOString(), tracked,
+    { start: daily[0], end: new Date(Date.parse(daily.at(-1)) + 86400000).toISOString() }).index, 900);
   assert.ok(reads < 15, `Introduction lookup read ${reads} dates`);
+});
+
+test("partial first and final display periods preserve the exact introduction date", () => {
+  const weekly = ["2019-12-29", "2020-01-05"];
+  const coverage = { start: "2020-01-01", end: "2020-01-09" };
+  assert.deepEqual(getComparisonIntroduction("2020-01-01", weekly, coverage), {
+    date: "2020-01-01T00:00:00.000Z", displayDate: weekly[0], index: 0,
+  });
+  assert.equal(getComparisonIntroduction("2020-01-08", weekly, coverage).index, 1);
+  assert.equal(getComparisonIntroduction("2020-01-09", weekly, coverage), null);
+  assert.equal(getComparisonIntroduction("2020-06-30", ["2020-01-01"],
+    { start: "2020-01-01", end: "2020-07-01" }).index, 0);
 });
 
 test("resized charts fill their measured bounds while preserving values and calendar spacing", () => {
@@ -93,6 +131,12 @@ test("resized charts fill their measured bounds while preserving values and cale
   ];
   const small = buildComparisonChart(points, 320, 180);
   const large = buildComparisonChart(points, 640, 360);
+  const compact = buildComparisonChart(points, 320, 80, true);
+  assert.equal(compact.y(20), 6);
+  assert.equal(compact.y(0), 72);
+  assert.equal(compact.x(Date.parse(dates[1])), small.x(Date.parse(dates[1])));
+  assert.ok(compact.original.startsWith("M64,72 "));
+  assert.ok(compact.original.endsWith("L304,6"));
   assert.equal(large.plot.bottom - large.plot.top, small.plot.bottom - small.plot.top + 180);
 
   for (const [chart, width, height] of [[small, 320, 180], [large, 640, 360]]) {

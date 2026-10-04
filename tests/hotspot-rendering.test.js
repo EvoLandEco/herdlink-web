@@ -133,8 +133,9 @@ test("the hotspot guide shows the active mode's title and five metric definition
     if (simulation) {
       assert.match(markup, /up to three regions with positive scores/);
       assert.match(markup, /sender infectious share at step start × movement beta/);
-      assert.match(markup, /max\(1, infectious population at step end\)/);
-      assert.match(markup, /Outgoing movement pressure relative to the infectious population at the end of the step/);
+      assert.match(markup, /Summed daily outgoing pressure \/ summed daily infectious population at day start/);
+      assert.match(markup, /undefined for zero infectious unit-days/);
+      assert.match(markup, /External movement pressure per infectious model unit-day over the displayed period/);
     } else {
       assert.match(markup, /Weighted PageRank with damping 0\.85/);
     }

@@ -3,15 +3,24 @@
 Seven presets compare movement-control strategies in the comparison panel.
 Choose an introduction date, seed region, model settings, and preset parameters
 before loading a preset. Loading a preset replaces the intervention schedule and
-keeps the selected disease parameters.
+keeps the selected simulation parameters. These presets specify movement
+restrictions. They do not supply disease parameter values or establish
+real-world intervention effects.
 
 Set Introduction date beside Seed region in Simulation Controls. Changing it
-updates infection timing and the historical population vector. Existing
+sets infection timing. Synthetic populations with share initialization use
+the history preceding that date; imported populations and count initialization
+retain their population reference. Existing
 restrictions retain their calendar dates. Loading a preset selects its targets
 and builds its response schedule from that date. An edited scenario's preset
 marker clears when its settings differ from the loaded preset.
 
-The Custom dropdown contains three preset parameters:
+Baseline view compares Original and Intervention and lists presets followed by
+three preset parameters. Compare 3 lists comparison presets followed by a shared
+Metric selector and Regions control in the side panel. The selected metric
+applies to overall and regional charts across all three columns. Each column
+provides independent scenario controls. The view switch sits above Presets in
+the side panel. Custom sits inside Presets and opens three saved scenario slots.
 
 | Parameter | Default | Range | Applies to |
 | --- | --- | --- | --- |
@@ -19,8 +28,9 @@ The Custom dropdown contains three preset parameters:
 | Response delay | 7 days | 0–365 calendar days | Start of all six intervention presets. |
 | Standstill duration | 14 days | 1–365 calendar days | Time from the start of Standstill to reopening. |
 
-These parameters configure the next preset load. Applied restrictions retain
-their calendar dates and targets while the parameter values are edited. Hubs
+These parameters reapply the selected preset after a 600 ms pause and rerun
+the comparison with its new schedule. Without a selected preset, choose one to
+apply the settings. Hubs
 and Bridges share the target count, supporting comparison at the same number of
 controlled regions; trade disruption depends on those regions' movements.
 
@@ -75,7 +85,7 @@ display shows daily, weekly, monthly, or yearly trade. Positive cross-region
 volumes form the historical graph. Community Cordon, Hubs, and Bridges become
 available when the introduction date has 365 preceding recorded days. Their
 selectors use movement history and seed identity independently of disease
-parameters and subsequent epidemic outcomes.
+parameters and subsequent simulated outcomes.
 
 Trace Ring observes positive outgoing movements from the seed during
 \([t_0,t_d)\):
@@ -153,31 +163,40 @@ both supported livestock-network research.
 ## Simulation timing and population
 
 The selected introduction date is stored with the scenario. The seed receives
-its initial infectious population at the first displayed record on or after
-that date. Earlier records show the susceptible initial state. Population units
-are estimated from trade activity in the available portion of the preceding
-365-day window and stored with the scenario. Both unrestricted and restricted
-trajectories use those same population units. The
+its exact initial S/E/I/R state at the start of that calendar day. An
+`initialFrame` stores this state before its first transition. Earlier days show
+susceptible compartments. The default synthetic population uses trade activity
+in the available portion of the preceding 365-day window. A prepared inventory
+supplies its own fixed regional vector. Both unrestricted and restricted
+trajectories use the same population reference, initial state, parameters and
+canonical daily input. The
 [population model and CBS data](simulation-population.md) documentation describes
 the trade scaling, census geography and requirements for an inventory-based
 simulation.
 
 Node restrictions retain their exact calendar start and reopening dates. The
-simulation applies permissions at each recorded sample. For example, a
-Standstill beginning on 8 January and ending on 22 January controls records
-inside that interval. A coarse display interval can span the entire closure.
-Cordon route edits apply on their recorded dates. Loading Cordon at another
-display resolution builds its route schedule for that resolution. Existing
-dated edits retain their matching-date behavior across resolution changes;
-the saved introduction and model population remain fixed. A response beyond the
-displayed horizon leaves its recorded movements open.
+simulation applies them at daily boundaries. A Standstill beginning on 8
+January and ending on 22 January governs \([8\text{ January},22\text{ January})\),
+including when a displayed bin spans the entire closure. Cordon route schedules
+use the canonical daily ledger. Stored route restrictions each apply for one
+UTC day; editing a route in a coarse display applies it across the days covered
+by that bin. A response beyond ledger coverage has no effect within the run.
 
-The disease engine advances one compartment update per displayed record.
-Transmission, latency, recovery, and waning parameters therefore operate per
-recorded step. Changing display aggregation also changes the disease clock and
-the sampled intervention effects. Policy comparisons within a fixed resolution
-share that clock. A calendar-time epidemic experiment requires a separate
-evaluation design using the daily movement sequence.
+The engine advances once per calendar day independently of display aggregation.
+Daily exit fractions govern progression, recovery and SEIRS waning; contact beta
+is a daily integrated hazard, and movement beta is exposure yield per recorded
+animal. The [model contract](simulation-model.md) gives their definitions.
+Weekly, monthly and yearly displays sample compartments at the actual bin end
+and sum daily infection entries. The bin's start date labels the display.
+Initial seeds remain distinct from incident entries. These conventions preserve
+the daily trajectory across display resolutions.
+
+Ledger mode evaluates the selected trade aggregation at its record dates.
+Coarse ledger totals can therefore miss a closure inside a displayed bin or
+apply its start-date permissions to the entire aggregate. Use the daily ledger
+or the headless evaluation script for exact retained-trade accounting. Display
+communities inherit the selected ledger aggregation; historical preset targets
+use the canonical daily history.
 
 ## Comparing policies
 
@@ -195,7 +214,13 @@ Standstill durations at the same response date. Include retained cross-region
 trade, post-response trade loss, external infection-entry burden, and peak
 infectious burden. Seed-location quartiles describe variation across starting regions.
 Cumulative infection entries include reinfections in SIS and SEIRS. Interpreting
-population or policy benefits biologically also requires model calibration.
+population or policy benefits biologically requires compatible population and
+disease observations, a suitable model and independent validation. The generic
+simulation uses a fixed population reference and uncalibrated parameters.
+
+Measure peaks and their dates on the daily state path, including the exact
+initial boundary. Sampling only the states shown in a coarse chart can miss
+the daily maximum.
 
 ## Calculation profile
 

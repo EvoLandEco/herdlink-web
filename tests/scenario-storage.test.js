@@ -1,10 +1,11 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { createDeclaredSyntheticPopulationSnapshot } from "../src/runtime/simulation-population.js";
 import { readScenarioSlots, saveScenarioSlot, scenarioSignature, scenarioStorageKey } from "../src/scenarioStorage.js";
 
 const scenario = {
-  schemaVersion: 1, datasetKey: "weekly", dates: ["2020-01-05T00:00:00.000Z"],
-  settings: { model: "SEIR", seedRegion: "CR35", initialPct: 1, beta: 0.32, movementBeta: 0.08, sigma: 0.22, gamma: 0.15 },
+  schemaVersion: 3, provenance: { engine: "test" }, datasetKey: "weekly", dates: ["2020-01-05T00:00:00.000Z"],
+  settings: { initializationConvention: "prevalence-shares", introductionDate: "2020-01-05", population: createDeclaredSyntheticPopulationSnapshot({ ids: ["CR35"], values: { CR35: 100 }, id: "test", referenceTime: "2020-01-05" }), model: "SEIR", seedRegion: "CR35", initialPct: 1, beta: 0.32, movementBeta: 0.08, sigma: 0.22, gamma: 0.15 },
   nodeInterventions: [[1578182400000, [["CR35", { exports: false }]]]],
   linkInterventions: [[1578182400000, [["CR01-CR02", true]]]],
 };
@@ -72,8 +73,6 @@ test("scenario signatures ignore entry order and slot labels while preserving th
   assert.equal(scenarioSignature(reordered), scenarioSignature(value));
   assert.equal(JSON.stringify(value), before);
   for (const changed of [
-    { ...value, datasetKey: "daily" },
-    { ...value, dates: [...value.dates, "2020-01-12T00:00:00.000Z"] },
     ...Object.keys(value.settings).map((key) => ({ ...value, settings: { ...value.settings,
       [key]: typeof value.settings[key] === "number" ? value.settings[key] + 0.1 : `${value.settings[key]} changed` } })),
     { ...value, nodeInterventions: value.nodeInterventions.slice(1) },
@@ -121,8 +120,39 @@ test("scenario signatures preserve population values independently of region key
   assert.notEqual(scenarioSignature(reordered), scenarioSignature(value));
 });
 
-test("an omitted introduction matches the first recorded date", () => {
-  assert.equal(scenarioSignature(scenario), scenarioSignature({
-    ...scenario, settings: { ...scenario.settings, introductionDate: scenario.dates[0].slice(0, 10) },
-  }));
+test("schema 3 signatures retain population references while display bins can differ", () => {
+  assert.equal(scenarioSignature(scenario), scenarioSignature({ ...scenario, datasetKey: "daily", dates: ["2020-01-06T00:00:00.000Z"] }));
+  const changed = structuredClone(scenario);
+  changed.settings.population.reference.id = "another-source";
+  assert.notEqual(scenarioSignature(changed), scenarioSignature(scenario));
+});
+
+test("private vectors never reach a browser storage write", () => {
+  const local = storage();
+  saveScenarioSlot(local, 0, "Public scenario", scenario);
+  const before = local.getItem(scenarioStorageKey);
+  const privateScenario = structuredClone(scenario);
+  privateScenario.settings.population.reference.accessClass = "private";
+  let writes = 0;
+  const watched = { ...local, setItem() { writes++; } };
+  assert.throws(() => saveScenarioSlot(watched, 0, "Private", privateScenario), /stay in memory/);
+  assert.equal(writes, 0);
+  assert.equal(local.getItem(scenarioStorageKey), before);
+  local.setItem(scenarioStorageKey, JSON.stringify({ version: 1, slots: [
+    { name: "Private", savedAt: "2020-01-01", scenario: privateScenario }, null, null,
+  ] }));
+  const privateRecord = local.getItem(scenarioStorageKey);
+  assert.throws(() => saveScenarioSlot(watched, 1, "Public", scenario), /stay in memory/);
+  assert.equal(writes, 0);
+  assert.equal(local.getItem(scenarioStorageKey), privateRecord);
+});
+
+test("legacy slots remain readable and cannot be saved as complete population scenarios", () => {
+  const local = storage();
+  const legacy = { ...scenario, schemaVersion: 2 };
+  local.setItem(scenarioStorageKey, JSON.stringify({ version: 1, slots: [{ name: "Reference", savedAt: "2020-01-01", scenario: legacy }, null, null] }));
+  const before = local.getItem(scenarioStorageKey);
+  assert.equal(readScenarioSlots(local)[0].scenario.schemaVersion, 2);
+  assert.throws(() => saveScenarioSlot(local, 0, "Reference", legacy), /Choose a population/);
+  assert.equal(local.getItem(scenarioStorageKey), before);
 });

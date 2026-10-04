@@ -99,7 +99,10 @@ function runtime(capture, inert = false) {
         ] },
         { href: "https://example.org/icons.css", get cssRules() { assert.fail("Remote CSS rules cannot be read directly"); } },
       ],
-      querySelector(selector) { assert.equal(selector, ".screen-access-content"); return app; },
+      querySelector(selector) {
+        if (selector === '#comparisonOverlay[open][data-private-population="true"]') return null;
+        assert.equal(selector, ".screen-access-content"); return app;
+      },
       createElement(tag) {
         if (tag === "style") return {};
         assert.equal(tag, "a");
@@ -177,4 +180,24 @@ test("a failed screenshot restores the app's inert state and exact sticky styles
     assert.deepEqual(stickyNodes.map((node) => node.getAttribute("style")), stickyStyles);
     assert.deepEqual(downloads, []);
   }
+});
+
+test("private populations block screenshot creation before the page is read", async () => {
+  const { context, app, downloads } = runtime(() => assert.fail("Private data must not reach the renderer"));
+  context.window.herdlinkHasPrivatePopulation = () => true;
+  context.document.querySelector = () => assert.fail("Private page must not be read for export");
+  await assert.rejects(context.downloadAppScreenshot("herdlink.png"), /private population/);
+  assert.equal(app.inert, false);
+  assert.deepEqual(downloads, []);
+});
+
+test("a displayed private comparison blocks export after the selected population changes", async () => {
+  const { context, downloads } = runtime(() => assert.fail("A private comparison must not reach the renderer"));
+  context.window.herdlinkHasPrivatePopulation = () => false;
+  context.document.querySelector = (selector) => {
+    assert.equal(selector, '#comparisonOverlay[open][data-private-population="true"]');
+    return {};
+  };
+  await assert.rejects(context.downloadAppScreenshot("herdlink.png"), /private population/);
+  assert.deepEqual(downloads, []);
 });

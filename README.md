@@ -1,11 +1,13 @@
-# HerdLink Web
+<h1><img src="public/assets/herdlink-logo.svg" alt="HerdLink — Livestock Trade Networks" width="560"></h1>
 
-![Version](https://img.shields.io/badge/version-v0.9.6-2f6fed)
+![Version](https://img.shields.io/badge/version-v0.9.8-2f6fed)
 ![Deployment](https://img.shields.io/badge/deployment-GitHub%20Pages-121013?logo=github)
 ![Website](https://img.shields.io/website?url=https%3A%2F%2Fherdlink.nl&label=HerdLink.nl)
 ![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)
 
 HerdLink Web is a browser-based tool for exploring livestock trade networks in the Netherlands. It combines regional graph views, map overlays, temporal metrics, partition summaries, and simulation panels so movement structure and disease spread scenarios can be inspected in one workspace.
+
+The [graduate simulation guide](docs/simulation-teaching-guide.md) explains the engine, parameter units and intervention scenarios through equations, figures and worked exercises. The [LaTeX source](docs/simulation-teaching-guide.tex), [printable PDF](output/pdf/herdlink-simulation-teaching-guide.pdf) and [runnable two-region example](scripts/simulation-tutorial-example.mjs) accompany the guide.
 
 |  |  |
 | :--: | :--: |
@@ -21,26 +23,42 @@ HerdLink Web is a browser-based tool for exploring livestock trade networks in t
 - Trade ledger mode for daily, weekly, monthly, and yearly livestock movement summaries.
 - Graph and map views with regional links, map layers, risk scores, and network metrics.
 - Focus mode for inspecting one region's incoming and outgoing trade structure.
-- Simulation mode with SEIR controls, compartment trajectory panels, regional prevalence maps, and focus node simulation insights.
+- Generic deterministic simulation with daily SIR/SIS/SEIR/SEIRS controls, compartment trajectory panels, regional prevalence maps, and focus node simulation insights.
 - Partition and community views that summarize trade clustering, partition exposure, and CR-region mappings.
 - Help overlay with quick start notes, keyboard shortcuts, and interactive illustrations of regions, trade volume, and network paths.
 - Comparison overlay with paired global and regional metrics, trajectories, and intervention effects in both modes.
 - PNG export of the whole app, including controls, networks, and statistics panels.
 
 Seed region selects the single region that starts infected, with CR35 selected by
-default. Initial % sets the infected share in that region before the first time
-step. Choosing a seed region recomputes the simulation from the beginning.
+default. Initial infectious, exposed and recovered percentages define its state
+at the start of the introduction day; the remaining share is susceptible. The
+engine records this exact state separately before the first transition. Choosing
+a seed region recomputes the simulation from the beginning.
+
+The simulation is an uncalibrated mathematical scenario using a synthetic
+population or a prepared fixed animal inventory. It uses the canonical daily ledger for every transition;
+weekly, monthly and yearly views show bin-end states and summed daily infection
+entries. The [model contract](docs/simulation-model.md) defines parameter units,
+initialization, metrics and the evidence required for disease claims.
+The [simulation assessment](docs/simulation-scientific-assessment.md) and
+[population strategy](docs/population-strategy-assessment.md) record scientific
+findings, assumptions and evidence limits.
+The [population product contract](docs/population-products.md) defines the final
+file consumed by HerdLink. Source preparation and research remain outside the
+application. The control panel accepts a prepared inventory file. Private populations
+remain in memory; scenario storage and screenshot exports are blocked for them.
 
 Trade ledger and simulation modes share one network and two controls for movement:
 
 - Link availability changes an individual directed route for the displayed time
-  step. Local Trades in ledger mode and Local Transmission in simulation mode
-  share the same checkbox setting. At each simulation step, it governs local
-  contact transmission alongside recorded movements within the region.
+  interval. A coarse display edit covers the daily intervals inside that bin.
+  Local movement checkboxes govern recorded movements within the region in both
+  modes. Contact beta controls an independent local contact pathway.
 - Imports and exports controls govern all movement to or from a region,
   starting at the displayed date and lasting until re-enabled. They include
-  partners that appear at later dates. Local transmission follows its own
-  checkbox setting. The searchable panel lists every node in the dataset.
+  partners that appear at later dates. Recorded local movements follow their
+  own checkbox; contact beta is independent. The searchable panel lists every
+  node in the dataset.
   A timeline shows each region with restrictions anywhere in the schedule:
   teal allows both directions,
   salmon blocks exports, purple blocks imports, and amber blocks both. Hover a
@@ -58,10 +76,17 @@ Trade ledger and simulation modes share one network and two controls for movemen
 
 A route between regions can operate when its link is available, its source can
 export, and its destination can import. Ledger mode measures allowed routes by
-recorded movement volume, while simulation mode calculates disease pressure on
-the same routes. The ledger route list keeps recorded volumes visible for blocked
+recorded movement volume, while simulation route values show attributed
+infection entries. The ledger route list keeps recorded volumes visible for blocked
 routes, with the reason shown beside the partner name. Its bars show partner
-distance and community; simulation bars show the partner's infectious share.
+distance and community; simulation bars show the partner's infectious share
+at the bin end.
+
+Ledger mode evaluates the selected aggregated records at their date labels.
+Coarse ledger trade totals can miss restrictions within a bin; exact daily
+retained-trade accounting requires the daily ledger or the evaluation script.
+The simulation uses daily restrictions at every display resolution. Coarse
+simulation charts sample states and can miss daily peaks.
 
 Trade communities use one undirected graph of allowed interregional volume across the full
 loaded period, with reciprocal routes added together. Broad (γ = 1) and Finer
@@ -96,14 +121,19 @@ fixed. Replay shows the controls active at each date. Restore all in either mode
 clears both kinds of edits across every date; the simulation uses this restored
 network when it runs.
 
-Dated edits survive settings and time resolution changes. Link availability edits
-apply only to matching dates in the selected resolution. Node restrictions apply
-to every step on or after their start date until a later permission change.
+Dated edits survive settings and time resolution changes. Each stored route
+restriction governs one UTC day; coarse display edits create restrictions for
+the days inside the selected bin. Node restrictions apply
+to every day on or after their start date until a later permission change.
 The schedules stay active when switching between ledger and simulation modes.
 
 Seven [intervention presets](docs/network-scenarios.md) compare Open trade, Seed
 containment, Trace Ring, Community Cordon, Hubs, Bridges, and Standstill. The
-Custom dropdown sets Target regions, Response delay, and Standstill duration.
+side panel contains presets with Target regions, Response delay, and Standstill
+duration in Baseline view. Compare 3 lists comparison presets in the side panel
+and provides independent controls in each column. The view switch sits above
+Presets in the side panel. Custom sits inside Presets and opens three saved
+scenario slots.
 Defaults are three targets, a seven-day delay, and a 14-day Standstill.
 Historical targeting uses 365 preceding days of canonical daily trade, while
 tracing follows outgoing seed movements before response. Community scale controls
@@ -112,19 +142,34 @@ Hubs and Bridges. Compare disease outcomes alongside retained trade to account
 for each policy's scope.
 
 Set Introduction date beside Seed region in Simulation Controls. Changing the
-date updates infection timing; existing restrictions keep their calendar dates.
+date sets infection timing; existing restrictions keep their calendar dates.
 Loading a preset selects its targets and builds its response schedule from that
-date. Custom parameter changes configure the next preset load while applied
-restrictions keep their dates and targets. Response delay applies to all six
+date. Preset parameter changes reapply the selected preset after a 600 ms pause
+and rerun the comparison with its new schedule. Response delay applies to all six
 intervention presets; zero delay starts controls on the introduction date and
 gives Trace Ring a seed-only target set. Target regions sets the Hubs and Bridges
 selection count, and Standstill duration sets its time to reopening.
 
-Disease compartments use [synthetic model population units](docs/simulation-population.md)
-scaled from trade activity. CBS pig census values describe agricultural activity
+Disease compartments default to [synthetic model population units](docs/simulation-population.md)
+scaled from trade activity. A prepared inventory reference retains its own
+quantity, period, geography and assumptions. CBS pig census values describe agricultural activity
 at business main addresses and provide the map's pig and holdings density layers.
 Using them as geographic disease populations requires alignment with animal sites
-and the movement data.
+and the movement data. The [KRD and GIAB assessment](docs/krd-population-assessment.md)
+documents permitted capacity, site matching and the evidence needed for regional
+stock estimates. Permit counts and the GIAB/KRD ratios do not supply dynamic
+simulation populations.
+
+Contact beta (0.10) is a daily integrated hazard, movement beta (0.04) is model
+units per recorded animal, and progression (0.22), recovery (0.15) and SEIRS
+waning (0.02) are daily exit fractions. These illustrative defaults put contact
+transmission below recovery so continuing movement contributes to outbreak growth.
+Response comparisons retain the daily shipment calendar and its uneven timing.
+Published disease estimates need compatible units, endpoints and model
+structure before translation; movement records alone cannot calibrate them.
+Saved scenarios identify their daily model. Records using one transition per
+displayed record remain stored and require explicit daily configuration before
+they can be used with this engine.
 
 Trajectory panels use smooth curves within each period of unchanged links.
 Each intervention boundary uses a step to connect the last state
@@ -134,8 +179,20 @@ before the edit to the first state under it.
 
 Press `C` to compare the original ledger with the current movement restrictions.
 In simulation mode, both scenarios use the same model, seed, settings, and
-synthetic model populations; the original scenario allows all movement.
-Choose a region and a trajectory metric to inspect their differences over time.
+population reference and vector; the original scenario allows all movement.
+The Region panel opens with three regions ranked by their peak Original value
+for the selected metric across the displayed timeline. Choose one to five rows,
+each with its own chart and values for the inspected date. Each chart pairs
+dashed Original and solid Intervention curves on the same scale.
+Choose an individual region to inspect its trajectory and full statistics.
+Compare 3 opens three columns with a shared date inspector
+and chart scales. A single Metric selector below Presets in the
+side panel controls both overall and regional charts. Regions selects the same
+regions across all three columns. Ledger comparisons offer incoming and outgoing
+movements; network totals sum the regional values and exclude movements within
+a region. Comparison presets vary strategies,
+target counts, response delays, and pause durations. Each column accepts a preset
+or saved scenario; its controls rerun the comparison after a short pause.
 The overlay's mode switch and `E` change the active application mode.
 
 | Key | Action |

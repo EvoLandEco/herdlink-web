@@ -216,13 +216,17 @@ test("simulation frame rendering preserves the selected community view", () => {
   const context = runtime();
   const calls = [];
   Object.assign(context, {
-    communityView: "flow", selectedNodeData: null, simulationState: { currentFrame: {} },
+    communityView: "flow", selectedNodeData: null, simulationState: {
+      currentFrame: {}, trajectory: { initialFrame: { nodeStates: {} }, frames: [] },
+    },
+    d3: { max: (items, accessor) => Math.max(0, ...items.map(accessor)) },
+    simulationPrevalenceScale: { domain() {} }, simulationPrevalenceTextScale: { domain() {} },
     isSimulationModeActive: () => true,
     renderCommunityFlowPanel: () => calls.push("flow"),
     renderSimulationPartitionStructurePanel: () => calls.push("heatmap"),
   });
   for (const name of ["renderSimulationNodeControls", "renderSimulationStatsContainer", "renderSimulationGlobalStatsChart",
-    "renderSimulationNodeStatsChart", "renderSimulationSpatialPatternPanel", "applySimulationNodeStyles"]) {
+    "renderSimulationIncidenceChart", "renderSimulationNodeStatsChart", "renderSimulationSpatialPatternPanel", "applySimulationNodeStyles"]) {
     context[name] = () => {};
   }
   vm.runInContext(["renderSimulationPanels", "updateSCCs"].map(extractFunction).join("\n"), context);

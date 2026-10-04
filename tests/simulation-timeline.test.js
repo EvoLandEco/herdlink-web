@@ -10,10 +10,13 @@ const extract = (name) => {
   return match[0];
 };
 
-function trajectory(values = [0, 0.1, 0.4], dates = ["2020-01-01", "2020-01-03", "2020-02-01"], introductionDate = "2020-01-02") {
+function trajectory(values = [0, 0.1, 0.4], dates = ["2020-01-01", "2020-01-03", "2020-02-01"], introductionDate = "2020-01-02", coverageEnd = "2020-02-04") {
   return {
     settings: { introductionDate },
-    frames: values.map((prevalence, index) => ({ date: new Date(dates[index]), summary: { prevalence } })),
+    frames: values.map((prevalence, index) => ({
+      date: new Date(dates[index]), intervalEnd: new Date(dates[index + 1] ?? coverageEnd),
+      summary: { prevalence },
+    })),
   };
 }
 
@@ -73,14 +76,14 @@ function runtime(data = trajectory()) {
   return { context, lane, marker, point, slider, calls, paths, pathData, chart, elements };
 }
 
-test("prevalence samples follow slider indices across irregular dates and mark the introduction step", () => {
+test("prevalence samples follow slider indices and mark the bin containing introduction", () => {
   const app = runtime();
   app.context.renderSimulationTimeline();
   assert.equal(app.lane.hidden, false);
   assert.deepEqual(app.paths.get(".simulation-timeline-curve"), [[0, 32], [500, 25], [1000, 4]]);
   assert.deepEqual(app.paths.get(".simulation-timeline-area"), [[0, 32, 32], [500, 32, 25], [1000, 32, 4]]);
   assert.equal(app.marker.hidden, false);
-  assert.equal(app.marker.style.left, "50%");
+  assert.equal(app.marker.style.left, "0%");
   assert.equal(app.marker.attributes["aria-label"], "Simulation introduction: 2020-01-02");
 
   for (const [value, left, top] of [[0, "0%", "32px"], [1, "50%", "25px"], [2, "100%", "4px"]]) {
@@ -90,10 +93,10 @@ test("prevalence samples follow slider indices across irregular dates and mark t
   }
 });
 
-test("introduction markers cover the first and final frames and hide beyond the timeline", () => {
+test("introduction markers use half-open display intervals and hide outside coverage", () => {
   for (const [introduction, position] of [
-    ["2019-12-31", "0%"], ["2020-01-01", "0%"], ["2020-01-03", "50%"],
-    ["2020-01-04", "100%"], ["2020-02-01", "100%"], [undefined, "0%"],
+    ["2020-01-01", "0%"], ["2020-01-02", "0%"], ["2020-01-03", "50%"],
+    ["2020-01-04", "50%"], ["2020-01-31", "50%"], ["2020-02-01", "100%"], [undefined, "0%"],
   ]) {
     const data = trajectory();
     data.settings.introductionDate = introduction;
@@ -102,9 +105,21 @@ test("introduction markers cover the first and final frames and hide beyond the 
     assert.equal(app.marker.hidden, false, introduction);
     assert.equal(app.marker.style.left, position, introduction);
   }
-  const app = runtime();
+  for (const introduction of ["2019-12-31", "2020-02-04", "2020-02-05"]) {
+    const app = runtime(trajectory(undefined, undefined, introduction));
+    app.context.renderSimulationTimeline();
+    assert.equal(app.marker.hidden, true, introduction);
+    assert.equal(app.lane.hidden, false);
+  }
+});
+
+test("introduction inside the final partial bin remains visible until the coverage boundary", () => {
+  const app = runtime(trajectory(undefined, undefined, "2020-02-03"));
   app.context.renderSimulationTimeline();
-  app.context.simulationState.trajectory = trajectory([0, 0, 0], undefined, "2020-02-02");
+  assert.equal(app.marker.hidden, false);
+  assert.equal(app.marker.style.left, "100%");
+  assert.equal(app.marker.attributes["aria-label"], "Simulation introduction: 2020-02-03");
+  app.context.simulationState.trajectory = trajectory(undefined, undefined, "2020-02-04");
   app.context.renderSimulationTimeline();
   assert.equal(app.marker.hidden, true);
   assert.equal(app.lane.hidden, false);

@@ -2,6 +2,8 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import vm from "node:vm";
+import * as simulationEngine from "../src/runtime/simulation-engine.js";
+import * as simulationPopulation from "../src/runtime/simulation-population.js";
 
 const source = readFileSync(new URL("../src/runtime/herdlink-runtime.js", import.meta.url), "utf8");
 const functions = [
@@ -9,22 +11,27 @@ const functions = [
   "getSimulationLinkAvailability", "getSimulationNodePermissions", "applySimulationNodePermissions",
   "getSimulationRestrictionTimeline", "getComparisonInterventionEvents",
   "getDisabledLinkKeys", "setSimulationLinkIntervention", "setSimulationNodeIntervention",
-  "collectSimulationRegionIds", "buildSimulationLedger", "estimateSimulationHoldings",
-  "getSimulationFrameSummary", "buildSimulationTrajectory", "computeTemporalNetworkStats",
+  "collectSimulationRegionIds", "buildSimulationTrajectory", "computeTemporalNetworkStats",
   "computeSimpleStats", "computeNumberOfConnectedComponents", "computeModularity",
   "computeTradeCommunityTimeline", "evaluatePartitionModularity",
   "computeHotSpotMetrics", "computeEigenvectorCentrality", "buildAdjList",
   "getStronglyConnectedComponents", "computePerronPair", "computePerronRoot", "computeSpectralRadius",
-  "getComparisonMetricDefinitions", "buildComparisonSeries", "getOriginalSimulationSeries", "getComparisonData", "initHerdLink", "clearNetworkCallout", "clearHoveredLinkState",
+  "getComparisonMetricDefinitions", "buildComparisonSeries", "evaluateComparisonScenario", "getOriginalSimulationSeries", "getComparisonData", "initHerdLink", "clearNetworkCallout", "clearHoveredLinkState",
 ].map((name) => {
   const match = source.match(new RegExp(`^([ ]*)function ${name}\\([^]*?^\\1}`, "m"));
   assert.ok(match, `Runtime function ${name} exists`);
   return match[0];
 }).join("\n");
 const settings = {
+  initializationConvention: "prevalence-shares",
+  introductionDate: "2020-01-01", holdings: Object.fromEntries(Array.from({ length: 40 }, (_, i) => [`CR${String(i + 1).padStart(2, "0")}`, 1000])),
   model: "SIR", seedRegion: "CR01", initialPct: 5,
   beta: 0.3, movementBeta: 2, gamma: 0.1, sigma: 0.3,
 };
+settings.population = simulationPopulation.createDeclaredSyntheticPopulationSnapshot({
+  ids: Object.keys(settings.holdings), values: settings.holdings,
+  id: "fabricated-comparison", referenceTime: settings.introductionDate, geographyVersion: "COROP",
+});
 const plain = (value) => JSON.parse(JSON.stringify(value, (_, item) => item instanceof Map ? Array.from(item) : item));
 
 function runtime() {
@@ -33,15 +40,20 @@ function runtime() {
     ["CR01", "CR02", 10 * (index + 1)], ["CR02", "CR01", 2], ["CR02", "CR03", 1],
   ].map(([COROP_LEV, COROP_AFN, AANTAL]) => ({ COROP_LEV, COROP_AFN, AANTAL, time })));
   const values = (items, accessor = (item) => item) => Array.from(items, accessor);
+  const dailyDates = Array.from({ length: 22 }, (_, day) => new Date(Date.UTC(2020, 0, 1 + day)));
+  const dailyData = dailyDates.flatMap((time) => loadedCSVData.some((row) => +row.time === +time)
+    ? loadedCSVData.filter((row) => +row.time === +time)
+    : []);
   const context = vm.createContext({
     Date, Map, Set, uniqueDates, loadedCSVData,
+    presetDailyData: dailyData, presetDailyDates: dailyDates.map(Number), dailySimulationCache: new Map(),
     simulationRegionIdsByDataset: new WeakMap(), tradeRecordsByDataset: new WeakMap(),
     originalLedgerStatsByDataset: new WeakMap(), tradeCommunityTimeline: null, communityScale: "broad",
     simulationLinkInterventions: new Map(), simulationNodeInterventions: new Map(),
     networkStatsDirtyDates: new Set(), networkStatsDirtyFrom: null, ledgerBaselineSpectralRadius: 0,
     comparisonDataCache: new Map(), comparisonDataError: null, appDataMode: "trade", simulationRecomputeTimer: null,
     simulationState: { status: "idle" }, selectedNodeData: null, nlLabelPoints: null,
-    window: { currentDate: uniqueDates[0] },
+    window: { herdlinkSimulation: { ...simulationEngine, ...simulationPopulation }, currentDate: uniqueDates[0] },
     metricNames: ["inDegree", "outDegree", "betweenness", "pageRank", "eigenvector"],
     d3: {
       min: (items, accessor) => Math.min(...values(items, accessor)),
@@ -78,6 +90,15 @@ test("explicit ledger scenarios preserve live data, restrictions, dirty flags an
   const current = context.computeTemporalNetworkStats(dates, { store: false });
   assert.deepEqual(dates.map((date) => original.global[date.toISOString()].totalTradeVolume), [13, 23, 33, 43]);
   assert.deepEqual(dates.map((date) => current.global[date.toISOString()].totalTradeVolume), [13, 3, 30, 40]);
+  for (const result of [original, current]) {
+    for (const date of dates) {
+      const key = date.toISOString();
+      for (const metric of ["inDegree", "outDegree"]) {
+        assert.equal(result.global[key][metric], Object.values(result.node[key]).reduce((sum, node) => sum + node[metric], 0));
+        assert.equal(result.global[key][metric], result.global[key].totalTradeVolume);
+      }
+    }
+  }
   assert.equal(original.global[dates[0].toISOString()].avgTradeEdge, 13 / 3);
   assert.equal(current.node[dates[2].toISOString()].CR02.outDegree, 0);
   assert.equal(original.node[dates[2].toISOString()].CR02.outDegree, 3);
@@ -90,6 +111,20 @@ test("explicit ledger scenarios preserve live data, restrictions, dirty flags an
     dirtyFrom: context.networkStatsDirtyFrom, radius: context.ledgerBaselineSpectralRadius,
     baseline: context.originalLedgerStatsByDataset.get(context.loadedCSVData),
   }), before);
+});
+
+test("shared ledger movement metrics exclude records within a region and respect restrictions", () => {
+  const context = runtime();
+  const date = context.uniqueDates[0];
+  const data = [...context.loadedCSVData, { COROP_LEV: "CR01", COROP_AFN: "CR01", AANTAL: 50, time: date }];
+  const linkInterventions = new Map([[+date, new Map([["CR01-CR02", true]])]]);
+  const stats = context.computeTemporalNetworkStats([date], { data, linkInterventions, store: false }).global[date.toISOString()];
+  assert.equal(stats.totalTradeVolume, 53);
+  assert.equal(stats.inDegree, 3);
+  assert.equal(stats.outDegree, 3);
+  const definitions = context.getComparisonMetricDefinitions("trade");
+  assert.deepEqual(Array.from(definitions.globalMetrics.filter((metric) => definitions.nodeMetrics.some((entry) => entry.key === metric.key)),
+    (metric) => metric.key), ["outDegree", "inDegree"]);
 });
 
 test("unmodified comparisons reuse live calculations and retain an immutable original through edits and date changes", () => {
@@ -220,7 +255,7 @@ test("simulation baselines use the same model, seed, population and steps with e
       nodeInterventions: new Map(), linkInterventions: new Map(),
     });
     const data = context.getComparisonData();
-    assert.equal(data.settings, parameters);
+    assert.deepEqual(plain(data.settings), plain(simulationEngine.validateSimulationSettings(parameters, currentTrajectory.ids)));
     assert.deepEqual(plain(data.original.global.slice(0, 2)), plain(data.intervention.global.slice(0, 2)));
     for (const [index, frame] of expected.frames.entries()) {
       for (const { key } of data.globalMetrics) assert.equal(data.original.global[index][key], frame.summary[key]);
@@ -230,16 +265,98 @@ test("simulation baselines use the same model, seed, population and steps with e
       }
     }
     assert.ok(data.original.nodes.CR01[2].newInfections > 0);
-    assert.equal(data.intervention.nodes.CR01[2].newInfections, 0);
+    assert.ok(data.intervention.nodes.CR01[2].newInfections > 0, "Contact transmission continues when local movements are closed.");
     assert.equal(data.intervention.nodes.CR02[2].incomingExposure, 0);
     assert.equal(context.simulationState.trajectory, currentTrajectory);
     assert.ok(Math.abs(data.original.global[3].cumulativeInfections -
       data.original.global.reduce((sum, frame) => sum + frame.newInfections, 0)) < 1e-9);
-    assert.equal(data.original.nodes.CR01[3].cumulativeInfections,
-      data.original.nodes.CR01.reduce((sum, frame) => sum + frame.newInfections, 0));
+    assert.ok(Math.abs(data.original.nodes.CR01[3].cumulativeInfections -
+      data.original.nodes.CR01.reduce((sum, frame) => sum + frame.newInfections, 0)) < 1e-9);
     assert.ok(!data.nodeMetrics.some(({ key }) => key === "rtProxy"));
     assert.deepEqual(plain([context.simulationNodeInterventions, context.simulationLinkInterventions]), schedules);
   }
+});
+
+test("baseline injection rejects different simulation settings and either type of restriction even with a cached reference", () => {
+  const context = runtime();
+  const unrestricted = context.buildSimulationTrajectory(settings);
+  const reference = context.getOriginalSimulationSeries(settings, unrestricted);
+  const snapshot = plain(reference);
+  const time = +context.uniqueDates[1];
+  const candidates = [
+    context.buildSimulationTrajectory({ ...settings, beta: settings.beta + 0.1 }),
+    context.buildSimulationTrajectory(settings, { nodeInterventions: new Map([[time, new Map([["CR01", { exports: false }]])]]) }),
+    context.buildSimulationTrajectory(settings, { linkInterventions: new Map([[time, new Map([["CR01-CR02", true]])]]) }),
+  ];
+  for (const candidate of candidates) {
+    assert.throws(() => context.getOriginalSimulationSeries(settings, candidate), /same daily inputs and no restrictions/);
+    assert.equal(context.getOriginalSimulationSeries(settings), reference);
+    assert.deepEqual(plain(reference), snapshot);
+    assert.equal(context.simulationNodeInterventions.size, 0);
+    assert.equal(context.simulationLinkInterventions.size, 0);
+  }
+});
+
+test("baseline identity detects changed daily contents within the same dataset array and recomputes the reference", () => {
+  const context = runtime();
+  const stale = context.buildSimulationTrajectory(settings);
+  const reference = context.getOriginalSimulationSeries(settings, stale);
+  const snapshot = plain(reference);
+  const sameArray = context.presetDailyData;
+  context.presetDailyData[0].AANTAL += 500;
+  assert.equal(context.presetDailyData, sameArray);
+  assert.throws(() => context.getOriginalSimulationSeries(settings, stale), /same daily inputs and no restrictions/);
+  const actual = context.getOriginalSimulationSeries(settings);
+  assert.notEqual(actual, reference);
+  assert.ok(actual.global[0].newInfections > reference.global[0].newInfections);
+  assert.deepEqual(plain(reference), snapshot);
+  const expectedDaily = simulationEngine.simulateDaily({
+    settings, ids: context.collectSimulationRegionIds(context.presetDailyData),
+    data: context.presetDailyData, dates: context.presetDailyDates.map((time) => new Date(time)),
+    nodeInterventions: new Map(), linkInterventions: new Map(),
+  });
+  const expected = simulationEngine.aggregateDailyTrajectory(expectedDaily, context.uniqueDates);
+  const definitions = context.getComparisonMetricDefinitions("simulation");
+  for (const [index, frame] of expected.frames.entries()) {
+    for (const { key } of definitions.globalMetrics) assert.equal(actual.global[index][key], frame.summary[key]);
+    for (const id of expected.ids) for (const { key } of definitions.nodeMetrics) {
+      assert.equal(actual.nodes[id][index][key], frame.nodeStates[id][key]);
+    }
+  }
+});
+
+test("display bins reuse the daily calculation and project end states and interval totals into a fresh comparison", () => {
+  const context = runtime();
+  const simulate = context.window.herdlinkSimulation.simulateDaily;
+  let dailyCalculations = 0;
+  context.window.herdlinkSimulation.simulateDaily = (...args) => { dailyCalculations++; return simulate(...args); };
+  runSimulation(context);
+  const daily = context.simulationState.trajectory.dailyTrajectory;
+  const dailySnapshot = plain(daily);
+  const first = context.getComparisonData();
+  const firstSnapshot = plain(first.original);
+  assert.equal(dailyCalculations, 1);
+  context.uniqueDates = [new Date("2020-01-01"), new Date("2020-01-11")];
+  runSimulation(context);
+  const second = context.getComparisonData();
+  assert.equal(dailyCalculations, 1);
+  assert.equal(context.simulationState.trajectory.dailyTrajectory, daily);
+  assert.notEqual(second.original, first.original);
+  assert.notEqual(second.intervention, first.intervention);
+  assert.equal(second.original.global.length, 2);
+  assert.deepEqual(plain(first.original), firstSnapshot);
+  assert.deepEqual(plain(daily), dailySnapshot);
+  for (const [index, entries] of [daily.frames.slice(0, 10), daily.frames.slice(10)].entries()) {
+    const final = entries.at(-1);
+    for (const key of ["S", "E", "I", "R", "N", "prevalence", "cumulativeInfections"]) {
+      assert.equal(second.original.global[index][key], final.summary[key]);
+    }
+    const incidence = entries.reduce((sum, frame) => sum + frame.summary.newInfections, 0);
+    assert.ok(Math.abs(second.original.global[index].newInfections - incidence) < 1e-9);
+    assert.equal(second.original.nodes.CR02[index].incomingExposure,
+      entries.reduce((sum, frame) => sum + frame.nodeStates.CR02.incomingExposure, 0));
+  }
+  assert.deepEqual(plain(second.original), plain(second.intervention));
 });
 
 test("simulation comparison caches ignore inspection changes and refresh for settings and intervention runs", () => {
@@ -285,8 +402,8 @@ test("simulation comparison caches ignore inspection changes and refresh for set
 
 test("explicit simulation and ledger inputs remain independent of the displayed dataset and dates", () => {
   const context = runtime();
-  const data = context.loadedCSVData;
-  const dates = context.uniqueDates;
+  const data = context.presetDailyData;
+  const dates = context.presetDailyDates.map((time) => new Date(time));
   const nodeInterventions = new Map([[dates[2].getTime(), new Map([["CR02", { imports: false }]])]]);
   const linkInterventions = new Map([[dates[1].getTime(), new Map([["CR01-CR02", true]])]]);
   const inputs = { data, dates, nodeInterventions, linkInterventions, store: false };
@@ -302,7 +419,7 @@ test("explicit simulation and ledger inputs remain independent of the displayed 
   assert.equal(linkInterventions.get(dates[1].getTime()).has("CR01-CR02"), true);
 });
 
-test("dataset and sampled date changes rebuild comparison caches without borrowing old holdings", () => {
+test("display dataset and date changes preserve the explicit daily model population", () => {
   const context = runtime();
   const firstTrade = context.getComparisonData();
   runSimulation(context);
@@ -324,8 +441,8 @@ test("dataset and sampled date changes rebuild comparison caches without borrowi
   const simulation = context.getComparisonData();
   assert.equal(simulation.original.global.length, 2);
   assert.notEqual(simulation.original, firstSimulation.original);
-  assert.ok(simulation.regions.some(({ id }) =>
-    simulation.original.nodes[id][0].N !== firstSimulation.original.nodes[id][0].N));
+  assert.ok(simulation.regions.every(({ id }) =>
+    simulation.original.nodes[id][0].N === firstSimulation.original.nodes[id][0].N));
 });
 
 test("failed CSV fetches and parsing publish an error instead of stale results, and another load clears it", async () => {
@@ -403,7 +520,7 @@ test("intervention markers group real node changes and exact-date route edits wi
     { date: dates[2].toISOString(), description: "Exports blocked for CR02 from this date onward." },
     { date: dates[2].toISOString(), description: "Imports allowed for CR01 from this date onward." },
   ]);
-  assert.ok(markers[1].events.some(({ description }) => description === "Movements blocked within CR02 for this step."));
+  assert.ok(markers[1].events.some(({ description }) => description === "Movements blocked within CR02 during this calendar day. Contact transmission is separate."));
   assert.ok(!markers.flatMap(({ events }) => events).some(({ description }) => description.includes("from CR03")));
   assert.deepEqual(plain([context.simulationNodeInterventions, context.simulationLinkInterventions]), schedules);
   assert.deepEqual(plain(context.getComparisonInterventionEvents([], ids, "trade")), []);
@@ -428,9 +545,9 @@ test("comparison event metadata keeps region names, local semantics, deletion an
     assert.equal(data.interventionEvents.length, 2);
     assert.equal(data.interventionEvents[0].events.length, 2);
     assert.ok(data.interventionEvents[0].events.some(({ description }) =>
-      description === "Movements blocked from First region (CR01) to Second region (CR02) for this step."));
+      description === "Movements blocked from First region (CR01) to Second region (CR02) during this calendar day."));
     assert.ok(data.interventionEvents[0].events.some(({ description }) => description ===
-      `${mode === "simulation" ? "Local transmission and movements" : "Movements"} blocked within First region (CR01) for this step.`));
+      "Movements blocked within First region (CR01) during this calendar day. Contact transmission is separate."));
     assert.equal(data.interventionEvents[1].events[0].description, "Imports blocked for Second region (CR02) from this date onward.");
     context.window.currentDate = context.uniqueDates[3];
     context.selectedNodeData = { id: "CR02" };
@@ -454,4 +571,22 @@ test("comparison event metadata keeps region names, local semantics, deletion an
     if (mode === "simulation") runSimulation(context);
     assert.deepEqual(plain(context.getComparisonData().interventionEvents), []);
   }
+});
+
+
+test("independent comparison columns calculate ledger restrictions without applying them to live state", () => {
+  const context = runtime();
+  context.areScenarioControlsDisabled = () => false;
+  context.validateScenario = (snapshot) => snapshot;
+  const before = plain({ window: context.window, nodes: context.simulationNodeInterventions,
+    links: context.simulationLinkInterventions, dirty: [...context.networkStatsDirtyDates], dirtyFrom: context.networkStatsDirtyFrom });
+  const series = [0, 1, 2].map((delay) => context.evaluateComparisonScenario({ label: `Delay ${delay}`, scenario: {
+    settings, nodeInterventions: new Map([[+context.uniqueDates[delay], new Map([["CR01", { exports: false }]])]]),
+    linkInterventions: new Map(),
+  } }));
+  assert.deepEqual(series.map((result) => plain(result.series.global.map((point) => point.totalTradeVolume))), [
+    [3, 3, 3, 3], [13, 3, 3, 3], [13, 23, 3, 3],
+  ]);
+  assert.deepEqual(plain({ window: context.window, nodes: context.simulationNodeInterventions,
+    links: context.simulationLinkInterventions, dirty: [...context.networkStatsDirtyDates], dirtyFrom: context.networkStatsDirtyFrom }), before);
 });
