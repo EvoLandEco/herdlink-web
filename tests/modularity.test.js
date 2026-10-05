@@ -133,11 +133,11 @@ test("the bundled graph including local trade preserves its native Leiden refere
   const ids = [...new Set(edges.flatMap(({ source, target }) => [source, target]))].sort();
   // igraph 1.0.0 and leidenalg 0.12.0, reproduced by scripts/compare-community-methods.py.
   const references = [
-    { resolution: 1, quality: 0.2986596362245344, groups: [
+    { resolution: 1, quality: 0.2999934433904417, groups: [
       "01 02 03 04 05 06 07 08 09 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 28 30 40",
       "29 31 36 37 38 39", "32 33 34 35",
     ] },
-    { resolution: 1.5, quality: 0.1924174446299272, groups: [
+    { resolution: 1.5, quality: 0.19351609828608105, groups: [
       "01 03 04 06 07 08 09 10", "02 11 12 14 30",
       "05 13 15 16 17 18 19 20 21 22 23 24 25 26 27 28 40",
       "29 31 36", "32 33 34", "35", "37", "38 39",
@@ -152,6 +152,7 @@ test("the bundled graph including local trade preserves its native Leiden refere
       members.get(community).push(id);
     }
     assert.deepEqual([...members.values()], reference.groups.map(group => group.split(" ").map(id => `CR${id}`)));
-    assert.ok(Math.abs(result.modularity - reference.quality) < 1e-12);
+    assert.ok(Math.abs(result.modularity - reference.quality) < 1e-12,
+      `Resolution ${reference.resolution}: expected Leiden quality ${reference.quality}, received ${result.modularity}`);
   }
 });
