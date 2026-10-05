@@ -801,6 +801,70 @@ test("saved daily scenarios retain their dynamics when loaded with another displ
   assert.equal(after.dailyTrajectory, before.dailyTrajectory);
 });
 
+test("all four bundled display resolutions preserve daily dynamics and dated controls", async () => {
+  const datasets = Object.fromEntries(["daily", "weekly", "monthly", "yearly"].map((resolution) => {
+    const csv = readFileSync(new URL(`../src/assets/data/${resolution}_aggregation.csv`, import.meta.url), "utf8");
+    const data = csv.trim().split(/\r?\n/).slice(1).map((line) => {
+      const [, time, COROP_LEV, COROP_AFN, AANTAL] = line.replaceAll('"', "").split(",");
+      return { time: new Date(time), COROP_LEV, COROP_AFN, AANTAL: Number(AANTAL) };
+    });
+    const dates = [...new Set(data.map((row) => +row.time))].sort((a, b) => a - b).map((time) => new Date(time));
+    return [resolution, { data, dates }];
+  }));
+  const { context } = runtime({ seedRegion: "CR35" }, 24, false);
+  const ids = Array.from({ length: 40 }, (_, index) => `CR${String(index + 1).padStart(2, "0")}`);
+  for (const { data } of Object.values(datasets)) assert.deepEqual(Array.from(context.collectSimulationRegionIds(data)), ids);
+  context.presetDailyData = datasets.daily.data;
+  context.presetDailyDates = datasets.daily.dates.map(Number);
+  context.presetDailyDataHash = createHash("sha256").update(JSON.stringify(context.presetDailyData)).digest("hex");
+  context.loadedCSVData = datasets.daily.data;
+  context.uniqueDates = datasets.daily.dates;
+  context.currentTimeSpan = "daily";
+  await context.ensurePresetDailyData();
+  context.simulationNodeInterventions = new Map([
+    [Date.parse("2020-02-29"), new Map([["CR35", { exports: false }]])],
+    [Date.parse("2020-03-03"), new Map([["CR35", { exports: true }]])],
+  ]);
+  context.simulationLinkInterventions.set(Date.parse("2020-12-31"), new Map([["CR35-CR15", true]]));
+  const inputs = plain(context.captureScenario());
+  const before = context.buildSimulationTrajectory(context.readSimulationSettings());
+  const fingerprint = () => {
+    const hash = createHash("sha256");
+    for (const frame of before.dailyFrames) hash.update(JSON.stringify(plain(frame)));
+    return hash.digest("hex");
+  };
+  const dailyFingerprint = fingerprint();
+  for (const resolution of ["weekly", "monthly", "yearly", "daily"]) {
+    context.currentTimeSpan = resolution;
+    context.loadedCSVData = datasets[resolution].data;
+    context.uniqueDates = datasets[resolution].dates;
+    await context.ensurePresetDailyData();
+    assert.deepEqual(plain(context.captureScenario()), {
+      ...inputs, datasetKey: resolution, dates: context.uniqueDates.map((date) => date.toISOString()),
+    }, resolution);
+    const run = context.buildSimulationTrajectory(context.readSimulationSettings());
+    assert.equal(run.dailyTrajectory, before.dailyTrajectory, resolution);
+    assert.equal(run.frames.length, context.uniqueDates.length, resolution);
+    assert.equal(+run.frames[0].intervalStart, +before.coverage.start, resolution);
+    let offset = 0;
+    for (const frame of run.frames) {
+      const days = before.dailyFrames.slice(offset, offset + frame.dayCount);
+      offset += frame.dayCount;
+      const last = days.at(-1);
+      for (const id of run.ids) {
+        for (const key of ["S", "E", "I", "R", "N", "prevalence", "cumulativeInfections"]) {
+          assert.equal(frame.nodeStates[id][key], last.nodeStates[id][key], `${resolution}: ${id} ${key}`);
+        }
+        assert.equal(frame.nodeStates[id].newInfections,
+          days.reduce((sum, day) => sum + day.nodeStates[id].newInfections, 0));
+      }
+    }
+    assert.equal(offset, before.dailyFrames.length, resolution);
+  }
+  assert.equal(fingerprint(), dailyFingerprint);
+  assert.equal(context.dailySimulationCache.size, 1);
+});
+
 test("scenario loads reuse matching schedules regardless of date, region, route and permission order", () => {
   for (const mode of ["trade", "simulation"]) {
     const { context, applied } = runtime();
