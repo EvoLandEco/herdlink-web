@@ -2181,8 +2181,6 @@
             const container = d3.select(".statsContainer");
             container
               .classed("simulation-stats-container", true)
-              .style("border", `1px solid ${theme.border}`)
-              .style("background", theme.surface)
               .html("");
             rows.forEach(([icon, label, value]) => {
               const item = container
@@ -5372,9 +5370,6 @@
             // Clear previous content.
             container.html("");
     
-            container.style("border", `1px solid ${theme.border}`);
-            container.style("background", theme.surface);
-    
             // Layout constants for stat rows.
             const statItemHeight = 20;
             const statMargin = 4;
@@ -8216,15 +8211,6 @@
 
 
 
-            d3.select(".statsContainer")
-              .style("border", `1px solid ${theme.border}`)
-              .style("background", theme.surface);
-
-
-
-
-
-    
             linkSelection
               .attr("display", function (linkData) {
                 const srcId =
@@ -8458,9 +8444,7 @@
               if (!window.isDoingTemporalUpdate) renderSimulationStatsContainer();
             } else {
               d3.select(".statsContainer")
-                .classed("simulation-stats-container", false)
-                .style("border", `1px solid ${theme.border}`)
-                .style("background", theme.surface);
+                .classed("simulation-stats-container", false);
 
             }
 
