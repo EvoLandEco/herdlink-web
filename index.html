@@ -1,13 +1,10 @@
 <!doctype html>
-<html lang="en" data-theme="dark">
+<html lang="en" data-theme="light">
   <head>
     <meta charset="UTF-8" />
     <script>
-      try {
-        if (localStorage.getItem("herdlink-theme") === "light") {
-          document.documentElement.dataset.theme = "light";
-        }
-      } catch {}
+      document.documentElement.dataset.theme =
+        window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
     </script>
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>HerdLink - NL Livestock Trade Network Analyser</title>

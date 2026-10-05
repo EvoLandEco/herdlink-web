@@ -1,4 +1,18 @@
-let transitionInProgress = false;
+let activeTransition = null;
+let requestedTheme;
+
+export function followSystemTheme(onChange) {
+  const preference = window.matchMedia("(prefers-color-scheme: dark)");
+  const apply = () => {
+    requestedTheme = preference.matches ? "dark" : "light";
+    activeTransition?.skipTransition();
+    document.documentElement.dataset.theme = requestedTheme;
+    onChange(requestedTheme);
+  };
+  preference.addEventListener("change", apply);
+  apply();
+  return () => preference.removeEventListener("change", apply);
+}
 
 export function isThemeShortcut(event, button) {
   return event.key.toLowerCase() === "t" && !event.defaultPrevented && !event.repeat && !event.isComposing &&
@@ -10,16 +24,13 @@ export function isThemeShortcut(event, button) {
 }
 
 export async function toggleTheme(button, onChange) {
-  if (transitionInProgress) return;
+  if (activeTransition) return;
 
   const root = document.documentElement;
-  const theme = root.dataset.theme === "light" ? "dark" : "light";
+  requestedTheme = root.dataset.theme === "light" ? "dark" : "light";
   const apply = () => {
-    root.dataset.theme = theme;
-    try {
-      localStorage.setItem("herdlink-theme", theme);
-    } catch {}
-    onChange(theme);
+    root.dataset.theme = requestedTheme;
+    onChange(requestedTheme);
   };
 
   if (!document.startViewTransition || window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
@@ -31,9 +42,9 @@ export async function toggleTheme(button, onChange) {
   const x = left + width / 2;
   const y = top + height / 2;
   const radius = Math.hypot(Math.max(x, window.innerWidth - x), Math.max(y, window.innerHeight - y));
-  transitionInProgress = true;
   try {
     const transition = document.startViewTransition(apply);
+    activeTransition = transition;
     try {
       await transition.ready;
       root.animate({
@@ -44,6 +55,6 @@ export async function toggleTheme(button, onChange) {
     }
     await transition.finished;
   } finally {
-    transitionInProgress = false;
+    activeTransition = null;
   }
 }

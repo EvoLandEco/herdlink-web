@@ -169,7 +169,7 @@ test("comparison sidebar switches views and groups custom scenarios with presets
   const props = { open: true, data: { status: "ready", mode: "trade", scenarioContext: { controlsValid: true,
     presetSettings: { targetBudget: 3, responseDays: 7, standstillDays: 14 } },
     globalMetrics: [{ key: "totalTradeVolume" }, { key: "outDegree" }, { key: "inDegree" }, { key: "modularity" }, { key: "spectralRadius" }],
-    nodeMetrics: [{ key: "outDegree" }, { key: "inDegree" }, { key: "betweenness" }, { key: "pageRank" }, { key: "eigenvector" }] },
+    nodeMetrics: [{ key: "totalTradeVolume" }, { key: "outDegree" }, { key: "inDegree" }, { key: "betweenness" }, { key: "pageRank" }, { key: "eigenvector" }] },
     onLoadPreset: (id) => loaded.push(id), onChangePresetSettings: (patch) => patches.push(patch) };
   const render = () => elements(renderWrapper("ComparisonOverlay", props, states));
   const sidebar = () => render().find((node) => node.props.className === "comparison-sidebar");
@@ -214,19 +214,20 @@ test("comparison sidebar switches views and groups custom scenarios with presets
   assert.deepEqual(sidebar().children.filter((node) => node && typeof node === "object").map((node) => node.type), ["div", "scenario-details", "recommended-comparisons", "chart-controls"]);
   assert.equal(details().props.threeScenarios, true);
   assert.equal(customButton(), undefined);
-  assert.deepEqual(Array.from(chartControls().props.metrics, (metric) => metric.key), ["totalTradeVolume", "outDegree", "inDegree", "modularity", "spectralRadius"]);
+  assert.deepEqual(Array.from(chartControls().props.metrics, (metric) => metric.key), ["totalTradeVolume", "outDegree", "inDegree"]);
+  assert.deepEqual(Array.from(chartControls().props.nodeMetrics, (metric) => metric.key), ["totalTradeVolume", "outDegree", "inDegree"]);
   assert.equal(chartControls().props.metric.key, "outDegree");
   assert.equal(chartControls().props.nodeMetric.key, "outDegree");
   assert.equal(chartControls().props.regionView, "top-3");
   assert.equal(chartControls().props.metricsLocked, true);
   chartControls().props.onMetricsLockedChange(false);
-  chartControls().props.onMetricChange("modularity");
-  assert.equal(comparison().props.metric.key, "modularity");
+  chartControls().props.onMetricChange("totalTradeVolume");
+  assert.equal(comparison().props.metric.key, "totalTradeVolume");
   assert.equal(comparison().props.nodeMetric.key, "outDegree");
-  chartControls().props.onNodeMetricChange("pageRank");
+  chartControls().props.onNodeMetricChange("inDegree");
   chartControls().props.onRegionChange("CR01");
-  assert.equal(comparison().props.metric.key, "modularity");
-  assert.equal(comparison().props.nodeMetric.key, "pageRank");
+  assert.equal(comparison().props.metric.key, "totalTradeVolume");
+  assert.equal(comparison().props.nodeMetric.key, "inDegree");
   assert.equal(comparison().props.regionView, "CR01");
   props.recomputing = true;
   assert.equal(chartControls().props.disabled, true);
@@ -269,16 +270,16 @@ test("comparison sidebar switches views and groups custom scenarios with presets
   assert.equal(elements(sidebar()).find((node) => node.type === "preset-settings").props.context.disabled, true);
 });
 
-test("Compare 3 metric locks synchronize both directions and retain each mode's selections", () => {
+test("Compare 3 filters metrics by mode and preserves locked and independent selections", () => {
   const states = [];
   const definitions = {
     trade: {
-      globalMetrics: ["outDegree", "inDegree", "modularity"].map((key) => ({ key })),
-      nodeMetrics: ["outDegree", "inDegree", "pageRank"].map((key) => ({ key })),
+      globalMetrics: ["outDegree", "inDegree", "totalTradeVolume", "modularity"].map((key) => ({ key })),
+      nodeMetrics: ["outDegree", "inDegree", "totalTradeVolume", "pageRank"].map((key) => ({ key })),
     },
     simulation: {
-      globalMetrics: ["prevalence", "I", "R"].map((key) => ({ key })),
-      nodeMetrics: ["prevalence", "I", "R", "incomingExposure"].map((key) => ({ key })),
+      globalMetrics: ["prevalence", "I", "R", "totalTradeVolume"].map((key) => ({ key })),
+      nodeMetrics: ["prevalence", "I", "R", "totalTradeVolume", "incomingExposure"].map((key) => ({ key })),
     },
   };
   const props = { open: true, data: { status: "ready", mode: "trade", ...definitions.trade,
@@ -296,18 +297,22 @@ test("Compare 3 metric locks synchronize both directions and retain each mode's 
   };
 
   view(1);
+  assert.deepEqual(Array.from(controls().metrics, ({ key }) => key), ["outDegree", "inDegree", "totalTradeVolume"]);
+  assert.deepEqual(Array.from(controls().nodeMetrics, ({ key }) => key), ["outDegree", "inDegree", "totalTradeVolume"]);
   assertSelection(true, "outDegree", "outDegree");
   controls().onMetricChange("inDegree");
   assertSelection(true, "inDegree", "inDegree");
   controls().onNodeMetricChange("outDegree");
   assertSelection(true, "outDegree", "outDegree");
   controls().onMetricsLockedChange(false);
-  controls().onMetricChange("modularity");
-  assertSelection(false, "modularity", "outDegree");
-  controls().onNodeMetricChange("pageRank");
-  assertSelection(false, "modularity", "pageRank");
+  controls().onMetricChange("totalTradeVolume");
+  assertSelection(false, "totalTradeVolume", "outDegree");
+  controls().onNodeMetricChange("inDegree");
+  assertSelection(false, "totalTradeVolume", "inDegree");
 
   mode("simulation");
+  assert.deepEqual(Array.from(controls().metrics, ({ key }) => key), ["prevalence", "I", "R"]);
+  assert.deepEqual(Array.from(controls().nodeMetrics, ({ key }) => key), ["prevalence", "I", "R", "incomingExposure"]);
   assertSelection(true, "prevalence", "prevalence");
   controls().onMetricChange("I");
   assertSelection(true, "I", "I");
@@ -319,7 +324,7 @@ test("Compare 3 metric locks synchronize both directions and retain each mode's 
   assertSelection(false, "I", "incomingExposure");
 
   mode("trade");
-  assertSelection(false, "modularity", "pageRank");
+  assertSelection(false, "totalTradeVolume", "inDegree");
   controls().onMetricChange("inDegree");
   controls().onMetricsLockedChange(true);
   assertSelection(true, "inDegree", "inDegree");
@@ -338,6 +343,12 @@ test("Compare 3 metric locks synchronize both directions and retain each mode's 
   assertSelection(true, "prevalence", "prevalence");
   mode("trade");
   assertSelection(true, "outDegree", "outDegree");
+  view(0);
+  assert.strictEqual(render().find((node) => node.type === "ComparisonContent").props.data, props.data);
+  assert.ok(props.data.globalMetrics.some(({ key }) => key === "modularity"));
+  mode("simulation");
+  assert.strictEqual(render().find((node) => node.type === "ComparisonContent").props.data, props.data);
+  assert.ok(props.data.globalMetrics.some(({ key }) => key === "totalTradeVolume"));
 });
 
 test("dense event clusters mount one selected date's details during interaction", () => {

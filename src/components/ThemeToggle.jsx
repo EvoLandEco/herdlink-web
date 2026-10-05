@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { flushSync } from "react-dom";
 import { faMoon, faSun } from "@fortawesome/free-solid-svg-icons";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
-import { isThemeShortcut, toggleTheme } from "../theme";
+import { followSystemTheme, isThemeShortcut, toggleTheme } from "../theme";
 
 export function ThemeToggle() {
   const buttonRef = useRef(null);
@@ -11,6 +11,8 @@ export function ThemeToggle() {
   const changeTheme = () => toggleTheme(buttonRef.current, (value) => {
     flushSync(() => setTheme(value));
   }).catch((error) => console.error("Unable to switch theme:", error));
+
+  useEffect(() => followSystemTheme(setTheme), []);
 
   useEffect(() => {
     const handleKey = (event) => {

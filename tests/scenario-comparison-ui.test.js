@@ -199,7 +199,7 @@ test("column edits cancel pending batches and date inspection uses the completed
   assert.ok(charts.every((chart) => chart.props.animate));
   assert.equal(elements(tree).some((node) => node.props.className === "scenario-comparison-controls"), false);
   assert.equal(charts[0].props.scalePoints, charts[2].props.scalePoints);
-  const controls = context.ComparisonChartControls({ data, metrics: data.globalMetrics, metric, nodeMetric: metric, regionView: props.regionView,
+  const controls = context.ComparisonChartControls({ data, metrics: data.globalMetrics, nodeMetrics: data.nodeMetrics, metric, nodeMetric: metric, regionView: props.regionView,
     onMetricChange: (key) => { props.metric = data.globalMetrics.find((entry) => entry.key === key); },
     onNodeMetricChange: (key) => { props.nodeMetric = data.nodeMetrics.find((entry) => entry.key === key); },
     onRegionChange: (value) => { props.regionView = value; } });
@@ -275,7 +275,7 @@ test("metric lock exposes shared choices and keeps separate metrics available wh
   const metrics = [metric("outDegree"), metric("inDegree"), metric("modularity")];
   const data = { nodeMetrics: [metric("outDegree"), metric("inDegree"), metric("pageRank")], regions: [] };
   const changes = [];
-  const props = { data, metrics, metric: metrics[0], nodeMetric: data.nodeMetrics[0], metricsLocked: true,
+  const props = { data, metrics, nodeMetrics: data.nodeMetrics, metric: metrics[0], nodeMetric: data.nodeMetrics[0], metricsLocked: true,
     onMetricsLockedChange: (locked) => changes.push(locked) };
   const context = vm.createContext({
     ...Object.fromEntries(icons.map((icon) => [icon, icon])), FontAwesomeIcon: "svg",
@@ -342,7 +342,7 @@ test("ledger columns compare network and regional metrics with independent ranki
   assert.equal(rendered[5].props.scalePoints, rendered[9].props.scalePoints);
   assert.notEqual(rendered[0].props.scalePoints, rendered[1].props.scalePoints);
   assert.equal(rendered[1].props.points[1].intervention, 5);
-  const controls = context.ComparisonChartControls({ ...props, metrics: globalMetrics,
+  const controls = context.ComparisonChartControls({ ...props, metrics: globalMetrics, nodeMetrics,
     onMetricChange: (key) => { props.metric = globalMetrics.find((metric) => metric.key === key); },
     onNodeMetricChange: (key) => { props.nodeMetric = nodeMetrics.find((metric) => metric.key === key); } });
   const selectors = elements(controls).filter((node) => node.type === "select");

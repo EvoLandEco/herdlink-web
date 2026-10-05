@@ -27,7 +27,8 @@ The [graduate simulation guide](docs/simulation-teaching-guide.md) explains the 
 - Partition and community views that summarize trade clustering, partition exposure, and CR-region mappings.
 - Help overlay with quick start notes, keyboard shortcuts, and interactive illustrations of regions, trade volume, and network paths.
 - Comparison overlay with paired global and regional metrics, trajectories, and intervention effects in both modes.
-- Light and dark themes with an animated switch and a saved theme preference.
+- Light and dark themes that follow the system preference, with light as the default.
+  The animated theme switch applies until the next system theme change or page load.
 
 Seed region selects the single region that starts infected, with CR35 selected by
 default. Initial infectious, exposed and recovered percentages define its state
@@ -189,9 +190,11 @@ Compare 3 opens three columns with a shared date inspector
 and chart scales. Overall and Regional selectors in Chart settings control their
 respective charts across all three columns. The lock beside them is on by default
 and keeps both selectors on the same metric. Unlock it to choose separate metrics,
-including metrics available only at one scale. Regions selects the same regions
-across all three columns. Ledger comparisons include movement totals, network
-structure, communities, and regional centrality. Retained movements counts allowed
+including simulation metrics available only at regional scale. Regions selects
+the same regions across all three columns. Ledger Compare 3 offers incoming,
+outgoing, and retained movements. Simulation Compare 3 excludes retained movements.
+Baseline comparisons also offer network structure, communities, and regional
+centrality in Ledger mode. Retained movements counts allowed
 animal movements, including local movements once; regional values count movements
 sent by that region. Incoming and outgoing movements exclude local movements.
 Comparison presets vary strategies,

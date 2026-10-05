@@ -85,7 +85,7 @@ Use that published context to explain the production chain. The regional
 records do not identify the role of each farm. Live animal trade and meat trade
 must be shown as separate parts of the chain.
 
-For 1 January 2019 through 15 April 2022, the bundled daily ledger sums to
+For 1 January 2019 through 15 April 2022, the supplied daily ledger sums to
 215,533,552 animal movements; prepared `AAN` rows sum to 108,811,978. Of 143,373
 bundled date/route rows, 88,517 are exactly twice the matching prepared `AAN`
 volume. This is consistent with repeated reporting, but does not establish its
@@ -93,7 +93,9 @@ cause. Other route totals differ by amounts other than a factor of two. The bund
 needs source reconciliation before its absolute volumes are presented as
 counts of physical movements. Do not divide all weights by two: the discrepancy
 is not uniform. Workshop planning can use the broad regional patterns while
-that check remains open.
+that check remains open. The application assets use a documented
+[correction for 20 December 2021](trade-data-corrections.md) and sum to
+215,083,918; that correction does not resolve the source accounting differences.
 
 Research on the full farm network is ongoing. Those data are not yet permitted
 for public display.

@@ -8,46 +8,101 @@ const html = readFileSync(new URL("../index.html", import.meta.url), "utf8");
 
 function setup() {
   const animations = [];
-  const saved = new Map();
+  const listeners = new Set();
+  const preference = {
+    matches: false,
+    addEventListener: (type, listener) => { assert.equal(type, "change"); listeners.add(listener); },
+    removeEventListener: (type, listener) => { assert.equal(type, "change"); listeners.delete(listener); },
+  };
   const root = { dataset: { theme: "dark" }, animate: (...args) => animations.push(args) };
   const button = { closest: () => null, getBoundingClientRect: () => ({ left: 940, top: 540, width: 40, height: 40 }) };
   const context = {
     document: { documentElement: root, querySelectorAll: () => [] },
-    window: { innerWidth: 1000, innerHeight: 600, matchMedia: () => ({ matches: false }) },
-    localStorage: { getItem: (key) => saved.get(key), setItem: (key, value) => saved.set(key, value) },
+    window: { innerWidth: 1000, innerHeight: 600,
+      matchMedia: (query) => query === "(prefers-color-scheme: dark)" ? preference : { matches: false } },
+    localStorage: {
+      getItem: () => assert.fail("Theme startup follows the system preference"),
+      setItem: () => assert.fail("Manual theme changes stay within the page session"),
+    },
   };
   vm.createContext(context);
   vm.runInContext(source, context);
-  return { context, root, button, animations, saved };
+  return { context, root, button, animations, preference, listeners };
 }
 
-test("saved light theme loads before styles; unknown or inaccessible storage keeps dark", () => {
+test("light is the default and the system theme loads before styles", () => {
   const script = html.match(/<script>([\s\S]*?)<\/script>/)[1];
-  assert.ok(html.includes('<html lang="en" data-theme="dark">'));
-  assert.ok(html.indexOf("herdlink-theme") < html.indexOf('rel="stylesheet"'));
-  for (const stored of ["light", "dark", "other", undefined]) {
-    const { context, root, saved } = setup();
-    saved.set("herdlink-theme", stored);
+  assert.ok(html.includes('<html lang="en" data-theme="light">'));
+  assert.ok(html.indexOf("prefers-color-scheme") < html.indexOf('rel="stylesheet"'));
+  for (const dark of [false, true]) {
+    const { context, root, preference } = setup();
+    preference.matches = dark;
     vm.runInContext(script, context);
-    assert.equal(root.dataset.theme, stored === "light" ? "light" : "dark");
+    assert.equal(root.dataset.theme, dark ? "dark" : "light");
   }
-  const { context, root } = setup();
-  context.localStorage.getItem = () => { throw new Error("Storage blocked"); };
-  vm.runInContext(script, context);
-  assert.equal(root.dataset.theme, "dark");
 });
 
-test("theme changes persist without requiring View Transitions", async () => {
-  const { context, root, button, saved } = setup();
+test("manual theme changes work without storage or View Transitions", async () => {
+  const { context, root, button } = setup();
   const state = [];
   await context.toggleTheme(button, (theme) => state.push(theme));
   assert.equal(root.dataset.theme, "light");
-  assert.equal(saved.get("herdlink-theme"), "light");
   assert.deepEqual(state, ["light"]);
-  context.localStorage.setItem = () => { throw new Error("Storage blocked"); };
   await context.toggleTheme(button, (theme) => state.push(theme));
   assert.equal(root.dataset.theme, "dark");
   assert.deepEqual(state, ["light", "dark"]);
+});
+
+test("system changes update the page and button state after manual toggles and clean up on unmount", async () => {
+  const { context, root, button, preference, listeners } = setup();
+  const state = [];
+  const onChange = (theme) => state.push(theme);
+  const stop = context.followSystemTheme(onChange);
+  assert.equal(root.dataset.theme, "light");
+  assert.equal(listeners.size, 1);
+  await context.toggleTheme(button, onChange);
+  assert.equal(root.dataset.theme, "dark");
+  for (const dark of [true, false, true]) {
+    preference.matches = dark;
+    for (const listener of listeners) listener();
+    assert.equal(root.dataset.theme, dark ? "dark" : "light");
+    assert.equal(state.at(-1), root.dataset.theme);
+  }
+  stop();
+  assert.equal(listeners.size, 0);
+});
+
+test("a system change takes precedence over a pending manual transition", async () => {
+  const { context, root, button, preference, listeners } = setup();
+  const state = [];
+  const onChange = (theme) => state.push(theme);
+  const stop = context.followSystemTheme(onChange);
+  await context.toggleTheme(button, onChange);
+  assert.equal(root.dataset.theme, "dark");
+  let applyPending, rejectReady, finishUpdate, finishTransition, skipped = 0;
+  context.document.startViewTransition = (apply) => {
+    applyPending = apply;
+    return {
+      ready: new Promise((_, reject) => { rejectReady = reject; }),
+      updateCallbackDone: new Promise((resolve) => { finishUpdate = resolve; }),
+      finished: new Promise((resolve) => { finishTransition = resolve; }),
+      skipTransition: () => { skipped++; rejectReady(new Error("System theme changed")); },
+    };
+  };
+  const pending = context.toggleTheme(button, onChange);
+  preference.matches = true;
+  for (const listener of listeners) listener();
+  applyPending();
+  finishUpdate();
+  finishTransition();
+  await pending;
+  assert.equal(skipped, 1);
+  assert.equal(root.dataset.theme, "dark");
+  assert.equal(state.at(-1), "dark");
+  delete context.document.startViewTransition;
+  await context.toggleTheme(button, onChange);
+  assert.equal(root.dataset.theme, "light");
+  stop();
 });
 
 test("reduced motion applies the theme immediately", async () => {

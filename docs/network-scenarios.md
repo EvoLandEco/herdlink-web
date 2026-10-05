@@ -20,7 +20,9 @@ three preset parameters. Compare 3 lists comparison presets followed by Overall,
 Regional, and Regions controls in the side panel. Overall selects a network
 metric, while Regional selects a metric for individual regions. The lock beside
 these selectors is on by default and keeps their metrics together. Unlock it to
-choose separate metrics or metrics available at only one scale. Each selection
+choose separate metrics or simulation metrics available only at regional scale.
+Ledger Compare 3 offers incoming, outgoing, and retained movements; Simulation
+Compare 3 excludes retained movements. Each selection
 applies across all three columns. Each column provides independent scenario
 controls. The view switch sits above Presets in
 the side panel. Custom sits inside Presets and opens three saved scenario slots.

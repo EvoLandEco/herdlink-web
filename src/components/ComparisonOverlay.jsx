@@ -493,9 +493,12 @@ export function ComparisonOverlay({ open, data, recomputing = false, onClose, on
   };
   const busy = open && (recomputing || data?.status === "loading");
   const displayedData = busy && completedData.current ? completedData.current : data;
-  const comparisonMetrics = displayedData?.globalMetrics || [];
+  const includeComparisonMetric = ({ key }) => displayedData?.mode === "trade"
+    ? ["inDegree", "outDegree", "totalTradeVolume"].includes(key) : key !== "totalTradeVolume";
+  const comparisonMetrics = (displayedData?.globalMetrics || []).filter(includeComparisonMetric);
+  const comparisonNodeMetrics = (displayedData?.nodeMetrics || []).filter(includeComparisonMetric);
   const comparisonMetric = comparisonMetrics.find((metric) => metric.key === comparisonMetricKeys[displayedData?.mode]);
-  const comparisonNodeMetric = displayedData?.nodeMetrics?.find((metric) => metric.key === comparisonNodeMetricKeys[displayedData?.mode]);
+  const comparisonNodeMetric = comparisonNodeMetrics.find((metric) => metric.key === comparisonNodeMetricKeys[displayedData?.mode]);
   const context = useMemo(() => busy && data?.scenarioContext
     ? { ...data.scenarioContext, disabled: true } : data?.scenarioContext, [busy, data?.scenarioContext]);
   const columns = comparisonColumns || (displayedData?.scenarioContext?.presetSettings
@@ -604,7 +607,7 @@ export function ComparisonOverlay({ open, data, recomputing = false, onClose, on
             }} Info={ComparisonInfo} inert={scenariosOpen} />
             : <ScenarioPresets context={context} activePresetId={activePresetId} onLoadPreset={onLoadPreset} Info={ComparisonInfo} inert={scenariosOpen}>{customControl}</ScenarioPresets>}
           {!threeScenarios && <ScenarioPresetSettings context={context} onChangePresetSettings={onChangePresetSettings} Info={ComparisonInfo} inert={scenariosOpen} />}
-          {threeScenarios && displayedData?.status === "ready" && <ComparisonChartControls data={displayedData} metrics={comparisonMetrics}
+          {threeScenarios && displayedData?.status === "ready" && <ComparisonChartControls data={displayedData} metrics={comparisonMetrics} nodeMetrics={comparisonNodeMetrics}
             metric={comparisonMetric} nodeMetric={comparisonNodeMetric} regionView={comparisonRegionView} disabled={busy}
             metricsLocked={comparisonMetricsLocked[displayedData.mode]}
             onMetricsLockedChange={(locked) => {

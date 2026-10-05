@@ -98,8 +98,8 @@ export function RecommendedComparisons({ context, selectedSet, onChooseSet, Info
   </div>;
 }
 
-export function ComparisonChartControls({ data, metrics, metric, nodeMetric, regionView, metricsLocked, onMetricsLockedChange, onMetricChange, onNodeMetricChange, onRegionChange, disabled, inert }) {
-  const canLock = data.nodeMetrics.some((entry) => entry.key === metric.key);
+export function ComparisonChartControls({ data, metrics, nodeMetrics, metric, nodeMetric, regionView, metricsLocked, onMetricsLockedChange, onMetricChange, onNodeMetricChange, onRegionChange, disabled, inert }) {
+  const canLock = nodeMetrics.some((entry) => entry.key === metric.key);
   const lockHelp = metricsLocked ? "Metrics move together. Unlock to choose them separately."
     : canLock ? "Lock both selectors to the overall metric." : "Choose an overall metric available in both views to lock them.";
   return <fieldset className="scenario-comparison-controls scenario-settings-group" inert={inert ? "" : undefined}>
@@ -114,12 +114,12 @@ export function ComparisonChartControls({ data, metrics, metric, nodeMetric, reg
       </div>
       <label>Overall <select aria-label="Shared overall metric" title={metric.description} value={metric.key} disabled={disabled} onChange={(event) => onMetricChange(event.target.value)}>
         {metrics.map((entry) => {
-          const locked = metricsLocked && !data.nodeMetrics.some((node) => node.key === entry.key);
+          const locked = metricsLocked && !nodeMetrics.some((node) => node.key === entry.key);
           return <option key={entry.key} value={entry.key} disabled={locked}>{entry.label}{locked ? " (unlock)" : ""}</option>;
         })}
       </select></label>
       <label>Regional <select aria-label="Shared region metric" title={nodeMetric.description} value={nodeMetric.key} disabled={disabled} onChange={(event) => onNodeMetricChange(event.target.value)}>
-        {data.nodeMetrics.map((entry) => {
+        {nodeMetrics.map((entry) => {
           const locked = metricsLocked && !metrics.some((overall) => overall.key === entry.key);
           return <option key={entry.key} value={entry.key} disabled={locked}>{entry.label}{locked ? " (unlock)" : ""}</option>;
         })}
