@@ -506,7 +506,9 @@ test("failed CSV fetches and parsing publish an error instead of stale results, 
     const updates = [];
     let clearedCallouts = 0;
     const positionInterrupts = [];
+    const cancelledFrames = [];
     Object.assign(context, {
+      linkBoundaryFrame: 7, cancelAnimationFrame: (id) => cancelledFrames.push(id),
       nodeGroup: { interrupt(name) { positionInterrupts.push(name); } },
       hoveredLink: { id: "CR01-CR02" }, hoveredLinkElement: null, hoveredNode: { id: "CR01" }, linkSelection: {},
       annotationGroup: { selectAll: () => ({
@@ -527,7 +529,9 @@ test("failed CSV fetches and parsing publish an error instead of stale results, 
     assert.equal(context.hoveredNode, null);
     assert.equal(context.linkSelection, null);
     assert.equal(clearedCallouts, 1);
-    assert.deepEqual(positionInterrupts, ["link-boundary", "map-position"]);
+    assert.deepEqual(positionInterrupts, ["map-position"]);
+    assert.deepEqual(cancelledFrames, [7]);
+    assert.equal(context.linkBoundaryFrame, null);
     await new Promise(setImmediate);
     assert.deepEqual(updates.map(({ status }) => status), ["loading", "error"]);
     const result = context.getComparisonData();

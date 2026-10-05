@@ -120,8 +120,8 @@
             eigenvector: { color: "var(--color-hotspot-eigen)", dash: "3 5", pattern: "Short dash" },
           };
           const hotspotRingSpacing = 4;
-          const hotspotRingMaxScale = Number(themeStyles.getPropertyValue("--hotspot-ring-max-scale"));
           const nodeAppearanceDuration = 200;
+          let linkBoundaryFrame = null;
           let newSCCs;
           let hoveredNode = null;
           let hoveredLink = null;
@@ -2198,7 +2198,7 @@
             if (displayElement) {
               displayElement.style.display = "block";
               displayElement.innerHTML = `
-                <i class="fa-solid fa-virus"></i> Simulation Prevalence:
+                <i class="fa-solid fa-virus"></i> Prevalence:
                 <span class="current-sr">${formatPct(summary.prevalence)}</span>
                 <span class="initial-sr">(peak ${formatPct(peak)})</span>
               `;
@@ -6985,45 +6985,61 @@
             return metrics;
           }
     
-          function getAdjustedTarget(d) {
-            const dx = d.target.x - d.source.x, dy = d.target.y - d.source.y;
-            const distance = Math.hypot(dx, dy);
-            const boundary = d.target.linkBoundaryRadius ?? ((d.target.r || 0) + 1);
-            const clearance = boundary + 4;
-            if (distance <= clearance) return null;
-            return { x: d.target.x - dx / distance * clearance, y: d.target.y - dy / distance * clearance };
-          }
-
           function getNetworkLinkPath(d) {
-            const end = getAdjustedTarget(d);
-            if (!end) return null;
-            const radius = Math.hypot(d.target.x - d.source.x, d.target.y - d.source.y);
-            return `M${d.source.x},${d.source.y}A${radius},${radius} 0 0,1 ${end.x},${end.y}`;
+            const dx = d.target.x - d.source.x, dy = d.target.y - d.source.y;
+            const radius = Math.hypot(dx, dy);
+            const sourceRadius = d.source.linkBoundaryRadius ?? d.source.r ?? 0;
+            const targetRadius = d.target.linkBoundaryRadius ?? d.target.r ?? 0;
+            if (!radius || sourceRadius >= radius || targetRadius >= radius) return null;
+            const sourceTrim = Math.asin(sourceRadius / (2 * radius));
+            const targetTrim = Math.asin(targetRadius / (2 * radius));
+            if (sourceTrim + targetTrim >= Math.PI / 6) return null;
+            // Intersect each node circle with the 60 degree arc between the node centers.
+            const angle = Math.atan2(dy, dx);
+            const startAngle = angle - Math.PI / 6 + sourceTrim;
+            const endAngle = angle + Math.PI / 6 - targetTrim;
+            const x1 = d.source.x + sourceRadius * Math.cos(startAngle);
+            const y1 = d.source.y + sourceRadius * Math.sin(startAngle);
+            const x2 = d.target.x - targetRadius * Math.cos(endAngle);
+            const y2 = d.target.y - targetRadius * Math.sin(endAngle);
+            return `M${x1},${y1}A${radius},${radius} 0 0,1 ${x2},${y2}`;
           }
 
-          function updateNetworkLinkBoundaries(includeTransition = false) {
+          function updateNetworkLinkBoundaries() {
+            cancelAnimationFrame(linkBoundaryFrame);
+            linkBoundaryFrame = null;
+            if (!linkSelection || !svg.node().isConnected) return;
+            let changed = false;
             nodeEnter.each(function (d) {
               const circle = this.querySelector("circle.primary");
-              let boundary = (circle ? +circle.getAttribute("r") : d.r) + 1;
-              for (const ring of this.querySelectorAll(".hotspotStroke")) {
-                const outer = +ring.getAttribute("r") + +ring.getAttribute("stroke-width") / 2 + 1;
-                boundary = Math.max(boundary, outer * hotspotRingMaxScale);
+              let boundary = d.r;
+              if (circle) {
+                const style = getComputedStyle(circle);
+                let stroke = style.stroke === "none" ? 0 : parseFloat(style.strokeWidth) / 2;
+                if (stroke && style.vectorEffect === "non-scaling-stroke") {
+                  const matrix = circle.getScreenCTM();
+                  stroke /= Math.hypot(matrix.a, matrix.b);
+                }
+                boundary = +circle.getAttribute("r") + stroke;
               }
-              if (includeTransition) {
-                const count = metricNames.filter(metric => topNMetric[metric].includes(d.id)).length;
-                const destination = count ? (d.r + count * hotspotRingSpacing + 2.25) * hotspotRingMaxScale : d.r + 1;
-                // Cover both ends of the node and ring size transitions.
-                boundary = Math.max(boundary, destination);
+              const rings = this.querySelector(".hotspot-rings");
+              if (rings.childElementCount) {
+                const matrix = rings.getCTM(), parentMatrix = this.getCTM();
+                const scale = Math.hypot(matrix.a, matrix.b) / Math.hypot(parentMatrix.a, parentMatrix.b);
+                for (const ring of rings.children) {
+                  if (+getComputedStyle(ring).opacity === 0) continue;
+                  const outer = +ring.getAttribute("r") + +ring.getAttribute("stroke-width") / 2 + 1;
+                  boundary = Math.max(boundary, outer * scale);
+                }
               }
+              changed ||= d.linkBoundaryRadius !== boundary;
               d.linkBoundaryRadius = boundary;
             });
-            linkSelection.attr("d", getNetworkLinkPath);
-            if (hoveredLink) updateAnnotationForLink(hoveredLink, annotationGroup);
-            if (includeTransition) {
-              nodeGroup.interrupt("link-boundary")
-                .transition("link-boundary").duration(nodeAppearanceDuration)
-                .on("end", () => updateNetworkLinkBoundaries());
+            if (changed) {
+              linkSelection.attr("d", getNetworkLinkPath);
+              if (hoveredLink) updateAnnotationForLink(hoveredLink, annotationGroup);
             }
+            linkBoundaryFrame = requestAnimationFrame(updateNetworkLinkBoundaries);
           }
 
           function getLinkBaseClass(d) {
@@ -7221,7 +7237,8 @@
 
           // Create Network
           function initNetwork(isReplot = false) {
-            nodeGroup?.interrupt("link-boundary");
+            cancelAnimationFrame(linkBoundaryFrame);
+            linkBoundaryFrame = null;
             nodeGroup?.interrupt("map-position");
             // Create annotation group
             clearNetworkCallout(calloutSvg);
@@ -7498,8 +7515,9 @@
               .append("marker")
               .attr("id", "arrow")
               .attr("viewBox", "0 0 448 512")
-              .attr("refX", 400)
-              .attr("refY", 256)
+              // The rotated chevron tip is the midpoint of its leading cubic.
+              .attr("refX", 351.975)
+              .attr("refY", 256.05)
               .attr("markerWidth", 20)
               .attr("markerHeight", 20)
               .attr("orient", "auto")
@@ -7512,25 +7530,13 @@
               .attr("fill", theme.text)
               .attr("transform", "rotate(90,224,256)");
     
-            svg
-              .append("defs")
-              .append("marker")
-              .attr("id", "loop")
-              .attr("viewBox", "0 0 32 32")
-              .attr("refX", 16)
-              .attr("refY", 16)
-              .attr("markerWidth", 2)
-              .attr("markerHeight", 2)
-              .attr("orient", "auto")
-              .attr("markerUnits", "userSpaceOnUse")
-              .append("path")
-              // This path draws a circular arc starting at (16,2) that goes almost full circle.
-              .attr("d", "M16,2 A14,14 0 1,1 15.99,2")
-              .attr("stroke", "red")
-              .attr("stroke-width", 2)
-              .attr("fill", "none")
-              .attr("stroke-dasharray", "5,2");
-    
+            svg.select("#arrow").clone(true)
+              .attr("id", "arrowSmall")
+              .attr("markerWidth", 10)
+              .attr("markerHeight", 10)
+              .select("path")
+              .attr("fill", "context-stroke");
+
             svg
               .append("defs")
               .append("filter")
@@ -8247,31 +8253,6 @@
                 } else {
                   return "none";
                 }
-              })
-              .attr("marker-end", function (linkData) {
-                // Force IDs to be strings.
-                const srcId = String(
-                    typeof linkData.source === "object"
-                      ? linkData.source.id
-                      : linkData.source,
-                  ),
-                  tgtId = String(
-                    typeof linkData.target === "object"
-                      ? linkData.target.id
-                      : linkData.target,
-                  );
-                if (
-                  (srcId === String(d.id) || tgtId === String(d.id)) &&
-                  !linkData.disabled &&
-                  linkData.weight > 0 &&
-                  srcId !== tgtId
-                ) {
-                  return "url(#arrow)";
-                } else if (srcId === tgtId) {
-                  return "url(#loop)";
-                } else {
-                  return null;
-                }
               });
     
     
@@ -8488,12 +8469,11 @@
 
 
     
-            // If unclicked, change link colors back, remove arrowheads and glowing filter
+            // Restore global link colors and clear the focus filter.
             linkSelection
               .interrupt()
               .attr("display", (d) => (d.weight > 0 ? "block" : "none"))
               .attr("class", "link")
-              .attr("marker-end", null)
               .attr("stroke", (d) => {
                 // If the link has zero (or negative) weight, don't show it.
                 return d.weight <= 0 ? "none" : edgeColor(Math.log(d.weight));
@@ -10024,8 +10004,7 @@
                       .attr("opacity", null)
                       .attr("display", "none")
                       .attr("class", "link")
-                      .attr("filter", null)
-                      .attr("marker-end", null);
+                      .attr("filter", null);
                   } else {
                     d3.select(this)
                       .interrupt()
@@ -10037,12 +10016,10 @@
                         d3.select(this)
                           .attr("display", "none")
                           .attr("class", "link")
-                          .attr("filter", null)
-                          .attr("marker-end", null);
+                          .attr("filter", null);
                       });
                   }
                 } else {
-                  const isSelf = srcId === tgtId;
                   const isOutgoing = srcId === selectedNodeData.id;
                   if (instant) {
                     d3.select(this)
@@ -10050,8 +10027,7 @@
                       .style("opacity", 1)
                       .attr("opacity", null)
                       .attr("class", isOutgoing ? "linkSelectOut" : "linkSelectIn")
-                      .attr("stroke-width", 2)
-                      .attr("marker-end", isSelf ? "url(#loop)" : "url(#arrow)");
+                      .attr("stroke-width", 2);
                   } else {
                     d3.select(this)
                       .interrupt()
@@ -10066,11 +10042,7 @@
                             "class",
                             isOutgoing ? "linkSelectOut" : "linkSelectIn",
                           )
-                          .attr("stroke-width", 2)
-                          .attr(
-                            "marker-end",
-                            isSelf ? "url(#loop)" : "url(#arrow)",
-                          );
+                          .attr("stroke-width", 2);
                       });
                   }
                 }
@@ -10085,8 +10057,7 @@
                       .attr("opacity", null)
                       .attr("display", "none")
                       .attr("class", "link")
-                      .attr("filter", null)
-                      .attr("marker-end", null);
+                      .attr("filter", null);
                   } else {
                     d3.select(this)
                       .interrupt()
@@ -10098,8 +10069,7 @@
                         d3.select(this)
                           .attr("display", "none")
                           .attr("class", "link")
-                          .attr("filter", null)
-                          .attr("marker-end", null);
+                          .attr("filter", null);
                       });
                   }
                 } else {
@@ -10111,8 +10081,7 @@
                       .attr("class", "link")
                       .attr("stroke", edgeColor(Math.log(d.weight)))
                       .attr("stroke-width", Math.sqrt(d.weight))
-                      .attr("filter", null)
-                      .attr("marker-end", null);
+                      .attr("filter", null);
                   } else {
                     d3.select(this)
                       .interrupt()
@@ -10126,8 +10095,7 @@
                           .attr("class", "link")
                           .attr("stroke", edgeColor(Math.log(d.weight)))
                           .attr("stroke-width", Math.sqrt(d.weight))
-                          .attr("filter", null)
-                          .attr("marker-end", null);
+                          .attr("filter", null);
                       });
                   }
                 }
@@ -11223,7 +11191,6 @@
               .attr("display", (d) => (!d.disabled && d.weight > 0 ? "block" : "none"))
               .attr("class", "link")
               .attr("filter", null)
-              .attr("marker-end", null)
               .attr("opacity", (d) => (!d.disabled && d.weight > 0 ? null : 0))
               .style("opacity", null)
               .transition()
@@ -11911,7 +11878,7 @@
                 .attr("r", (m, i) => d.r + (i + 1) * hotspotRingSpacing);
             });
             labelSelection.attr("dy", hotspotLabelDy);
-            updateNetworkLinkBoundaries(true);
+            updateNetworkLinkBoundaries();
           }
     
           function restoreLinks() {
@@ -13890,7 +13857,8 @@
           }
     
           function initHerdLink(csvUrl) {
-            nodeGroup?.interrupt("link-boundary");
+            cancelAnimationFrame(linkBoundaryFrame);
+            linkBoundaryFrame = null;
             nodeGroup?.interrupt("map-position");
             clearHoveredLinkState();
             hoveredNode = null;

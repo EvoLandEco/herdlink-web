@@ -182,7 +182,7 @@ test("a hotspot regained during its exit transition becomes visible and keeps it
       return { each(callback) { callback.call(node, node); } };
     } },
     labelSelection: { attr(name, value) { assert.equal(name, "dy"); labelOffset = value(node); } },
-    updateNetworkLinkBoundaries: (includeTransition) => boundaryRefreshes.push(includeTransition),
+    updateNetworkLinkBoundaries: () => boundaryRefreshes.push(true),
     d3: { select(element) {
       assert.equal(element, node);
       return { select(selector) { assert.equal(selector, ".hotspot-rings"); return ringGroup; } };

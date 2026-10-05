@@ -125,7 +125,7 @@ function runtime(mode = "map") {
     },
   });
   vm.runInContext([
-    "getAdjustedTarget", "getNetworkLinkPath", "getNetworkLinkArc", "renderGraphPositions", "updateMapPositionsWithTransition",
+    "getNetworkLinkPath", "getNetworkLinkArc", "renderGraphPositions", "updateMapPositionsWithTransition",
     "updateMapLayout", "resizeNetworkPanel",
   ].map(extractFunction).join("\n"), context);
   return {
@@ -137,6 +137,13 @@ function runtime(mode = "map") {
       context.resizeNetworkPanel();
     },
   };
+}
+
+function assertLinkBoundaries(app) {
+  const { source, target } = app.allLinks[0];
+  const arc = app.context.getNetworkLinkArc(app.linkSelection.elements[0].attrs.d);
+  assert.ok(Math.abs(Math.hypot(arc.x1 - source.x, arc.y1 - source.y) - (source.linkBoundaryRadius ?? source.r)) < 1e-9);
+  assert.ok(Math.abs(Math.hypot(arc.x2 - target.x, arc.y2 - target.y) - (target.linkBoundaryRadius ?? target.r)) < 1e-9);
 }
 
 test("map resize keeps regions, routes, labels, focus and context layers aligned", () => {
@@ -157,8 +164,7 @@ test("map resize keeps regions, routes, labels, focus and context layers aligned
   assert.equal(app.nodeEnter.elements[0].attrs.transform, "translate(150,600)");
   assert.deepEqual(app.labelSelection.elements.map(({ attrs }) => [attrs.x, attrs.y]), [[150, 579], [450, 275]]);
   const path = app.linkSelection.elements[0].attrs.d;
-  assert.ok(path.startsWith("M150,600A"));
-  assert.ok(path.endsWith(`${450 - 17 / Math.sqrt(2)},${300 + 17 / Math.sqrt(2)}`));
+  assertLinkBoundaries(app);
   assert.equal(app.mapMounts.length, 1);
   assert.equal(app.mapMounts[0].width, 600);
   assert.equal(app.mapMounts[0].height, 900);
@@ -189,7 +195,7 @@ test("graph resize scales coordinates, velocities and held nodes before resuming
   ]);
   assert.equal(app.nodeEnter.elements[0].attrs.transform, "translate(50,300)");
   assert.deepEqual(app.labelSelection.elements.map(({ attrs }) => [attrs.x, attrs.y]), [[50, 279], [300, 575]]);
-  assert.ok(app.linkSelection.elements[0].attrs.d.startsWith("M50,300A"));
+  assertLinkBoundaries(app);
   assert.equal(app.forceState.x, 200);
   assert.equal(app.forceState.y, 450);
   assert.equal(app.forceState.running, true);
@@ -211,9 +217,7 @@ test("map date changes retain displayed positions when force nodes receive new d
     [150, 600, 150, 600], [450, 300, 450, 300],
   ]);
   app.linkSelection.attr("d", app.context.getNetworkLinkPath);
-  const path = app.linkSelection.elements[0].attrs.d;
-  assert.ok(path.startsWith("M150,600A"));
-  assert.ok(path.endsWith(`${450 - 17 / Math.sqrt(2)},${300 + 17 / Math.sqrt(2)}`));
+  assertLinkBoundaries(app);
 });
 
 test("one map tween keeps arrow clearance and callouts aligned as route directions change", () => {
@@ -238,8 +242,7 @@ test("one map tween keeps arrow clearance and callouts aligned as route directio
     assert.equal(app.nodeEnter.elements[0].attrs.transform, `translate(${source.x},${source.y})`);
     assert.equal(app.labelSelection.elements[0].attrs.x, source.x);
     assert.equal(app.labelSelection.elements[0].attrs.y, source.y - source.r - 13);
-    const arc = app.context.getNetworkLinkArc(app.linkSelection.elements[0].attrs.d);
-    assert.ok(Math.abs(Math.hypot(arc.x2 - target.x, arc.y2 - target.y) - 44) < 1e-9);
+    assertLinkBoundaries(app);
   }
   assert.equal(app.context.isMovingToMap, false);
   assert.ok(app.annotations.every(({ type }) => type === "link"));
@@ -255,19 +258,20 @@ test("boundary refreshes during map movement use displayed coordinates and keep 
   app.nodeGroup.advance("map-position", 0.3);
   const displayed = app.allNodes.map(({ x, y }) => [x, y]);
   app.nodeEnter.elements.forEach((element) => {
-    element.querySelector = () => ({ getAttribute: () => element.datum.r });
-    element.querySelectorAll = () => [];
+    element.querySelector = (selector) => selector === "circle.primary"
+      ? { getAttribute: (name) => name === "r" ? element.datum.r : 0 }
+      : { childElementCount: 0 };
   });
   target.r = 30;
+  Object.assign(app.context, {
+    linkBoundaryFrame: null, requestAnimationFrame() {}, cancelAnimationFrame() {},
+    svg: { node: () => ({ isConnected: true }) },
+    getComputedStyle: () => ({ stroke: "none" }),
+  });
   vm.runInContext(extractFunction("updateNetworkLinkBoundaries"), app.context);
   app.context.updateNetworkLinkBoundaries();
   assert.deepEqual(app.allNodes.map(({ x, y }) => [x, y]), displayed);
-  const check = () => {
-    const arc = app.context.getNetworkLinkArc(app.linkSelection.elements[0].attrs.d);
-    assert.equal(arc.x1, source.x);
-    assert.equal(arc.y1, source.y);
-    assert.ok(Math.abs(Math.hypot(arc.x2 - target.x, arc.y2 - target.y) - 35) < 1e-9);
-  };
+  const check = () => assertLinkBoundaries(app);
   check();
   app.nodeGroup.advance("map-position", 0.7);
   check();
@@ -472,7 +476,7 @@ test("small graph bounds keep inactive nodes and route endpoints inside the pane
   assert.equal(app.allNodes[0].x, 100);
   assert.equal(app.allNodes[0].y, 100);
   assert.equal(app.nodeEnter.elements[0].attrs.transform, "translate(100,100)");
-  assert.ok(app.linkSelection.elements[0].attrs.d.startsWith("M100,100A"));
+  assertLinkBoundaries(app);
   for (const node of app.allNodes) {
     assert.ok(node.x >= 0 && node.x <= 200 && node.y >= 0 && node.y <= 200);
   }
