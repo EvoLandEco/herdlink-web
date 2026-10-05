@@ -24,7 +24,7 @@ test("ledger node colors follow the current partition after a same-date network 
   let colorDomain;
   const chain = selection();
   const scale = () => "risk-color";
-  for (const name of ["domain", "range", "clamp"]) scale[name] = () => scale;
+  for (const name of ["domain", "range", "interpolate", "clamp"]) scale[name] = () => scale;
   const context = vm.createContext({
     allNodes, enabledLinks: [], selectedNodeData: null,
     window: {

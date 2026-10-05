@@ -52,7 +52,10 @@ function runtime(edges = [["CR01", "CR02", 1000], ["CR02", "CR01", 100], ["CR02"
     simulationNodeInterventions: new Map(),
     networkStatsDirtyDates: new Set(), networkStatsDirtyFrom: null, ledgerBaselineSpectralRadius: 0,
     window: { currentDate: uniqueDates[0], herdlinkSimulation: { ...simulationEngine, ...simulationPopulation } }, tradeIntensity: null, exposureIntensity: null,
-    computeSpectralRadius: () => 0, computeHotSpotMetrics: () => ({}),
+    computeSpectralRadius: () => 0,
+    computeHotSpotMetrics: (nodes) => Object.fromEntries(nodes.map(({ id }) => [id, {
+      inDegree: 0, outDegree: 0, betweenness: 0, pageRank: 1 / nodes.length, eigenvector: 0,
+    }])),
     setLedgerHotspotsMax: () => {},
     metricNames: ["inDegree", "outDegree", "betweenness", "pageRank", "eigenvector"],
     d3: {

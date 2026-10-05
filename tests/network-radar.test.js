@@ -92,6 +92,7 @@ function runtime(reducedMotion = false) {
   const root = element("g"), group = new Selection([root]);
   const context = vm.createContext({
     annotationGroup: group, w: 800, h: 600,
+    theme: { elevated: "var(--color-surface-strong)", canvas: "var(--color-canvas)" },
     window: { matchMedia: () => ({ matches: reducedMotion }) },
     d3: { line() { const line = (points) => JSON.stringify(points); line.curve = () => line; return line; } },
   });
@@ -106,6 +107,29 @@ const info = (values, changes = {}) => ({
   labels: ["IN", "OUT", "BT", "PR", "EC"], rows: [], values, ...changes,
 });
 const values = (value) => [value, value, value, value, value];
+
+test("network initialization selects the canvas after an SVG toolbar icon", () => {
+  const icon = { id: "themeIcon", tag: "svg" };
+  const canvas = { id: "mainFigureSVG", tag: "svg" };
+  const children = [icon, canvas];
+  const d3 = { select: (selector) => children.find((node) =>
+    selector.includes(" ") ? node.tag === selector.split(" ").at(-1) : node.id === selector.slice(1)) };
+  const binding = source.match(/const svg = d3\.select\([^;]+;/)[0];
+  assert.equal(vm.runInNewContext(`${binding} svg;`, { d3 }), canvas);
+});
+
+test("bar labels choose the foreground with greater WCAG contrast", () => {
+  const color = (hex) => {
+    const value = hex.slice(1);
+    const channels = value.length === 3 ? [...value].map((digit) => digit.repeat(2)) : value.match(/../g);
+    const [r, g, b] = channels.map((channel) => parseInt(channel, 16));
+    return { r, g, b };
+  };
+  const fn = source.match(/^([ ]*)function getReadableFillTextColor\([^]*?^\1}/m)[0];
+  const readable = vm.runInNewContext(`${fn} getReadableFillTextColor;`, { d3: { color } });
+  for (const fill of ["#000", "#777"]) assert.equal(readable(fill), "#fff");
+  for (const fill of ["#fff", "#999"]) assert.equal(readable(fill), "#082623");
+});
 
 test("current date notes fit inside the plot at peaks and timeline edges", () => {
   const { context } = runtime();

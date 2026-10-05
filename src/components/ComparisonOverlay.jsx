@@ -41,6 +41,16 @@ function useComparisonTipPosition(label, maxHeight = 420) {
     const place = () => {
       const bounds = body.getBoundingClientRect();
       const anchor = info.getBoundingClientRect();
+      if (!body.classList.contains("comparison-sidebar")) {
+        tip.style.maxWidth = `${body.clientWidth}px`;
+        tip.style.left = "";
+        tip.style.right = "";
+        const rect = tip.getBoundingClientRect();
+        const contentLeft = bounds.left + body.clientLeft;
+        const left = Math.max(contentLeft, Math.min(rect.left, contentLeft + body.clientWidth - rect.width));
+        tip.style.left = `${left - anchor.left - info.clientLeft}px`;
+        tip.style.right = "auto";
+      }
       const contentTop = bounds.top + body.clientTop;
       const above = Math.max(0, anchor.top - contentTop - 10);
       const below = Math.max(0, contentTop + body.clientHeight - anchor.bottom - 10);
@@ -474,6 +484,8 @@ export function ComparisonOverlay({ open, data, recomputing = false, onClose, on
   const [selectedComparisonSet, setSelectedComparisonSet] = useState("strategies");
   const [comparisonColumns, setComparisonColumns] = useState(null);
   const [comparisonMetricKeys, setComparisonMetricKeys] = useState({ simulation: "prevalence", trade: "outDegree" });
+  const [comparisonNodeMetricKeys, setComparisonNodeMetricKeys] = useState({ simulation: "prevalence", trade: "outDegree" });
+  const [comparisonMetricsLocked, setComparisonMetricsLocked] = useState({ simulation: true, trade: true });
   const [comparisonRegionView, setComparisonRegionView] = useState("top-3");
   const closeScenarios = () => {
     setScenariosOpen(false);
@@ -481,8 +493,9 @@ export function ComparisonOverlay({ open, data, recomputing = false, onClose, on
   };
   const busy = open && (recomputing || data?.status === "loading");
   const displayedData = busy && completedData.current ? completedData.current : data;
-  const comparisonMetrics = displayedData?.globalMetrics?.filter((metric) => displayedData.nodeMetrics.some((nodeMetric) => nodeMetric.key === metric.key)) || [];
+  const comparisonMetrics = displayedData?.globalMetrics || [];
   const comparisonMetric = comparisonMetrics.find((metric) => metric.key === comparisonMetricKeys[displayedData?.mode]);
+  const comparisonNodeMetric = displayedData?.nodeMetrics?.find((metric) => metric.key === comparisonNodeMetricKeys[displayedData?.mode]);
   const context = useMemo(() => busy && data?.scenarioContext
     ? { ...data.scenarioContext, disabled: true } : data?.scenarioContext, [busy, data?.scenarioContext]);
   const columns = comparisonColumns || (displayedData?.scenarioContext?.presetSettings
@@ -571,6 +584,8 @@ export function ComparisonOverlay({ open, data, recomputing = false, onClose, on
                 setSelectedComparisonSet("strategies");
                 setComparisonColumns(null);
                 setComparisonMetricKeys({ simulation: "prevalence", trade: "outDegree" });
+                setComparisonNodeMetricKeys({ simulation: "prevalence", trade: "outDegree" });
+                setComparisonMetricsLocked({ simulation: true, trade: true });
                 setComparisonRegionView("top-3");
                 setThreeScenarios(true);
               }
@@ -590,8 +605,20 @@ export function ComparisonOverlay({ open, data, recomputing = false, onClose, on
             : <ScenarioPresets context={context} activePresetId={activePresetId} onLoadPreset={onLoadPreset} Info={ComparisonInfo} inert={scenariosOpen}>{customControl}</ScenarioPresets>}
           {!threeScenarios && <ScenarioPresetSettings context={context} onChangePresetSettings={onChangePresetSettings} Info={ComparisonInfo} inert={scenariosOpen} />}
           {threeScenarios && displayedData?.status === "ready" && <ComparisonChartControls data={displayedData} metrics={comparisonMetrics}
-            metric={comparisonMetric} regionView={comparisonRegionView} disabled={busy}
-            onMetricChange={(key) => setComparisonMetricKeys((keys) => ({ ...keys, [displayedData.mode]: key }))}
+            metric={comparisonMetric} nodeMetric={comparisonNodeMetric} regionView={comparisonRegionView} disabled={busy}
+            metricsLocked={comparisonMetricsLocked[displayedData.mode]}
+            onMetricsLockedChange={(locked) => {
+              setComparisonMetricsLocked((modes) => ({ ...modes, [displayedData.mode]: locked }));
+              if (locked) setComparisonNodeMetricKeys((keys) => ({ ...keys, [displayedData.mode]: comparisonMetric.key }));
+            }}
+            onMetricChange={(key) => {
+              setComparisonMetricKeys((keys) => ({ ...keys, [displayedData.mode]: key }));
+              if (comparisonMetricsLocked[displayedData.mode]) setComparisonNodeMetricKeys((keys) => ({ ...keys, [displayedData.mode]: key }));
+            }}
+            onNodeMetricChange={(key) => {
+              setComparisonNodeMetricKeys((keys) => ({ ...keys, [displayedData.mode]: key }));
+              if (comparisonMetricsLocked[displayedData.mode]) setComparisonMetricKeys((keys) => ({ ...keys, [displayedData.mode]: key }));
+            }}
             onRegionChange={setComparisonRegionView} inert={scenariosOpen} />}
         </aside>
         <div className="comparison-results__content" inert={busy || scenariosOpen ? "" : undefined}>
@@ -599,7 +626,7 @@ export function ComparisonOverlay({ open, data, recomputing = false, onClose, on
             ? <ScenarioComparison data={displayedData} enabled={open && !busy} slots={scenarioSlots}
               configurations={columns} evaluation={comparisonEvaluation}
               onChangeConfigurations={(columns) => { setSelectedComparisonSet(null); setComparisonColumns(columns); }}
-              metric={comparisonMetric} regionView={comparisonRegionView}
+              metric={comparisonMetric} nodeMetric={comparisonNodeMetric} regionView={comparisonRegionView}
               Chart={PairedChart} Info={ComparisonInfo} />
             : <ComparisonContent data={displayedData} animate={open && !busy} />}
         </div>

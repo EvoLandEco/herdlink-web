@@ -16,7 +16,7 @@ const functions = [
   "computeTradeCommunityTimeline", "evaluatePartitionModularity",
   "computeHotSpotMetrics", "computeEigenvectorCentrality", "buildAdjList",
   "getStronglyConnectedComponents", "computePerronPair", "computePerronRoot", "computeSpectralRadius",
-  "getComparisonMetricDefinitions", "buildComparisonSeries", "evaluateComparisonScenario", "getOriginalSimulationSeries", "getComparisonData", "initHerdLink", "clearNetworkCallout", "clearHoveredLinkState",
+  "getComparisonMetricDefinitions", "buildComparisonSeries", "buildSimulationComparisonSeries", "evaluateComparisonScenario", "getOriginalSimulationSeries", "getComparisonData", "initHerdLink", "clearNetworkCallout", "clearHoveredLinkState",
 ].map((name) => {
   const match = source.match(new RegExp(`^([ ]*)function ${name}\\([^]*?^\\1}`, "m"));
   assert.ok(match, `Runtime function ${name} exists`);
@@ -113,7 +113,7 @@ test("explicit ledger scenarios preserve live data, restrictions, dirty flags an
   }), before);
 });
 
-test("shared ledger movement metrics exclude records within a region and respect restrictions", () => {
+test("ledger incoming and outgoing metrics exclude local records while retained movements include them", () => {
   const context = runtime();
   const date = context.uniqueDates[0];
   const data = [...context.loadedCSVData, { COROP_LEV: "CR01", COROP_AFN: "CR01", AANTAL: 50, time: date }];
@@ -124,7 +124,61 @@ test("shared ledger movement metrics exclude records within a region and respect
   assert.equal(stats.outDegree, 3);
   const definitions = context.getComparisonMetricDefinitions("trade");
   assert.deepEqual(Array.from(definitions.globalMetrics.filter((metric) => definitions.nodeMetrics.some((entry) => entry.key === metric.key)),
-    (metric) => metric.key), ["outDegree", "inDegree"]);
+    (metric) => metric.key), ["totalTradeVolume", "outDegree", "inDegree"]);
+});
+
+test("retained movements count each allowed record once and sum daily volumes into display periods", () => {
+  const context = runtime();
+  const dates = Array.from({ length: 4 }, (_, day) => new Date(Date.UTC(2020, 0, 1 + day)));
+  const data = dates.flatMap((time) => [
+    ["CR01", "CR02", 10], ["CR02", "CR01", 2], ["CR02", "CR03", 1], ["CR01", "CR01", 50],
+  ].map(([COROP_LEV, COROP_AFN, AANTAL]) => ({ COROP_LEV, COROP_AFN, AANTAL, time })));
+  context.loadedCSVData = context.presetDailyData = data;
+  context.uniqueDates = dates;
+  context.presetDailyDates = dates.map(Number);
+  context.simulationNodeInterventions = new Map([
+    [+dates[1], new Map([["CR01", { exports: false }]])],
+    [+dates[3], new Map([["CR02", { exports: false }]])],
+  ]);
+  context.simulationLinkInterventions = new Map([
+    [+dates[2], new Map([["CR01-CR01", true], ["CR02-CR03", true]])],
+    [+dates[3], new Map([["CR01-CR01", true]])],
+  ]);
+  context.areScenarioControlsDisabled = () => false;
+  context.validateScenario = (snapshot) => snapshot;
+  const scenario = { settings, nodeInterventions: context.simulationNodeInterventions, linkInterventions: context.simulationLinkInterventions };
+  const totals = (series) => plain(series.map((point) => point.totalTradeVolume));
+
+  context.computeTemporalNetworkStats();
+  const ledger = context.getComparisonData();
+  assert.deepEqual(totals(ledger.original.global), [63, 63, 63, 63]);
+  assert.deepEqual(totals(ledger.intervention.global), [63, 53, 2, 0]);
+  assert.deepEqual(totals(ledger.intervention.nodes.CR01), [60, 50, 0, 0]);
+  assert.deepEqual(totals(ledger.intervention.nodes.CR02), [3, 3, 2, 0]);
+  assert.deepEqual(totals(ledger.intervention.nodes.CR40), [0, 0, 0, 0]);
+  assert.deepEqual(totals(context.evaluateComparisonScenario({ label: "Retained trade", scenario }).series.global), [63, 53, 2, 0]);
+
+  context.uniqueDates = [dates[0], dates[2]];
+  runSimulation(context);
+  const simulation = context.getComparisonData();
+  assert.deepEqual(totals(simulation.original.global), [126, 126]);
+  assert.deepEqual(totals(simulation.intervention.global), [116, 2]);
+  assert.deepEqual(totals(simulation.intervention.nodes.CR01), [110, 0]);
+  assert.deepEqual(totals(simulation.intervention.nodes.CR02), [6, 2]);
+  assert.deepEqual(totals(simulation.intervention.nodes.CR40), [0, 0]);
+  const evaluated = context.evaluateComparisonScenario({ label: "Retained trade", scenario }).series;
+  assert.deepEqual(totals(evaluated.global), [116, 2]);
+  assert.deepEqual(totals(evaluated.nodes.CR01), [110, 0]);
+  for (const comparison of [ledger, simulation]) {
+    for (const metrics of [comparison.globalMetrics, comparison.nodeMetrics]) {
+      assert.ok(metrics.some(({ key, format }) => key === "totalTradeVolume" && format === "count"));
+    }
+    for (const series of [comparison.original, comparison.intervention]) {
+      for (const [index, point] of series.global.entries()) {
+        assert.equal(point.totalTradeVolume, Object.values(series.nodes).reduce((sum, nodes) => sum + nodes[index].totalTradeVolume, 0));
+      }
+    }
+  }
 });
 
 test("unmodified comparisons reuse live calculations and retain an immutable original through edits and date changes", () => {
@@ -258,10 +312,10 @@ test("simulation baselines use the same model, seed, population and steps with e
     assert.deepEqual(plain(data.settings), plain(simulationEngine.validateSimulationSettings(parameters, currentTrajectory.ids)));
     assert.deepEqual(plain(data.original.global.slice(0, 2)), plain(data.intervention.global.slice(0, 2)));
     for (const [index, frame] of expected.frames.entries()) {
-      for (const { key } of data.globalMetrics) assert.equal(data.original.global[index][key], frame.summary[key]);
+      for (const { key } of data.globalMetrics.filter(({ key }) => key !== "totalTradeVolume")) assert.equal(data.original.global[index][key], frame.summary[key]);
       for (const id of expected.ids) {
         assert.equal(data.original.nodes[id][index].N, data.intervention.nodes[id][index].N);
-        for (const { key } of data.nodeMetrics) assert.equal(data.original.nodes[id][index][key], frame.nodeStates[id][key]);
+        for (const { key } of data.nodeMetrics.filter(({ key }) => key !== "totalTradeVolume")) assert.equal(data.original.nodes[id][index][key], frame.nodeStates[id][key]);
       }
     }
     assert.ok(data.original.nodes.CR01[2].newInfections > 0);
@@ -318,8 +372,8 @@ test("baseline identity detects changed daily contents within the same dataset a
   const expected = simulationEngine.aggregateDailyTrajectory(expectedDaily, context.uniqueDates);
   const definitions = context.getComparisonMetricDefinitions("simulation");
   for (const [index, frame] of expected.frames.entries()) {
-    for (const { key } of definitions.globalMetrics) assert.equal(actual.global[index][key], frame.summary[key]);
-    for (const id of expected.ids) for (const { key } of definitions.nodeMetrics) {
+    for (const { key } of definitions.globalMetrics.filter(({ key }) => key !== "totalTradeVolume")) assert.equal(actual.global[index][key], frame.summary[key]);
+    for (const id of expected.ids) for (const { key } of definitions.nodeMetrics.filter(({ key }) => key !== "totalTradeVolume")) {
       assert.equal(actual.nodes[id][index][key], frame.nodeStates[id][key]);
     }
   }

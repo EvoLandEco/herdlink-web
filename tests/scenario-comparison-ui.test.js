@@ -8,6 +8,10 @@ import { formatComparisonValue, getComparisonIntroduction, pairComparisonSeries,
 
 const source = readFileSync(new URL("../src/components/ScenarioComparison.jsx", import.meta.url), "utf8");
 const icons = source.match(/import \{ ([^}]+) \} from "@fortawesome\/free-solid-svg-icons"/)[1].split(", ");
+const library = readFileSync(new URL("../src/components/ScenarioLibrary.jsx", import.meta.url), "utf8");
+const libraryIcons = library.match(/import \{ ([^}]+) \} from "@fortawesome\/free-solid-svg-icons"/)[1].split(", ");
+const shared = ["presetIcons", "presetLabels"].map((name) => library.match(new RegExp(`^export const ${name} = \\{[^]*?^\\};`, "m"))[0].replace(/^export /, "")).join("\n");
+const presetIcons = vm.runInNewContext(`${shared}\npresetIcons`, Object.fromEntries(libraryIcons.map((icon) => [icon, icon])));
 const { code } = await transform(source.replace(/^import .*;\n/gm, "").replace(/^export /gm, ""), {
   loader: "jsx", jsxFactory: "createElement", jsxFragment: "Fragment",
 });
@@ -83,15 +87,11 @@ test("sidebar details show shared settings, actual target counts and each saved 
 });
 
 test("comparison preset cards show configured columns, shared timing and matching scenario icons", () => {
-  const library = readFileSync(new URL("../src/components/ScenarioLibrary.jsx", import.meta.url), "utf8");
-  const libraryIcons = library.match(/import \{ ([^}]+) \} from "@fortawesome\/free-solid-svg-icons"/)[1].split(", ");
-  const shared = ["presetIcons", "presetLabels"].map((name) => library.match(new RegExp(`^export const ${name} = \\{[^]*?^\\};`, "m"))[0].replace(/^export /, "")).join("\n");
   const context = vm.createContext({
     ...Object.fromEntries([...icons, ...libraryIcons].map((icon) => [icon, icon])), FontAwesomeIcon: "icon", Fragment: "fragment", comparisonSets,
     createElement: (type, props, ...children) => typeof type === "function" ? type({ ...props, children }) : { type, props: props || {}, children },
   });
   vm.runInContext(`${shared}\n${code}`, context);
-  const presetIcons = vm.runInContext("presetIcons", context);
   const settings = { targetBudget: 8, responseDays: 11, standstillDays: 20 };
   const data = { controlsValid: true, presetSettings: settings,
     presets: [...new Set(comparisonSets.flatMap((set) => set.presets))].map((id) => ({ id })),
@@ -135,13 +135,13 @@ test("column edits cancel pending batches and date inspection uses the completed
       provenance: { movementData: { start: dates[0], end: "2020-02-01" } },
     },
   };
-  const props = { data, enabled: true, slots: [null, null, null], metric, regionView: "top-3", Chart: "chart", Info: "info",
+  const props = { data, enabled: true, slots: [null, null, null], metric, nodeMetric: metric, regionView: "top-3", Chart: "chart", Info: "info",
     configurations: comparisonConfigurations("strategies", data.scenarioContext.presetSettings),
     onChangeConfigurations: (columns) => { props.configurations = columns; },
   };
   const context = vm.createContext({
     ...Object.fromEntries(icons.map((icon) => [icon, icon])), FontAwesomeIcon: "svg",
-    Fragment: "fragment", Intl, Date, comparisonConfigurations, comparisonSets,
+    Fragment: "fragment", Intl, Date, comparisonConfigurations, comparisonSets, presetIcons,
     formatComparisonValue, getComparisonIntroduction, pairComparisonSeries, topComparisonRegions,
     useId: () => "test-id", useMemo: (calculate) => calculate(),
     useRef: (current) => refs[refIndex++] ||= { current },
@@ -179,6 +179,8 @@ test("column edits cancel pending batches and date inspection uses the completed
     const callbacks = [...queue.values()]; queue.clear(); callbacks.forEach((callback) => callback()); render();
   };
   render();
+  const strategyIcons = () => elements(tree).filter((node) => node.props.className === "scenario-comparison-strategy__icon").map((node) => node.props.icon);
+  assert.deepEqual(strategyIcons(), props.configurations.map((config) => presetIcons[config.presetId]));
   assert.equal(calls.length, 0);
   flush(timers); flush(frames);
   assert.equal(calls.length, 1);
@@ -197,15 +199,21 @@ test("column edits cancel pending batches and date inspection uses the completed
   assert.ok(charts.every((chart) => chart.props.animate));
   assert.equal(elements(tree).some((node) => node.props.className === "scenario-comparison-controls"), false);
   assert.equal(charts[0].props.scalePoints, charts[2].props.scalePoints);
-  const controls = context.ComparisonChartControls({ data, metrics: data.globalMetrics, metric, regionView: props.regionView,
+  const controls = context.ComparisonChartControls({ data, metrics: data.globalMetrics, metric, nodeMetric: metric, regionView: props.regionView,
     onMetricChange: (key) => { props.metric = data.globalMetrics.find((entry) => entry.key === key); },
+    onNodeMetricChange: (key) => { props.nodeMetric = data.nodeMetrics.find((entry) => entry.key === key); },
     onRegionChange: (value) => { props.regionView = value; } });
   assert.equal(elements(controls).some((node) => node.type === "info" || node.children.includes("Shared chart scales")), false);
   const selectors = elements(controls).filter((node) => node.type === "select");
-  assert.deepEqual(selectors.map((node) => node.props["aria-label"]), ["Shared comparison metric", "Shared regions"]);
-  assert.deepEqual(elements(selectors[1]).filter((node) => node.type === "option" && node.props.value.startsWith("top-")).map((node) => node.props.value), ["top-3"]);
+  assert.deepEqual(selectors.map((node) => node.props["aria-label"]), ["Shared overall metric", "Shared region metric", "Shared regions"]);
+  assert.deepEqual(elements(selectors[2]).filter((node) => node.type === "option" && node.props.value.startsWith("top-")).map((node) => node.props.value), ["top-3"]);
   selectors[0].props.onChange({ target: { value: "I" } });
-  selectors[1].props.onChange({ target: { value: "CR01" } });
+  render();
+  assert.deepEqual(elements(tree).filter((node) => node.type === "chart").map((chart) => chart.props.metric.key), ["I", "prevalence", "I", "prevalence", "I", "prevalence"]);
+  assert.equal(calls.length, 4);
+  assert.equal(timers.size, 0);
+  selectors[1].props.onChange({ target: { value: "I" } });
+  selectors[2].props.onChange({ target: { value: "CR01" } });
   render();
   const changedCharts = elements(tree).filter((node) => node.type === "chart");
   assert.ok(changedCharts.every((chart) => chart.props.metric === infectious));
@@ -242,10 +250,113 @@ test("column edits cancel pending batches and date inspection uses the completed
   assert.ok(elements(tree).filter((node) => node.type === "chart").every((chart) => chart.props.animate));
   elements(tree).find((node) => node.props["aria-label"] === "Scenario 2 delay (days)").props.onChange({ target: { value: "12" } });
   render();
+  const firstConfig = props.configurations[0], thirdConfig = props.configurations[2];
+  elements(tree).find((node) => node.props["aria-label"] === "Scenario 2 strategy").props.onChange({ target: { value: "hub-controls" } });
+  render();
+  assert.equal(props.configurations[0], firstConfig);
+  assert.equal(props.configurations[1].presetId, "hub-controls");
+  assert.equal(props.configurations[2], thirdConfig);
+  assert.deepEqual(strategyIcons(), [presetIcons["open-trade"], presetIcons["hub-controls"], presetIcons["partner-ring"]]);
+  props.slots[0] = { name: "Saved model", scenario: { schemaVersion: 3 } };
+  elements(tree).find((node) => node.props["aria-label"] === "Scenario 3 strategy").props.onChange({ target: { value: "saved-0" } });
+  render();
+  assert.equal(props.configurations[2].presetId, "saved-0");
+  assert.deepEqual(strategyIcons(), [presetIcons["open-trade"], presetIcons["hub-controls"], "faLayerGroup"]);
   props.enabled = false; render();
   assert.equal(timers.size, 0);
   assert.equal(frames.size, 0);
   data.mode = "trade";
   render();
   assert.equal(props.evaluation.results, null);
+});
+
+test("metric lock exposes shared choices and keeps separate metrics available when unlocked", () => {
+  const metric = (key) => ({ key, label: key });
+  const metrics = [metric("outDegree"), metric("inDegree"), metric("modularity")];
+  const data = { nodeMetrics: [metric("outDegree"), metric("inDegree"), metric("pageRank")], regions: [] };
+  const changes = [];
+  const props = { data, metrics, metric: metrics[0], nodeMetric: data.nodeMetrics[0], metricsLocked: true,
+    onMetricsLockedChange: (locked) => changes.push(locked) };
+  const context = vm.createContext({
+    ...Object.fromEntries(icons.map((icon) => [icon, icon])), FontAwesomeIcon: "svg",
+    createElement: (type, attributes, ...children) => ({ type, props: attributes || {}, children }),
+  });
+  vm.runInContext(code, context);
+  const render = () => elements(context.ComparisonChartControls(props));
+  const lock = () => render().find((node) => node.props.type === "checkbox");
+  const choice = (key) => render().find((node) => node.type === "option" && node.props.value === key);
+  assert.equal(lock().props.checked, true);
+  assert.equal(lock().props["aria-label"], "Lock overall and regional metrics");
+  assert.equal(lock().props.disabled, false);
+  assert.equal(choice("inDegree").props.disabled, false);
+  assert.equal(choice("modularity").props.disabled, true);
+  assert.equal(choice("pageRank").props.disabled, true);
+  lock().props.onChange({ target: { checked: false } });
+  assert.deepEqual(changes, [false]);
+  props.metricsLocked = false;
+  assert.equal(choice("modularity").props.disabled, false);
+  assert.equal(choice("pageRank").props.disabled, false);
+  props.metric = metrics[2];
+  assert.equal(lock().props.disabled, true);
+  assert.equal(render().find((node) => node.props.className === "comparison-metric-lock").props.title,
+    "Choose an overall metric available in both views to lock them.");
+  assert.equal(render().some((node) => node.children.includes("Locked") || node.children.includes("Unlocked")), false);
+  props.metric = metrics[1];
+  assert.equal(lock().props.disabled, false);
+  props.disabled = true;
+  assert.ok(render().filter((node) => node.type === "input" || node.type === "select").every((node) => node.props.disabled));
+});
+
+test("ledger columns compare network and regional metrics with independent rankings and shared scales", () => {
+  const dates = ["2020-01-01", "2020-01-02"];
+  const globalMetrics = ["modularity", "spectralRadius"].map((key) => ({ key, label: key, format: "decimal" }));
+  const nodeMetrics = ["betweenness", "pageRank"].map((key) => ({ key, label: key, format: "decimal" }));
+  const regions = [1, 2, 3, 4].map((index) => ({ id: `CR0${index}`, name: `Region ${index}` }));
+  const nodes = (column) => Object.fromEntries(regions.map((region, index) => [region.id, dates.map((date, day) => ({
+    date, betweenness: (index + 1) * (column + 1) + day, pageRank: (4 - index) / 10 - day / 100,
+  }))]));
+  const settings = { introductionDate: dates[0], seedRegion: regions[0].id };
+  const data = { dates, date: dates[0], globalMetrics, nodeMetrics, regions, original: { nodes: nodes(0) },
+    scenarioContext: { controlsValid: true, presets: [{ id: "open-trade", label: "Open" }] } };
+  const props = { data, enabled: true, slots: [], regionView: "top-3", metric: globalMetrics[0], nodeMetric: nodeMetrics[0], Chart: "chart",
+    configurations: Array.from({ length: 3 }, () => ({ presetId: "open-trade" })),
+    evaluation: { status: "ready", results: Array.from({ length: 3 }, (_, column) => ({ label: `Column ${column}`, settings, interventionEvents: [],
+      series: { global: dates.map((date, day) => ({ date, modularity: (column + 1) / 10, spectralRadius: (column + 1) * 10 + day })), nodes: nodes(column) },
+    })) } };
+  let inspectedDate = null;
+  const context = vm.createContext({
+    ...Object.fromEntries(icons.map((icon) => [icon, icon])), FontAwesomeIcon: "svg", Fragment: "fragment", presetIcons,
+    formatComparisonValue, getComparisonIntroduction, pairComparisonSeries, topComparisonRegions,
+    useMemo: (calculate) => calculate(), useState: () => [inspectedDate, (date) => { inspectedDate = date; }],
+    createElement: (type, attributes, ...children) => ({ type, props: attributes || {}, children }),
+  });
+  vm.runInContext(code, context);
+  const charts = () => elements(context.ScenarioComparison(props)).filter((node) => node.type === "chart");
+  let rendered = charts();
+  assert.equal(rendered.length, 12);
+  assert.deepEqual(rendered.slice(0, 4).map((chart) => chart.props.metric.key), ["modularity", "betweenness", "betweenness", "betweenness"]);
+  assert.deepEqual(rendered.slice(1, 4).map((chart) => chart.props.scope), ["Scenario 1 Region 4", "Scenario 1 Region 3", "Scenario 1 Region 2"]);
+  assert.equal(rendered[0].props.scalePoints, rendered[4].props.scalePoints);
+  assert.equal(rendered[4].props.scalePoints, rendered[8].props.scalePoints);
+  assert.equal(rendered[1].props.scalePoints, rendered[5].props.scalePoints);
+  assert.equal(rendered[5].props.scalePoints, rendered[9].props.scalePoints);
+  assert.notEqual(rendered[0].props.scalePoints, rendered[1].props.scalePoints);
+  assert.equal(rendered[1].props.points[1].intervention, 5);
+  const controls = context.ComparisonChartControls({ ...props, metrics: globalMetrics,
+    onMetricChange: (key) => { props.metric = globalMetrics.find((metric) => metric.key === key); },
+    onNodeMetricChange: (key) => { props.nodeMetric = nodeMetrics.find((metric) => metric.key === key); } });
+  const selectors = elements(controls).filter((node) => node.type === "select");
+  assert.deepEqual(elements(selectors[0]).filter((node) => node.type === "option").map((node) => node.props.value), ["modularity", "spectralRadius"]);
+  assert.deepEqual(elements(selectors[1]).filter((node) => node.type === "option").map((node) => node.props.value), ["betweenness", "pageRank"]);
+  selectors[0].props.onChange({ target: { value: "spectralRadius" } });
+  rendered = charts();
+  assert.equal(rendered[0].props.points[1].intervention, 11);
+  assert.equal(rendered[1].props.metric.key, "betweenness");
+  selectors[1].props.onChange({ target: { value: "pageRank" } });
+  rendered = charts();
+  assert.deepEqual(rendered.slice(0, 4).map((chart) => chart.props.metric.key), ["spectralRadius", "pageRank", "pageRank", "pageRank"]);
+  assert.deepEqual(rendered.slice(1, 4).map((chart) => chart.props.scope), ["Scenario 1 Region 1", "Scenario 1 Region 2", "Scenario 1 Region 3"]);
+  assert.equal(rendered[1].props.points[1].intervention, 0.39);
+  rendered[1].props.onInspect(dates[1]);
+  assert.ok(charts().every((chart) => chart.props.date === dates[1]));
 });

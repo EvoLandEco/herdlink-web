@@ -68,8 +68,7 @@ export function useComparison(hasSupportedScreen) {
       close();
       return;
     }
-    if (!window.herdlinkComparison || !hasSupportedScreen || document.getElementById("mainContainer")?.closest("[inert]") ||
-      window.herdlinkComparison?.canOpen() === false) return;
+    if (!window.herdlinkComparison || !hasSupportedScreen || document.getElementById("mainContainer")?.closest("[inert]")) return;
     if (window.isIntroOverlayOpen?.()) window.closeIntroOverlay?.();
     window.herdlinkComparison?.prepare();
     openRef.current = true;

@@ -60,7 +60,6 @@ test("an open comparison blocks runtime actions and help without stealing native
   const context = vm.createContext({
     document: { getElementById: () => ({ closest: () => screenBlocked ? {} : null }) },
     window: { isComparisonOverlayOpen: () => comparisonOpen },
-    screenshotInProgress: false,
   });
   vm.runInContext([
     extractFunction(runtimeSource, "handlesAppShortcut"),
@@ -90,12 +89,11 @@ test("an open comparison blocks runtime actions and help without stealing native
   assert.equal(context.isIntroToggleShortcut(key("h")), false);
 });
 
-test("opening waits for runtime registration, respects capture and viewport locks, and closes visible help", () => {
-  function hook({ supported = true, inert = false, canOpen = true, helpOpen = false, runtimeReady = true } = {}) {
+test("opening waits for runtime registration, respects viewport locks, and closes visible help", () => {
+  function hook({ supported = true, inert = false, helpOpen = false, runtimeReady = true } = {}) {
     const state = [];
     const calls = [];
     const bridge = {
-      canOpen: () => canOpen,
       prepare: () => calls.push("prepare"),
     };
     const context = vm.createContext({
@@ -124,7 +122,7 @@ test("opening waits for runtime registration, respects capture and viewport lock
     return { api: context.useComparison(supported), state, calls, bridge, window: context.window };
   }
 
-  for (const lock of [{ supported: false }, { inert: true }, { canOpen: false }, { runtimeReady: false }]) {
+  for (const lock of [{ supported: false }, { inert: true }, { runtimeReady: false }]) {
     const app = hook(lock);
     app.api.toggle();
     assert.equal(app.state[0].value, false);
@@ -137,7 +135,6 @@ test("opening waits for runtime registration, respects capture and viewport lock
     assert.deepEqual(app.calls, [
       ...(helpOpen ? ["close help"] : []), "prepare", "herdlink:comparison-change",
     ]);
-    app.bridge.canOpen = () => false;
     app.api.toggle();
     assert.equal(app.state[0].value, false);
   }

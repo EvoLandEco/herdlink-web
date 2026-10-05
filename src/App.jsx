@@ -7,7 +7,6 @@ import { NetworkPanel } from "./components/NetworkPanel";
 import { RightPanel } from "./components/RightPanel";
 import { ScreenSizeNotice } from "./components/ScreenSizeNotice";
 import { createMapLayers } from "./mapLayers";
-import { downloadAppScreenshot } from "./screenshot";
 import { assetUrls } from "./assetUrls";
 import jLouvainUrl from "./runtime/jLouvain.js?url";
 import d3AnnotationUrl from "./runtime/d3anno.js?url";
@@ -17,7 +16,6 @@ import * as simulationEngine from "./runtime/simulation-engine.js";
 import * as simulationPopulation from "./runtime/simulation-population.js";
 
 window.createHerdLinkMapLayers = createMapLayers;
-window.downloadHerdLinkScreenshot = downloadAppScreenshot;
 window.HERDLINK_ASSET_URLS = assetUrls;
 window.herdlinkPresetTools = interventionPresets;
 window.herdlinkSimulation = { ...simulationEngine, ...simulationPopulation };
@@ -85,7 +83,7 @@ const importsExportsGuide = {
       iconClass: "fa-solid fa-timeline",
       title: "Timeline colors",
       text:
-        "Teal allows both directions. Salmon blocks exports, purple blocks imports, and amber blocks both. The white line marks the displayed date. The timeline covers the full schedule even when the region list is filtered.",
+        "Teal allows both directions. Salmon blocks exports, purple blocks imports, and amber blocks both. The vertical line marks the displayed date. The timeline covers the full schedule even when the region list is filtered.",
     },
     {
       iconClass: "fa-solid fa-list-check",

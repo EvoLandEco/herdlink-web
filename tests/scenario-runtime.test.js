@@ -12,7 +12,7 @@ const functions = [
   "getNodeId", "getLinkKey", "getStatnaam", "getTradeRecordsByDate", "clampNumber",
   "syncSimulationPopulationControls", "applySimulationPopulation", "importSimulationPopulation", "useSyntheticSimulationPopulation", "setSimulationInitializationConvention", "readSimulationSettings", "collectSimulationRegionIds", "buildSimulationTrajectory",
   "getSimulationLinkAvailability", "getSimulationNodePermissions", "applySimulationNodePermissions", "getDisabledLinkKeys",
-  "getComparisonMetricDefinitions", "buildComparisonSeries", "getOriginalSimulationSeries",
+  "getComparisonMetricDefinitions", "buildComparisonSeries", "buildSimulationComparisonSeries", "getOriginalSimulationSeries",
   "areNetworkControlsLocked", "areScenarioControlsDisabled", "getScenarioContext",
   "getPresetSettings", "setPresetSettings", "getNetworkPresetGraph", "getNetworkPresetSelection",
   "syncSimulationIntroductionControl", "getSimulationPopulationForDate", "ensurePresetDailyData",
@@ -63,7 +63,7 @@ function runtime(parameters = {}, steps = 24, initialize = true) {
     computeHotSpotMetrics: (nodes) => Object.fromEntries(nodes.map(({ id }) => [id, { betweenness: id === "CR02" ? 2 : 0 }])),
     simulationNodeInterventions: new Map(), simulationLinkInterventions: new Map(),
     simulationState: { status: "idle" }, appDataMode: "trade", appModeSwitchLocked: false,
-    simulationRecomputeTimer: null, simulationRunId: 0, screenshotInProgress: false,
+    simulationRecomputeTimer: null, simulationRunId: 0,
     networkStatsDirtyDates: new Set(), networkStatsDirtyFrom: null, comparisonDataError: null,
     window: { herdlinkSimulation: { ...simulationEngine, ...simulationPopulation }, herdlinkPresetTools: presetTools, currentDate: uniqueDates[0], herdlinkComparison: { refresh() {} } },
     document: { getElementById: (id) => id === "mainContainer" ? { closest: () => inert } : elements[id] },
@@ -621,6 +621,47 @@ test("responses and standstill duration use exact calendar dates across models a
   }
 });
 
+test("Standstill preserves local trade while cross-region routes pause and reopen in loaded and compared scenarios", () => {
+  const { context } = runtime({}, [0, 2, 4, 8, 10]);
+  context.appDataMode = "simulation";
+  const introduction = +context.uniqueDates[0];
+  const localRecords = context.presetDailyDates.filter((time) => time >= introduction).flatMap((time) =>
+    [["CR01", 9], ["CR03", 6]].map(([id, AANTAL]) => ({ time: new Date(time), COROP_LEV: id, COROP_AFN: id, AANTAL })));
+  context.presetDailyData = [...context.presetDailyData, ...localRecords];
+  context.presetDailyDataHash = createHash("sha256").update(JSON.stringify(context.presetDailyData)).digest("hex");
+  context.setPresetSettings({ responseDays: 3, standstillDays: 5 });
+  const before = plain(context.captureScenario());
+  const compared = context.evaluateComparisonScenario({ presetId: "temporary-standstill" });
+  assert.deepEqual(plain(context.captureScenario()), before);
+  context.loadPreset("temporary-standstill");
+  const run = context.buildSimulationTrajectory(context.readSimulationSettings());
+  for (const frame of run.dailyFrames.filter((frame) => +frame.date >= introduction)) {
+    const day = (+frame.date - introduction) / dayMs;
+    const closed = day >= 3 && day < 8;
+    assert.equal(frame.linkStates.get("CR01-CR01")?.ledgerWeight, 9, `CR01 local trade on day ${day}`);
+    assert.equal(frame.linkStates.get("CR03-CR03")?.ledgerWeight, 6, `CR03 local trade on day ${day}`);
+    for (const [key, weight] of [["CR01-CR02", 100], ["CR03-CR01", 50], ["CR02-CR03", 20]]) {
+      assert.equal(frame.linkStates.get(key)?.ledgerWeight ?? 0, closed ? 0 : weight, `${key} trade on day ${day}`);
+    }
+    assert.equal([...frame.linkStates.values()].reduce((sum, link) => sum + link.ledgerWeight, 0), closed ? 15 : 185,
+      `Retained trade on day ${day}`);
+  }
+  const loaded = context.buildSimulationComparisonSeries(run);
+  const volumes = (series) => ({
+    global: Array.from(series.global, (point) => point.totalTradeVolume),
+    region: Array.from(series.nodes.CR01, (point) => point.totalTradeVolume),
+  });
+  assert.deepEqual(volumes(loaded), { global: [370, 200, 60, 370, 185], region: [218, 118, 36, 218, 109] });
+  assert.deepEqual(volumes(compared.series), volumes(loaded));
+  const saved = plain(context.captureScenario());
+  context.loadPreset("open-trade");
+  context.loadScenario(saved);
+  assert.deepEqual(plain(context.captureScenario().linkInterventions), saved.linkInterventions);
+  assert.deepEqual(plain(context.captureScenario().nodeInterventions), saved.nodeInterventions);
+  const restored = context.evaluateComparisonScenario({ label: "Saved standstill", scenario: saved });
+  assert.deepEqual(volumes(restored.series), volumes(loaded));
+});
+
 test("initial state is recorded at the exact introduction boundary and populations stay fixed across presets", () => {
   const { context } = runtime({}, [0, 2, 4, 8, 13, 21, 28]);
   context.setPresetSettings({ introductionDate: "2020-01-04" });
@@ -876,7 +917,7 @@ test("invalid snapshots and locked actions cannot change settings or schedules",
     assert.throws(() => context.captureScenario());
     context.window[key] = false;
   }
-  for (const [key, value] of [["simulationRecomputeTimer", 0], ["appModeSwitchLocked", true], ["screenshotInProgress", true]]) {
+  for (const [key, value] of [["simulationRecomputeTimer", 0], ["appModeSwitchLocked", true]]) {
     const prior = context[key]; context[key] = value;
     assert.throws(() => context.loadPreset("open-trade"));
     context[key] = prior;

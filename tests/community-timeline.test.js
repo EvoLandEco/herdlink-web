@@ -37,7 +37,12 @@ function runtime(data = fixture()) {
     networkStatsDirtyDates: new Set(), networkStatsDirtyFrom: null,
     ledgerBaselineSpectralRadius: 0, window: {},
     computeSpectralRadius: () => 0,
-    computeHotSpotMetrics: () => ({ calculation: ++centralities }),
+    computeHotSpotMetrics: (nodes) => {
+      centralities++;
+      return Object.fromEntries(nodes.map(({ id }) => [id, {
+        inDegree: 0, outDegree: 0, betweenness: 0, pageRank: 1 / nodes.length, eigenvector: 0,
+      }]));
+    },
     d3: {
       min: (items, accessor) => Math.min(...values(items, accessor)),
       max: (items, accessor) => Math.max(...values(items, accessor)),

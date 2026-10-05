@@ -38,7 +38,7 @@
   padding: 16px;
   border: 1px solid var(--color-border);
   border-radius: var(--radius-lg);
-  background: linear-gradient(150deg, rgba(114, 228, 212, 0.035), transparent 45%), var(--color-canvas);
+  background: linear-gradient(150deg, rgba(var(--color-accent-rgb), 0.035), transparent 45%), var(--color-canvas);
 }
 
 .network-lesson__heading {
@@ -78,9 +78,9 @@
   isolation: isolate;
   aspect-ratio: 5 / 3;
   width: 100%;
-  border: 1px solid rgba(114, 228, 212, 0.09);
+  border: 1px solid rgba(var(--color-accent-rgb), 0.09);
   border-radius: var(--radius-md);
-  background: radial-gradient(circle, rgba(139, 157, 178, 0.14) 0.7px, transparent 0.9px) 4px 4px / 13px 13px;
+  background: radial-gradient(circle, color-mix(in srgb, var(--color-text-subtle) 14%, transparent) 0.7px, transparent 0.9px) 4px 4px / 13px 13px;
 }
 
 .network-lesson__scene > svg {
@@ -101,13 +101,13 @@
 }
 
 .network-region-outline {
-  fill: rgba(114, 228, 212, 0.025);
-  stroke: rgba(114, 228, 212, 0.17);
+  fill: rgba(var(--color-accent-rgb), 0.025);
+  stroke: rgba(var(--color-accent-rgb), 0.17);
 }
 
 .network-region-divider {
   fill: none;
-  stroke: rgba(114, 228, 212, 0.12);
+  stroke: rgba(var(--color-accent-rgb), 0.12);
   stroke-dasharray: 3 4;
 }
 
@@ -152,11 +152,11 @@
   border-color: var(--color-accent);
   color: var(--color-on-accent);
   background: var(--color-accent);
-  box-shadow: 0 0 0 6px rgba(114, 228, 212, 0.1), 0 0 22px rgba(114, 228, 212, 0.13);
+  box-shadow: 0 0 0 6px rgba(var(--color-accent-rgb), 0.1), 0 0 22px rgba(var(--color-accent-rgb), 0.13);
 }
 
 .network-region:hover {
-  box-shadow: 0 0 0 5px rgba(114, 228, 212, 0.14);
+  box-shadow: 0 0 0 5px rgba(var(--color-accent-rgb), 0.14);
 }
 
 .network-lesson__interaction {
@@ -215,12 +215,12 @@
 
 .network-orbit {
   fill: none;
-  stroke: rgba(114, 228, 212, 0.15);
+  stroke: rgba(var(--color-accent-rgb), 0.15);
   stroke-dasharray: 2 5;
 }
 
 .network-orbit--incoming {
-  stroke: rgba(255, 186, 134, 0.2);
+  stroke: color-mix(in srgb, var(--color-chart-incoming) 20%, transparent);
 }
 
 .network-volume-guide {
@@ -351,7 +351,7 @@
 }
 
 .network-route-region.is-reachable circle {
-  fill: #193a3c;
+  fill: color-mix(in srgb, var(--color-accent) 15%, var(--color-surface));
   stroke: var(--color-accent);
 }
 

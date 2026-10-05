@@ -57,7 +57,6 @@ function runtime() {
     useSyntheticSimulationPopulation: () => calls.push("synthetic"),
     document,
     simulationState: { status: "error" }, comparisonDataError: "Invalid numerical setting", simulationInitialStates: null,
-    screenshotInProgress: false,
     readSimulationSettings: () => { calls.push("read"); return {}; },
     scheduleSimulationRecompute: () => calls.push("recompute"),
     setModeSwitcherDisabled() {}, renderSimulationTimeline() {},

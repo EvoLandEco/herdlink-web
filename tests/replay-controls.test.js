@@ -26,7 +26,6 @@ function replay(dateCount = 3) {
   }
   const context = vm.createContext({
     window: { isPlaying: false },
-    screenshotInProgress: false,
     simulationState: { status: "ready" },
     document: { getElementById: (id) => elements[id], addEventListener() {} },
     slider: elements.timeSlider, playPauseBtn: elements.playPauseBtn,
@@ -135,17 +134,6 @@ test("document shortcuts leave native slider, field, and button keys alone", () 
   assert.equal(calls.filter(([name]) => name === "frame").length, 1);
   context.playPauseKeyListener({ ...key(" "), repeat: true });
   assert.equal(context.window.isPlaying, false);
-});
-
-test("screenshot capture prevents keyboard changes to the displayed date", () => {
-  const { context, calls, elements } = replay();
-  context.screenshotInProgress = true;
-  context.sliderKeyListener(key("ArrowRight"));
-  context.playPauseKeyListener(key(" "));
-  context.fromStartKeyListener(key("f"));
-  assert.equal(elements.timeSlider.value, 0);
-  assert.equal(context.window.isPlaying, false);
-  assert.deepEqual(calls, []);
 });
 
 

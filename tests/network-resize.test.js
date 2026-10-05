@@ -363,6 +363,7 @@ function calloutContent(app) {
   };
   Object.assign(app.context, {
     annotationGroup: group, hoveredLinkElement: null, isSimulationModeActive: () => false,
+    theme: { elevated: "var(--color-surface-strong)" },
     getStatnaam: (id) => `Region ${id}`, formatCount: String, formatSmall: String,
     drawRadarChart(_card, info) { content.radar = info.kind === "node"; }, simulationCompartmentColors: { I: "red" },
   });

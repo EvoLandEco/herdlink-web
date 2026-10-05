@@ -34,13 +34,14 @@ function runtime({ blocked = false } = {}) {
         add: (value) => classes.add(value),
         remove: (value) => classes.delete(value),
         contains: (value) => classes.has(value),
+        toggle: (value, active) => active ? classes.add(value) : classes.delete(value),
       },
       addEventListener(name, callback) { this.listeners[name] = callback; },
       focus() { document.activeElement = this; },
       getClientRects() { return this.hidden ? [] : [{}]; },
       getBoundingClientRect() { return this.bounds; },
       setAttribute(name, value) { this.attributes[name] = String(value); },
-      closest() { return null; },
+      closest(selector) { return selector.split(", ").some((value) => classes.has(value.slice(1))) ? this : null; },
     };
   }
   document.body = element("body", false);
@@ -64,21 +65,35 @@ function runtime({ blocked = false } = {}) {
   overlay.querySelectorAll = () => controls;
   document.activeElement = opener;
   element("introKeyboard");
-  for (const suffix of ["S", "E", "M", "Q", "H", "C", "R", "F", "Space", "Arrows"]) {
-    element(`introDot${suffix}`);
+  for (const suffix of ["T", "E", "M", "Q", "H", "C", "R", "F", "Space", "Arrows"]) {
+    const card = element(`introCard${suffix}`);
+    card.classList.add("kbd-callout");
+    element(`introDot${suffix}`).parentElement = card;
   }
   const context = vm.createContext({
-    document, screenshotInProgress: false, theme: {},
+    document, theme: { accent: "teal" },
     window: {
       scrollX: 0, scrollY: 0,
       addEventListener: (name, callback) => { windowListeners[name] = callback; },
       SimpleKeyboard: { default: class {
         constructor() { keyboardBuilds += 1; }
-        getButtonElement() { return {}; }
+        getButtonElement(key) {
+          const button = elements[`introKey${key}`] || element(`introKey${key}`);
+          button.classList.add("intro-key--hot");
+          return button;
+        }
       } },
     },
     LeaderLine: class {
-      constructor() { this.removed = false; this.positions = 0; drawnLines.push(this); }
+      constructor(start, end, options) {
+        this.start = start;
+        this.end = end;
+        this.options = options;
+        this.removed = false;
+        this.positions = 0;
+        drawnLines.push(this);
+      }
+      setOptions(options) { Object.assign(this.options, options); }
       show() {}
       position() { this.positions += 1; }
       remove() { this.removed = true; }
@@ -134,6 +149,30 @@ test("guide connectors follow page visibility and reuse the keyboard", () => {
   app.context.window.closeIntroOverlay();
   app.changePage();
   assert.equal(app.liveLines().length, 0);
+});
+
+test("hover and focus highlight a shortcut group and closing clears it", () => {
+  const app = runtime();
+  const arrows = app.liveLines().filter((line) => line.end.id === "introDotArrows");
+  const other = app.liveLines().find((line) => line.end.id === "introDotE");
+  app.guide.listeners.pointerover({ target: arrows[0].start });
+  for (const line of arrows) {
+    assert.equal(line.options.color, "teal");
+    assert.equal(line.start.classList.contains("is-shortcut-active"), true);
+  }
+  assert.equal(other.options.color, "var(--color-border-strong)");
+  app.guide.listeners.focusin({ target: other.end.parentElement });
+  assert.equal(other.options.color, "teal");
+  assert.equal(arrows[0].options.color, "var(--color-border-strong)");
+  app.document.activeElement = other.end.parentElement;
+  app.guide.listeners.pointerout({ relatedTarget: app.guide });
+  assert.equal(other.options.color, "teal");
+  app.context.window.closeIntroOverlay();
+  assert.equal(other.start.classList.contains("is-shortcut-active"), false);
+  assert.equal(other.end.parentElement.classList.contains("is-shortcut-active"), false);
+  app.context.window.openIntroOverlay();
+  assert.equal(app.liveLines().length, 13);
+  assert.ok(app.liveLines().every((line) => line.options.size === 1.5));
 });
 
 test("opening help focuses its switch and closing restores the opener", () => {

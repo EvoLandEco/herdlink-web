@@ -1,11 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { faChartLine, faCheck, faCircleInfo, faLink } from "@fortawesome/free-solid-svg-icons";
+import { faChartLine, faCheck, faCircleInfo, faLayerGroup, faLink, faLock, faLockOpen } from "@fortawesome/free-solid-svg-icons";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import { comparisonSets } from "../scenarioComparison";
 import { presetIcons, presetLabels } from "./ScenarioLibrary";
 import { formatComparisonValue, getComparisonIntroduction, pairComparisonSeries, topComparisonRegions } from "../comparisonCharts";
 
-export const comparisonColors = ["#72e4d4", "#c8b6ff", "#f6b5a4"];
+export const comparisonColors = ["var(--color-accent)", "var(--color-chart-purple)", "var(--color-chart-coral)"];
 const comparisonHelp = {
   strategies: {
     summary: "Compare unrestricted trade with seed containment and forward tracing.",
@@ -98,12 +98,33 @@ export function RecommendedComparisons({ context, selectedSet, onChooseSet, Info
   </div>;
 }
 
-export function ComparisonChartControls({ data, metrics, metric, regionView, onMetricChange, onRegionChange, disabled, inert }) {
+export function ComparisonChartControls({ data, metrics, metric, nodeMetric, regionView, metricsLocked, onMetricsLockedChange, onMetricChange, onNodeMetricChange, onRegionChange, disabled, inert }) {
+  const canLock = data.nodeMetrics.some((entry) => entry.key === metric.key);
+  const lockHelp = metricsLocked ? "Metrics move together. Unlock to choose them separately."
+    : canLock ? "Lock both selectors to the overall metric." : "Choose an overall metric available in both views to lock them.";
   return <fieldset className="scenario-comparison-controls scenario-settings-group" inert={inert ? "" : undefined}>
     <legend>Chart settings</legend>
-    <label>Metric <select aria-label="Shared comparison metric" value={metric.key} disabled={disabled} onChange={(event) => onMetricChange(event.target.value)}>
-      {metrics.map((entry) => <option key={entry.key} value={entry.key}>{entry.label}</option>)}
-    </select></label>
+    <div className="comparison-metric-pair" data-locked={metricsLocked}>
+      <div className="comparison-metric-link">
+        <label className="comparison-metric-lock" title={lockHelp}>
+          <input type="checkbox" aria-label="Lock overall and regional metrics" checked={metricsLocked}
+            disabled={disabled || !canLock} onChange={(event) => onMetricsLockedChange(event.target.checked)} />
+          <span><FontAwesomeIcon icon={metricsLocked ? faLock : faLockOpen} aria-hidden="true" /></span>
+        </label>
+      </div>
+      <label>Overall <select aria-label="Shared overall metric" title={metric.description} value={metric.key} disabled={disabled} onChange={(event) => onMetricChange(event.target.value)}>
+        {metrics.map((entry) => {
+          const locked = metricsLocked && !data.nodeMetrics.some((node) => node.key === entry.key);
+          return <option key={entry.key} value={entry.key} disabled={locked}>{entry.label}{locked ? " (unlock)" : ""}</option>;
+        })}
+      </select></label>
+      <label>Regional <select aria-label="Shared region metric" title={nodeMetric.description} value={nodeMetric.key} disabled={disabled} onChange={(event) => onNodeMetricChange(event.target.value)}>
+        {data.nodeMetrics.map((entry) => {
+          const locked = metricsLocked && !metrics.some((overall) => overall.key === entry.key);
+          return <option key={entry.key} value={entry.key} disabled={locked}>{entry.label}{locked ? " (unlock)" : ""}</option>;
+        })}
+      </select></label>
+    </div>
     <label>Regions <select aria-label="Shared regions" value={regionView} disabled={disabled} onChange={(event) => onRegionChange(event.target.value)}>
       <optgroup label="Top regions"><option value="top-3">Top 3</option></optgroup>
       <optgroup label="Single region">{data.regions.map((region) => <option key={region.id} value={region.id}>{region.name} · {region.id}</option>)}</optgroup>
@@ -163,7 +184,7 @@ export function useScenarioComparison({ data, enabled, slots, configurations }) 
     : current.status !== "error" && completed.current?.inputKey === inputKey ? completed.current.results : null };
 }
 
-export function ScenarioComparison({ data, enabled, slots, configurations, onChangeConfigurations, evaluation, metric, regionView, Chart }) {
+export function ScenarioComparison({ data, enabled, slots, configurations, onChangeConfigurations, evaluation, metric, nodeMetric, regionView, Chart }) {
   const context = data.scenarioContext;
   const [inspectedDate, setInspectedDate] = useState(null);
   const available = enabled && context.controlsValid && !context.disabled;
@@ -172,16 +193,16 @@ export function ScenarioComparison({ data, enabled, slots, configurations, onCha
   const dateIndex = Math.max(0, data.dates.indexOf(inspectedDate || data.date));
   const date = data.dates[dateIndex];
   const regions = useMemo(() => regionView === "top-3"
-    ? topComparisonRegions(data.regions, data.original.nodes, metric.key, 3)
-    : data.regions.filter((region) => region.id === regionView), [regionView, data.regions, data.original, metric.key]);
+    ? topComparisonRegions(data.regions, data.original.nodes, nodeMetric.key, 3)
+    : data.regions.filter((region) => region.id === regionView), [regionView, data.regions, data.original, nodeMetric.key]);
   const charts = useMemo(() => {
     if (!results) return null;
     const network = results.map((result) => pairComparisonSeries(data.dates, [], result.series.global, metric.key));
     return { network, networkScale: network.flat(), regions: regions.map((region) => {
-      const points = results.map((result) => pairComparisonSeries(data.dates, [], result.series.nodes[region.id] || [], metric.key));
+      const points = results.map((result) => pairComparisonSeries(data.dates, [], result.series.nodes[region.id] || [], nodeMetric.key));
       return { points, scale: points.flat() };
     }) };
-  }, [results, data.dates, metric.key, regions]);
+  }, [results, data.dates, metric.key, nodeMetric.key, regions]);
   const edit = (index, patch) => {
     onChangeConfigurations(configurations.map((config, column) => column === index ? { ...config, ...patch } : config));
   };
@@ -199,10 +220,13 @@ export function ScenarioComparison({ data, enabled, slots, configurations, onCha
             style={{ "--comparison-intervention": comparisonColors[column], "--scenario-color": comparisonColors[column] }}>
             <div className="scenario-comparison-column__heading">
               <span>{String(column + 1).padStart(2, "0")}</span>
-              <select aria-label={`Scenario ${column + 1} strategy`} value={config.presetId} disabled={!available} onChange={(event) => edit(column, { presetId: event.target.value })}>
-                <optgroup label="Strategies">{context.presets.map((preset) => <option key={preset.id} value={preset.id} disabled={Boolean(preset.disabledReason)}>{preset.label}</option>)}</optgroup>
-                <optgroup label="Saved scenarios">{slots.map((slot, index) => slot && <option key={index} value={`saved-${index}`} disabled={slot.scenario.schemaVersion !== 3}>{slot.name}</option>)}</optgroup>
-              </select>
+              <div className="scenario-comparison-strategy">
+                <select aria-label={`Scenario ${column + 1} strategy`} value={config.presetId} disabled={!available} onChange={(event) => edit(column, { presetId: event.target.value })}>
+                  <optgroup label="Strategies">{context.presets.map((preset) => <option key={preset.id} value={preset.id} disabled={Boolean(preset.disabledReason)}>{preset.label}</option>)}</optgroup>
+                  <optgroup label="Saved scenarios">{slots.map((slot, index) => slot && <option key={index} value={`saved-${index}`} disabled={slot.scenario.schemaVersion !== 3}>{slot.name}</option>)}</optgroup>
+                </select>
+                <FontAwesomeIcon className="scenario-comparison-strategy__icon" icon={saved ? faLayerGroup : presetIcons[config.presetId]} aria-hidden="true" />
+              </div>
             </div>
             <div className="scenario-comparison-settings">
               {settingFields(config.presetId).map(([field, label, min, max, applicable]) =>
@@ -220,9 +244,10 @@ export function ScenarioComparison({ data, enabled, slots, configurations, onCha
                   scope={`Scenario ${column + 1} overall`} animate={enabled && ready} onInspect={setInspectedDate} />
               </div>
               <div className="scenario-comparison-regions" inert={!ready ? "" : undefined} role="group" aria-label={`Scenario ${column + 1} regional trajectories`} tabIndex={0}>
+                <h3 className="scenario-comparison-region-heading">Regional · {nodeMetric.label}</h3>
                 {regions.map((region, index) => <section key={index} className="comparison-region-row" aria-label={`${region.name} (${region.id})`}>
-                  <div className="scenario-comparison-region-value"><span>{region.id} · {region.name}</span><strong>{formatComparisonValue(result.series.nodes[region.id]?.[dateIndex]?.[metric.key], metric.format)}</strong></div>
-                  <Chart compact points={charts.regions[index].points[column]} scalePoints={charts.regions[index].scale} seriesLabel={result.label} metric={metric}
+                  <div className="scenario-comparison-region-value"><span>{region.id} · {region.name}</span><strong>{formatComparisonValue(result.series.nodes[region.id]?.[dateIndex]?.[nodeMetric.key], nodeMetric.format)}</strong></div>
+                  <Chart compact points={charts.regions[index].points[column]} scalePoints={charts.regions[index].scale} seriesLabel={result.label} metric={nodeMetric}
                     date={date} currentDate={data.date} interventionEvents={[]} scope={`Scenario ${column + 1} ${region.name}`}
                     animate={enabled && ready} onInspect={setInspectedDate} />
                 </section>)}

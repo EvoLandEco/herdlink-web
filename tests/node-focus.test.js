@@ -33,7 +33,7 @@ function indicatorRuntime() {
     selectedNodeData: null,
     document: { getElementById: (id) => elements[id] },
     nodeGroup: { selectAll(selector) {
-      assert.equal(selector, ".nodeGroup");
+      assert.equal(selector, ".nodeGroup, .nodeLabel");
       return { classed(name, value) {
         assert.equal(name, "is-focused");
         nodes.forEach((node) => value(node) ? focused.add(node.id) : focused.delete(node.id));
@@ -83,7 +83,7 @@ function exitRuntime() {
     mainFigureSVG: { focus: (options) => calls.push(["network focus", options.preventScroll]) },
   };
   const context = vm.createContext({
-    selectedNodeData: { id: "CR35" }, window: {}, screenshotInProgress: false,
+    selectedNodeData: { id: "CR35" }, window: {},
     document: {
       getElementById: (id) => elements[id],
       addEventListener: (name, callback) => { listeners[name] = callback; },

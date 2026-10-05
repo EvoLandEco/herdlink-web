@@ -33,7 +33,7 @@ function hook() {
   const body = {};
   const document = Object.assign(new EventTarget(), { body, activeElement: body, getElementById: () => null });
   const bridge = {
-    canOpen: () => true, prepare() {},
+    prepare() {},
     read: () => snapshot,
     loadPreset: (id) => { calls.push(["preset", id]); return { label: id, detail: "Applied." }; },
     loadScenario: (scenario) => calls.push(["scenario", scenario]),

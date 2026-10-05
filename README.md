@@ -1,6 +1,6 @@
 <h1><img src="public/assets/herdlink-logo.svg" alt="HerdLink — Livestock Trade Networks" width="560"></h1>
 
-![Version](https://img.shields.io/badge/version-v0.9.8-2f6fed)
+![Version](https://img.shields.io/badge/version-v0.9.9-2f6fed)
 ![Deployment](https://img.shields.io/badge/deployment-GitHub%20Pages-121013?logo=github)
 ![Website](https://img.shields.io/website?url=https%3A%2F%2Fherdlink.nl&label=HerdLink.nl)
 ![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)
@@ -27,7 +27,7 @@ The [graduate simulation guide](docs/simulation-teaching-guide.md) explains the 
 - Partition and community views that summarize trade clustering, partition exposure, and CR-region mappings.
 - Help overlay with quick start notes, keyboard shortcuts, and interactive illustrations of regions, trade volume, and network paths.
 - Comparison overlay with paired global and regional metrics, trajectories, and intervention effects in both modes.
-- PNG export of the whole app, including controls, networks, and statistics panels.
+- Light and dark themes with an animated switch and a saved theme preference.
 
 Seed region selects the single region that starts infected, with CR35 selected by
 default. Initial infectious, exposed and recovered percentages define its state
@@ -46,7 +46,7 @@ findings, assumptions and evidence limits.
 The [population product contract](docs/population-products.md) defines the final
 file consumed by HerdLink. Source preparation and research remain outside the
 application. The control panel accepts a prepared inventory file. Private populations
-remain in memory; scenario storage and screenshot exports are blocked for them.
+remain in memory; scenario storage is blocked for them.
 
 Trade ledger and simulation modes share one network and two controls for movement:
 
@@ -186,11 +186,15 @@ each with its own chart and values for the inspected date. Each chart pairs
 dashed Original and solid Intervention curves on the same scale.
 Choose an individual region to inspect its trajectory and full statistics.
 Compare 3 opens three columns with a shared date inspector
-and chart scales. A single Metric selector below Presets in the
-side panel controls both overall and regional charts. Regions selects the same
-regions across all three columns. Ledger comparisons offer incoming and outgoing
-movements; network totals sum the regional values and exclude movements within
-a region. Comparison presets vary strategies,
+and chart scales. Overall and Regional selectors in Chart settings control their
+respective charts across all three columns. The lock beside them is on by default
+and keeps both selectors on the same metric. Unlock it to choose separate metrics,
+including metrics available only at one scale. Regions selects the same regions
+across all three columns. Ledger comparisons include movement totals, network
+structure, communities, and regional centrality. Retained movements counts allowed
+animal movements, including local movements once; regional values count movements
+sent by that region. Incoming and outgoing movements exclude local movements.
+Comparison presets vary strategies,
 target counts, response delays, and pause durations. Each column accepts a preset
 or saved scenario; its controls rerun the comparison after a short pause.
 The overlay's mode switch and `E` change the active application mode.
@@ -199,7 +203,7 @@ The overlay's mode switch and `E` change the active application mode.
 | --- | --- |
 | `E` | Switch between trade ledger and simulation modes |
 | `M` | Switch between map and graph views |
-| `S` | Export a screenshot |
+| `T` | Switch between light and dark themes |
 | `R` | Restore all links and node movement permissions |
 | `Q` | Exit focus mode |
 | `H` | Open or close the help overlay |
@@ -262,8 +266,7 @@ simulation settings, and regional links connect origin and destination regions.
   reference dates, and land-area survey vintages.
 - PDOK serves [BRT background tiles](https://www.pdok.nl/ogc-webservices/-/article/basisregistratie-topografie-achtergrondkaarten-brt-a-)
   and [aerial imagery](https://www.pdok.nl/ogc-webservices/-/article/pdok-luchtfoto-rgb-open-)
-  on demand. They require an internet connection. Tiles are embedded in the SVG
-  before PNG export, together with the layer legend.
+  on demand. They require an internet connection.
 
 The source data use CC BY 4.0. The MIT licence applies to the application code.
 
@@ -330,9 +333,8 @@ kit keeps its licensed icon selection; its release version is controlled in
 the [kit settings](https://docs.fontawesome.com/web/setup/use-kit#additional-settings).
 
 The Pages workflow stores published assets on `herdlink-pages-assets` and includes
-them in each deployment. This lets open tabs load their runtime, data, and
-screenshot code after another release. The archive is written before Pages
-publishes the site. A generated filename with different contents stops the
+them in each deployment. Open tabs load their runtime and data from this archive.
+The archive is written before Pages publishes the site. A generated filename with different contents stops the
 deployment. Files declared in `public/assets` keep their fixed paths and may
 be replaced.
 

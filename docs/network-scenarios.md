@@ -16,10 +16,13 @@ and builds its response schedule from that date. An edited scenario's preset
 marker clears when its settings differ from the loaded preset.
 
 Baseline view compares Original and Intervention and lists presets followed by
-three preset parameters. Compare 3 lists comparison presets followed by a shared
-Metric selector and Regions control in the side panel. The selected metric
-applies to overall and regional charts across all three columns. Each column
-provides independent scenario controls. The view switch sits above Presets in
+three preset parameters. Compare 3 lists comparison presets followed by Overall,
+Regional, and Regions controls in the side panel. Overall selects a network
+metric, while Regional selects a metric for individual regions. The lock beside
+these selectors is on by default and keeps their metrics together. Unlock it to
+choose separate metrics or metrics available at only one scale. Each selection
+applies across all three columns. Each column provides independent scenario
+controls. The view switch sits above Presets in
 the side panel. Custom sits inside Presets and opens three saved scenario slots.
 
 | Parameter | Default | Range | Applies to |

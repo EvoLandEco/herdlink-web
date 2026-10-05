@@ -271,8 +271,8 @@ export function createMapLayers({ svg, theme, fetchAsset, refreshRegions }) {
       const defs = svg.append("defs").attr("id", "map-layer-defs");
       defs.append("clipPath").attr("id", "map-country-clip").append("path").attr("d", path(geometry));
       const pattern = defs.append("pattern").attr("id", "map-census-missing").attr("width", 6).attr("height", 6).attr("patternUnits", "userSpaceOnUse");
-      pattern.append("rect").attr("width", 6).attr("height", 6).attr("fill", "#586371");
-      pattern.append("path").attr("d", "M0,6L6,0").attr("stroke", "#abb5c0").attr("stroke-width", 1);
+      pattern.append("rect").attr("width", 6).attr("height", 6).attr("fill", theme.muted);
+      pattern.append("path").attr("d", "M0,6L6,0").attr("stroke", theme.text).attr("stroke-width", 1);
       group.attr("clip-path", "url(#map-country-clip)");
       context = { projection, path, width, height, group };
       render();

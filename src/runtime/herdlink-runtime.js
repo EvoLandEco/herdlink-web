@@ -47,22 +47,24 @@
           window.isDoingTemporalUpdate = false;
           const themeStyles = getComputedStyle(document.documentElement);
           const theme = {
-            text: themeStyles.getPropertyValue("--color-text").trim(),
-            muted: themeStyles.getPropertyValue("--color-text-muted").trim(),
-            surface: themeStyles.getPropertyValue("--color-surface").trim(),
-            elevated: themeStyles.getPropertyValue("--color-surface-strong").trim(),
-            canvas: themeStyles.getPropertyValue("--color-canvas").trim(),
-            border: themeStyles.getPropertyValue("--color-border").trim(),
-            grid: themeStyles.getPropertyValue("--color-chart-grid").trim(),
-            accent: themeStyles.getPropertyValue("--color-accent").trim(),
-            onAccent: themeStyles.getPropertyValue("--color-on-accent").trim(),
-            incoming: themeStyles.getPropertyValue("--color-chart-incoming").trim(),
-            outgoing: themeStyles.getPropertyValue("--color-chart-outgoing").trim(),
-            font: themeStyles.getPropertyValue("--font-body").trim(),
+            text: "var(--color-text)",
+            muted: "var(--color-text-muted)",
+            surface: "var(--color-surface)",
+            elevated: "var(--color-surface-strong)",
+            canvas: "var(--color-canvas)",
+            border: "var(--color-border)",
+            grid: "var(--color-chart-grid)",
+            accent: "var(--color-accent)",
+            onAccent: "var(--color-on-accent)",
+            incoming: "var(--color-chart-incoming)",
+            outgoing: "var(--color-chart-outgoing)",
+            font: "var(--font-body)",
           };
-          const tradeIntensity = d3.interpolateRgb(theme.accent, "#364f67");
-          const exposureIntensity = d3.interpolateRgb("#634350", "#ffb599");
-          const svg = d3.select("#col2 svg");
+          const tradeIntensity = (value) => `color-mix(in srgb, ${theme.accent}, #364f67 ${value * 100}%)`;
+          const exposureIntensityDark = d3.interpolateRgb("#634350", "#ffb599");
+          const exposureIntensityLight = d3.interpolateRgb("#b9918c", "#ac3d28");
+          const exposureIntensity = (value) => `light-dark(${exposureIntensityLight(value)}, ${exposureIntensityDark(value)})`;
+          const svg = d3.select("#mainFigureSVG");
           const calloutSvg = d3.select("#networkCalloutSVG");
           let containerCol2 = document.getElementById("col2");
           let w = containerCol2.clientWidth,
@@ -111,11 +113,11 @@
           const numberPrintedHotspots = 3;
           let edgeExtent, edgeColor, nodeColor, nodeSize;
           const hotspotStyles = {
-            inDegree: { color: "#009e73", dash: "none", pattern: "Solid" },
-            outDegree: { color: "#56b4e9", dash: "10 5", pattern: "Long dash" },
-            betweenness: { color: "#e69f00", dash: "0 5", pattern: "Dotted" },
-            pageRank: { color: "#f0e442", dash: "8 4 0 4", pattern: "Dash and dot" },
-            eigenvector: { color: "#cc79a7", dash: "3 5", pattern: "Short dash" },
+            inDegree: { color: "var(--color-hotspot-in)", dash: "none", pattern: "Solid" },
+            outDegree: { color: "var(--color-hotspot-out)", dash: "10 5", pattern: "Long dash" },
+            betweenness: { color: "var(--color-hotspot-between)", dash: "0 5", pattern: "Dotted" },
+            pageRank: { color: "var(--color-hotspot-rank)", dash: "8 4 0 4", pattern: "Dash and dot" },
+            eigenvector: { color: "var(--color-hotspot-eigen)", dash: "3 5", pattern: "Short dash" },
           };
           const hotspotRingSpacing = 4;
           const hotspotRingMaxScale = Number(themeStyles.getPropertyValue("--hotspot-ring-max-scale"));
@@ -137,10 +139,10 @@
           let preYDomainGlobalStats = null;
           let preYDomainNodeStats = null;
           const simulationCompartmentColors = {
-            S: "#7ccbae",
-            E: "#f1c77b",
-            I: "#f28b96",
-            R: "#78b8ed",
+            S: "var(--color-chart-green)",
+            E: "var(--color-chart-amber)",
+            I: "var(--color-chart-rose)",
+            R: "var(--color-chart-blue)",
           };
           const simulationCompartmentLabels = {
             S: "Susceptible",
@@ -161,33 +163,23 @@
             }
           }
 
+          const simulationPrevalenceDark = d3.interpolateRgbBasis([
+            "#263b4c", "#46526a", "#79637a", "#af7a87", "#db9b97", "#ffcca8",
+          ]);
+          const simulationPrevalenceLight = d3.interpolateRgbBasis([
+            "#e4edf1", "#ead5d7", "#e7b6b5", "#d98c8c", "#bf5966", "#952e49",
+          ]);
           const simulationPrevalenceScale = d3
-            .scaleSequential(
-              d3.interpolateRgbBasis([
-                "#263b4c",
-                "#46526a",
-                "#79637a",
-                "#af7a87",
-                "#db9b97",
-                "#ffcca8",
-              ]),
-            )
+            .scaleSequential((value) => `light-dark(${simulationPrevalenceLight(value)}, ${simulationPrevalenceDark(value)})`)
             .domain([0, 1])
-            .unknown("#64748b")
+            .unknown(theme.muted)
             .clamp(true);
           const simulationPrevalenceTextScale = d3
             .scaleSequential(
-              d3.interpolateRgbBasis([
-                "#a5b5c8",
-                "#b5bbca",
-                "#c7b9ca",
-                "#ddb2bf",
-                "#efb7b2",
-                "#ffcca8",
-              ]),
+              (value) => `color-mix(in srgb, ${theme.muted}, ${theme.incoming} ${value * 100}%)`,
             )
             .domain([0, 1])
-            .unknown("#64748b")
+            .unknown(theme.muted)
             .clamp(true);
           let appDataMode = "trade";
           const appModeSwitchBounceMs = 550;
@@ -456,7 +448,7 @@
               .attr("height", height)
               .attr("rx", 3)
               .attr("ry", 3)
-              .style("fill", "rgba(107, 114, 128, 0.18)")
+              .style("fill", "color-mix(in srgb, var(--color-text-muted) 18%, transparent)")
               .merge(range)
               .call((selection) =>
                 transitionSelection(selection)
@@ -665,16 +657,23 @@
             mergedGroup.raise();
           }
 
-          function getReadableFillTextColor(fill) {
-            const color = d3.color(fill);
-            if (!color) return theme.onAccent;
-            const luminance =
-              (0.299 * color.r + 0.587 * color.g + 0.114 * color.b) / 255;
-            return luminance < 0.56 ? "#fff" : theme.onAccent;
-          }
-
           function clampNumber(value, min, max) {
             return Math.min(max, Math.max(min, value));
+          }
+
+          function getReadableFillTextColor(fill) {
+            const luminance = (value) => {
+              const color = d3.color(value);
+              const channels = [color.r, color.g, color.b].map((channel) => {
+                const value = channel / 255;
+                return value <= 0.04045 ? value / 12.92 : ((value + 0.055) / 1.055) ** 2.4;
+              });
+              return channels[0] * 0.2126 + channels[1] * 0.7152 + channels[2] * 0.0722;
+            };
+            const background = luminance(fill);
+            const ink = luminance("#082623");
+            const inkContrast = (Math.max(background, ink) + 0.05) / (Math.min(background, ink) + 0.05);
+            return 1.05 / (background + 0.05) > inkContrast ? "#fff" : "#082623";
           }
 
           function setTradeEdgeScales(links) {
@@ -1360,6 +1359,7 @@
 
           function getComparisonMetricDefinitions(mode) {
             const metric = (key, label, format, description) => ({ key, label, format, description });
+            const retainedMovements = metric("totalTradeVolume", "Retained movements", "count", "Animals moved on permitted trade records during the displayed period, including movements within a region once. Regional values count movements sent by that region.");
             if (mode === "simulation") {
               const compartments = [
                 metric("S", "Susceptible", "decimal", "Susceptible model population units at the end of the displayed period."),
@@ -1372,8 +1372,9 @@
                 metric("cumulativeInfections", "Cumulative infections", "decimal", "New infection events summed across daily steps, excluding the initial seed. Reinfections count again in SIS and SEIRS."),
               ];
               return {
-                globalMetrics: compartments,
+                globalMetrics: compartments.concat(retainedMovements),
                 nodeMetrics: compartments.concat([
+                  retainedMovements,
                   metric("incomingExposure", "Incoming exposure", "decimal", "Incoming movement pressure from other regions, weighted by source prevalence at each day's start, multiplied by the movement coefficient and summed across the displayed period."),
                   metric("outgoingPressure", "Outgoing pressure", "decimal", "Outgoing movement pressure to other regions, weighted by this region's prevalence at each day's start, multiplied by the movement coefficient and summed across the displayed period."),
                 ]),
@@ -1381,7 +1382,7 @@
             }
             return {
               globalMetrics: [
-                metric("totalTradeVolume", "Animal movements", "count", "Total animal movements on enabled ledger records, including movements within a region."),
+                retainedMovements,
                 metric("totalNodes", "Trading regions", "count", "Regions with at least one enabled positive ledger record."),
                 metric("totalEdges", "Trade records", "count", "Enabled positive ledger records, including records within a region."),
                 metric("avgTradeEdge", "Movements per record", "decimal", "Total animal movements divided by enabled positive ledger records."),
@@ -1394,6 +1395,7 @@
                 metric("inDegree", "Incoming movements", "count", "Cross-region animal movements received on enabled records, summed across all regions. Movements within a region are excluded."),
               ],
               nodeMetrics: [
+                retainedMovements,
                 metric("inDegree", "Incoming movements", "count", "Animal movements arriving from other regions on enabled records."),
                 metric("outDegree", "Outgoing movements", "count", "Animal movements sent to other regions on enabled records."),
                 metric("betweenness", "Betweenness", "decimal", "Directed weighted shortest path betweenness, using inverse movement volume as distance."),
@@ -1413,6 +1415,20 @@
               const nodes = nodesAtDate(key);
               for (const id of ids) {
                 series.nodes[id].push({ date: key, ...project(nodes?.[id], definitions.nodeMetrics) });
+              }
+            }
+            return series;
+          }
+
+          function buildSimulationComparisonSeries(trajectory) {
+            const series = buildComparisonSeries(uniqueDates, trajectory.ids, getComparisonMetricDefinitions("simulation"),
+              (key) => trajectory.frameByKey[key]?.summary, (key) => trajectory.frameByKey[key]?.nodeStates);
+            for (const [index, point] of series.global.entries()) {
+              point.totalTradeVolume = 0;
+              for (const id of trajectory.ids) series.nodes[id][index].totalTradeVolume = 0;
+              for (const link of trajectory.frameByKey[point.date].linkStates.values()) {
+                point.totalTradeVolume += link.ledgerWeight;
+                series.nodes[link.source][index].totalTradeVolume += link.ledgerWeight;
               }
             }
             return series;
@@ -1438,8 +1454,7 @@
               const trajectory = originalTrajectory
                 ? window.herdlinkSimulation.aggregateDailyTrajectory(originalTrajectory, uniqueDates)
                 : buildSimulationTrajectory(settings, { nodeInterventions: new Map(), linkInterventions: new Map() });
-              cache.original = buildComparisonSeries(uniqueDates, trajectory.ids, getComparisonMetricDefinitions("simulation"),
-                (key) => trajectory.frameByKey[key]?.summary, (key) => trajectory.frameByKey[key]?.nodeStates);
+              cache.original = buildSimulationComparisonSeries(trajectory);
               cache.originalKey = originalKey;
             }
             return cache.original;
@@ -1448,7 +1463,7 @@
           function areScenarioControlsDisabled() {
             return !loadedCSVData || !uniqueDates.length || !currentTimeSpan ||
               areNetworkControlsLocked() || window.isDoingTemporalUpdate || window.isSwitchingAppMode ||
-              simulationRecomputeTimer !== null || screenshotInProgress ||
+              simulationRecomputeTimer !== null ||
               !!document.getElementById("mainContainer")?.closest("[inert]");
           }
 
@@ -1973,8 +1988,7 @@
             let series;
             if (appDataMode === "simulation") {
               const trajectory = buildSimulationTrajectory(settings, { nodeInterventions, linkInterventions });
-              series = buildComparisonSeries(uniqueDates, ids, definitions,
-                (key) => trajectory.frameByKey[key]?.summary, (key) => trajectory.frameByKey[key]?.nodeStates);
+              series = buildSimulationComparisonSeries(trajectory);
             } else {
               const stats = computeTemporalNetworkStats(uniqueDates, { data: loadedCSVData, nodeInterventions, linkInterventions, store: false });
               series = buildComparisonSeries(uniqueDates, ids, definitions,
@@ -2027,15 +2041,12 @@
             if (mode === "simulation") {
               const trajectory = simulationState.trajectory;
               if (!trajectory) return { ...snapshot, status: "loading", regions, original: null, intervention: null };
-              const project = (value) => buildComparisonSeries(uniqueDates, ids, definitions,
-                (key) => value.frameByKey[key]?.summary,
-                (key) => value.frameByKey[key]?.nodeStates);
               {
                 cache.original = getOriginalSimulationSeries(settings,
                   !simulationNodeInterventions.size && !simulationLinkInterventions.size ? trajectory : null);
               }
               if (cache.trajectory !== trajectory) {
-                cache.intervention = project(trajectory);
+                cache.intervention = buildSimulationComparisonSeries(trajectory);
                 cache.trajectory = trajectory;
               }
             } else {
@@ -2210,7 +2221,7 @@
             if (!data.length) return;
             const container = d3.select("#globalStats");
             const node = container.node();
-            const margin = { top: 68, right: 32, bottom: 30, left: 36 };
+            const margin = { top: 68, right: 24, bottom: 30, left: 36 };
             const width = Math.max(10, node.clientWidth - margin.left - margin.right);
             const height = Math.max(10, node.clientHeight - margin.top - margin.bottom);
             container
@@ -2381,8 +2392,8 @@
             const current = simulationState.currentFrame;
             const period = { daily: "Daily", weekly: "Weekly", monthly: "Monthly", yearly: "Yearly" }[currentTimeSpan];
             const sources = [
-              { key: "contactInfections", label: "Contact", color: "#72e4d4" },
-              { key: "movementInfections", label: "Movement", color: "#f1c77b" },
+              { key: "contactInfections", label: "Contact", color: "var(--color-chart-outgoing)" },
+              { key: "movementInfections", label: "Movement", color: "var(--color-chart-amber)" },
             ];
             container.select(".simulation-incidence-period").text(`${period} totals`);
             container.selectAll(".simulation-incidence-summary").data([null]).join("div")
@@ -2390,7 +2401,7 @@
               .html(sources.map((source) => `<span style="--source-color:${source.color}">
                 <i aria-hidden="true"></i>${source.label}<strong>${formatSmall(current.summary[source.key])}</strong>
               </span>`).join(""));
-            const margin = { top: 68, right: 32, bottom: 30, left: 36 };
+            const margin = { top: 68, right: 24, bottom: 30, left: 36 };
             const width = Math.max(10, node.clientWidth - margin.left - margin.right);
             const height = Math.max(10, node.clientHeight - margin.top - margin.bottom);
             const svg = container.selectAll("svg.simulation-incidence-chart").data([null]).join("svg")
@@ -2433,7 +2444,7 @@
             if (!frame || selectedNodeData) return;
             const container = d3.select("#nodeStats");
             const node = container.node();
-            const margin = { top: 58, right: 22, bottom: 24, left: 52 };
+            const margin = { top: 58, right: 24, bottom: 24, left: 52 };
             const width = Math.max(10, node.clientWidth - margin.left - margin.right);
             const height = Math.max(10, node.clientHeight - margin.top - margin.bottom);
             container
@@ -2466,10 +2477,12 @@
             g.attr("transform", `translate(${margin.left},${margin.top})`);
             svg.selectAll(".simulation-panel-title").remove();
 
+            const barColor = d3.scaleOrdinal(["#78b8ed", "#ffba86", "#7ccbae", "#f28b96", "#bca6ed", "#d3b49a", "#e8a2cf", "#a0b1c5", "#cfce87", "#72d5df"])
+              .domain(nodeColor.domain()).unknown("#a5b5c8");
             const data = Object.entries(frame.nodeStates)
               .map(([id, state]) => ({
                 id, ...state, statnaam: getStatnaam(id),
-                color: d3.interpolateRgb(theme.surface, getSimulationPartitionColor(getSimulationPartitionKey(id)))(0.65),
+                color: d3.interpolateRgb("#141e2b", barColor(Number(getSimulationPartitionKey(id))))(0.65),
               }))
               .filter((state) => state.N > 0)
               .sort((a, b) => b.prevalence - a.prevalence)
@@ -2477,8 +2490,7 @@
             const x = d3
               .scaleLinear()
               .domain([0, d3.max(data, (d) => d.prevalence) || 0.01])
-              .range([0, width])
-              .nice();
+              .range([0, width]);
             const y = d3
               .scaleBand()
               .domain(data.map((d) => d.id))
@@ -2586,7 +2598,7 @@
               .attr("stop-color", (value) => simulationPrevalenceScale(value * maximum));
             const items = [
               { label: `Prevalence · 0–${formatPct(maximum)}`, type: "fill", color: "url(#simulation-spatial-prevalence-gradient)" },
-              { label: "Attributed entries", type: "line", color: "#f1c77b" },
+              { label: "Attributed entries", type: "line", color: "var(--color-chart-amber)" },
               { label: "New cases", type: "circle", color: theme.accent },
             ];
             const legend = svg
@@ -2830,7 +2842,7 @@
                   ? simulationPrevalenceScale(state.prevalence)
                   : theme.surface;
               })
-              .attr("stroke", "rgba(255,255,255,0.85)")
+              .attr("stroke", theme.text)
               .attr("stroke-width", 0.7)
               .attr("opacity", 0.86);
             g.selectAll("path.simulation-spatial-region").selectAll("title")
@@ -2856,6 +2868,35 @@
               return `M${sx},${sy}Q${cx},${cy} ${tx},${ty}`;
             };
 
+            const flowCasings = g
+              .selectAll("g.simulation-spatial-flow-casings")
+              .data([null])
+              .join("g")
+              .attr("class", "simulation-spatial-flow-casings")
+              .attr("aria-hidden", "true")
+              .selectAll("path")
+              .data(visibleFlows, (item) => `${item.source}-${item.target}`);
+            flowCasings
+              .enter()
+              .append("path")
+              .attr("stroke-width", 0)
+              .attr("opacity", 0)
+              .merge(flowCasings)
+              .call((selection) =>
+                transitionSelection(selection)
+                  .attr("d", flowPath)
+                  .attr("stroke-width", (item) => flowWidth(item.riskLoad) + 2)
+                  .attr("opacity", 1),
+              );
+            flowCasings
+              .exit()
+              .call((selection) =>
+                transitionSelection(selection)
+                  .attr("stroke-width", 0)
+                  .attr("opacity", 0)
+                  .remove(),
+              );
+
             const flowLayer = g
               .selectAll("g.simulation-spatial-flow-layer")
               .data([null])
@@ -2879,7 +2920,7 @@
                   .attr("d", flowPath)
                   .attr("stroke", simulationCompartmentColors.E)
                   .attr("stroke-width", (item) => flowWidth(item.riskLoad))
-                  .attr("opacity", 0.7),
+                  .attr("opacity", 1),
               );
             flowLayer.selectAll("path.simulation-spatial-flow").selectAll("title")
               .data((item) => [item]).join("title")
@@ -3311,7 +3352,7 @@
                   .attr("stroke", (cell) =>
                     cell.source === cell.target
                       ? theme.muted
-                      : "rgba(255,255,255,0.9)",
+                      : theme.text,
                   )
                   .attr("stroke-width", (cell) =>
                     cell.source === cell.target ? 1.1 : 0.6,
@@ -3444,13 +3485,13 @@
           function styleSimulationFocusChartChrome(root) {
             root
               .selectAll(".simulation-focus-axis text")
-              .attr("fill", "rgba(255,255,255,0.95)");
+              .attr("fill", theme.text);
             root
               .selectAll(".simulation-focus-axis path, .simulation-focus-axis line")
-              .attr("stroke", "rgba(255,255,255,0.62)");
+              .attr("stroke", theme.muted);
             root
               .selectAll(".simulation-focus-grid line")
-              .attr("stroke", "rgba(255,255,255,0.2)")
+              .attr("stroke", theme.grid)
               .attr("stroke-dasharray", "3 3");
             root.selectAll(".simulation-focus-grid path").attr("stroke", "none");
             root.selectAll(".simulation-focus-grid text").attr("fill", "none");
@@ -3593,7 +3634,7 @@
                 date: current.date,
                 height,
                 rangeWidth: 10,
-                lineColor: "#ffffff",
+                lineColor: theme.text,
               });
             }
 
@@ -3864,17 +3905,17 @@
               {
                 key: "Focal I",
                 value: partition.I ? (state.I || 0) / partition.I : 0,
-                color: "#78b8ed",
+                color: "var(--color-chart-blue)",
               },
               {
                 key: "In cross",
                 value: incomingBase ? stats.incomingCross / incomingBase : 0,
-                color: "#f1c77b",
+                color: "var(--color-chart-amber)",
               },
               {
                 key: "Out cross",
                 value: outgoingBase ? stats.outgoingCross / outgoingBase : 0,
-                color: "#f28b96",
+                color: "var(--color-chart-rose)",
               },
             ];
             const x = d3
@@ -3949,7 +3990,7 @@
               .attr("x", (d) => x(d.key) + x.bandwidth() / 2)
               .attr("y", height - 6)
               .attr("text-anchor", "middle")
-              .attr("fill", "rgba(255,255,255,0.95)")
+              .attr("fill", theme.onAccent)
               .text((d) => formatPct(d.value))
               .merge(labels)
               .text((d) => formatPct(d.value))
@@ -3970,17 +4011,17 @@
               {
                 key: "Incoming",
                 value: state.incomingExposure || 0,
-                color: "#f1c77b",
+                color: "var(--color-chart-amber)",
               },
               {
                 key: "Outgoing",
                 value: state.outgoingPressure || 0,
-                color: "#f28b96",
+                color: "var(--color-chart-rose)",
               },
               {
                 key: "New cases",
                 value: state.newInfections || 0,
-                color: "#78b8ed",
+                color: "var(--color-chart-blue)",
               },
             ];
             const x = d3
@@ -4132,7 +4173,7 @@
               .attr("width", x.bandwidth())
               .attr("height", 0)
               .attr("rx", 4)
-              .attr("fill", "#f1c77b")
+              .attr("fill", "var(--color-chart-amber)")
               .merge(incomingBars)
               .call((selection) =>
                 transitionSelection(selection)
@@ -4155,7 +4196,7 @@
               .attr("width", x.bandwidth())
               .attr("height", 0)
               .attr("rx", 4)
-              .attr("fill", "#f28b96")
+              .attr("fill", "var(--color-chart-rose)")
               .merge(outgoingBars)
               .call((selection) =>
                 transitionSelection(selection)
@@ -4178,7 +4219,7 @@
               .attr("x", (d) => x(d.key) + x.bandwidth() / 2)
               .attr("y", height - 6)
               .attr("text-anchor", "middle")
-              .attr("fill", "rgba(255,255,255,0.95)")
+              .attr("fill", theme.onAccent)
               .text((d) => formatSmall(d.total))
               .merge(labels)
               .text((d) => (d.total > 0 ? formatSmall(d.total) : ""))
@@ -4190,8 +4231,8 @@
             labels.exit().remove();
 
             const legendData = [
-              { key: "Incoming", color: "#f1c77b" },
-              { key: "Outgoing", color: "#f28b96" },
+              { key: "Incoming", color: "var(--color-chart-amber)" },
+              { key: "Outgoing", color: "var(--color-chart-rose)" },
             ];
             const legendItemWidth = 86;
             const legendWidth = legendData.length * legendItemWidth - 8;
@@ -4227,7 +4268,7 @@
               .join("text")
               .attr("x", 20)
               .attr("y", 8)
-              .attr("fill", "rgba(255,255,255,0.95)")
+              .attr("fill", theme.text)
               .style("font-size", "10px")
               .style("font-weight", 700)
               .text((d) => d.key);
@@ -4339,7 +4380,7 @@
                 date: current.date,
                 height,
                 rangeWidth: 10,
-                lineColor: "#ffffff",
+                lineColor: theme.text,
               });
             }
           }
@@ -5364,7 +5405,8 @@
             const colorScale = d3
               .scaleLinear()
               .domain([0, 1, 2])
-              .range(["#b2c248", "salmon", "orange"])
+              .range(["var(--color-community-olive)", "var(--color-chart-coral)", "var(--color-chart-amber)"])
+              .interpolate((start, end) => (value) => `color-mix(in srgb, ${start}, ${end} ${value * 100}%)`)
               .clamp(true);
     
             // Update the risk score display.
@@ -5381,9 +5423,8 @@
               displayElement.style.display = "block";
             }
     
-            // Keep baseline value color fixed to salmon.
             const initialSpan = displayElement.querySelector(".initial-sr");
-            initialSpan.style.color = "salmon";
+            initialSpan.style.color = "var(--color-chart-coral)";
     
             // Color current value by normalized risk.
             const currentSpan = displayElement.querySelector(".current-sr");
@@ -5463,15 +5504,15 @@
               .attr("x2", width).attr("y2", 0).attr("stroke", theme.muted)
               .attr("stroke-dasharray", "4 4").attr("stroke-opacity", 0.65);
             g.selectAll("path.trade-concentration-area").data([data.points]).join("path")
-              .attr("class", "trade-concentration-area").attr("fill", "#f1c77b").attr("fill-opacity", 0.13)
+              .attr("class", "trade-concentration-area").attr("fill", "var(--color-chart-amber)").attr("fill-opacity", 0.13)
               .attr("d", area);
             g.selectAll("path.trade-concentration-curve").data([data.points]).join("path")
               .attr("class", "trade-concentration-curve").attr("fill", "none")
-              .attr("stroke", "#f1c77b").attr("stroke-width", 2).attr("d", line);
+              .attr("stroke", "var(--color-chart-amber)").attr("stroke-width", 2).attr("d", line);
             const point = g.selectAll("circle.trade-concentration-point").data([data.coverage]).join("circle")
               .attr("class", "trade-concentration-point").attr("cx", (point) => x(point.routeShare))
               .attr("cy", (point) => y(point.volumeShare)).attr("r", 4)
-              .attr("fill", theme.surface).attr("stroke", "#f1c77b").attr("stroke-width", 1.5);
+              .attr("fill", theme.surface).attr("stroke", "var(--color-chart-amber)").attr("stroke-width", 1.5);
             point.selectAll("title").data([data.coverage]).join("title")
               .text((point) => `${point.routeCount} of ${data.routeCount} routes carry ${formatPct(point.volumeShare)} of volume`);
           }
@@ -5528,7 +5569,7 @@
             const containerNode = container.node();
             if (!containerNode.clientWidth || !containerNode.clientHeight) return;
             const controls = document.getElementById("globalStatsControls");
-            const margin = { top: controls.offsetTop + controls.offsetHeight + 10, right: 30, bottom: 40, left: 10 };
+            const margin = { top: controls.offsetTop + controls.offsetHeight + 10, right: 24, bottom: 40, left: 10 };
             const width = containerNode.clientWidth - margin.left - margin.right;
             const height = containerNode.clientHeight - margin.top - margin.bottom;
             let svgContainer = container.select("svg");
@@ -5559,7 +5600,7 @@
             const x = d3
               .scaleTime()
               .domain(d3.extent(data, (d) => d.date))
-              .range([xPadding, width - xPadding]);
+              .range([xPadding, width]);
             const minValue = d3.min(data, (d) => d.value);
             const maxValue = d3.max(data, (d) => d.value);
             let yDomain;
@@ -5805,7 +5846,7 @@
               return;
             }
 
-            const margin = { top: 40, right: 30, bottom: 40, left: 10 };
+            const margin = { top: 40, right: 24, bottom: 40, left: 10 };
             const container = d3.select("#nodeStats");
             container.selectAll(".simulation-panel-heading").remove();
             const containerWidth = container.node().clientWidth;
@@ -5889,7 +5930,7 @@
             const x = d3
               .scaleTime()
               .domain(d3.extent(dateStrings, (d) => parseDate(d)))
-              .range([xPadding, width - xPadding]);
+              .range([xPadding, width]);
             let y;
             if (selectedMetric === "inDegree" || selectedMetric === "outDegree") {
               y = d3.scaleSqrt().domain([yMin, yMax]).range([height, 0]);
@@ -6033,10 +6074,9 @@
               d3.drag().on("drag", function (event) {
                 // Compute the new x position of the rectangle and constrain it within the x-scale range.
                 let newX = event.x;
-                // Constrain: newX should not be less than xPadding and not beyond (width - xPadding - windowWidth)
                 newX = Math.max(
                   xPadding,
-                  Math.min(newX, width - xPadding - windowWidth),
+                  Math.min(newX, width - windowWidth),
                 );
                 // Update the rectangle's x position.
                 highlightRect.attr("x", newX);
@@ -6351,6 +6391,8 @@
     
               // Compute node stats (use all nodes).
               const nodeStats = computeHotSpotMetrics(nodes, enabledLinks);
+              for (const node of Object.values(nodeStats)) node.totalTradeVolume = 0;
+              for (const link of enabledLinks) nodeStats[link.source.id].totalTradeVolume += link.weight;
               // Combine all stats into an object.
               const stats = {
                 totalNodes: simpleStats.totalNodes,
@@ -7445,7 +7487,7 @@
               .attr("operator", "dilate")
               .attr("radius", 1)
               .attr("result", "outline");
-            hotspotOutline.append("feFlood").attr("flood-color", theme.canvas);
+            hotspotOutline.append("feFlood").attr("flood-color", `light-dark(${theme.muted}, ${theme.canvas})`);
             hotspotOutline.append("feComposite").attr("in2", "outline").attr("operator", "in");
             const outlineMerge = hotspotOutline.append("feMerge");
             outlineMerge.append("feMergeNode");
@@ -7549,7 +7591,7 @@
     
           function initAesthetics() {
             setTradeEdgeScales(nonZeroLinks);
-            nodeColor = d3.scaleOrdinal(["#78b8ed", "#ffba86", "#7ccbae", "#f28b96", "#bca6ed", "#d3b49a", "#e8a2cf", "#a0b1c5", "#cfce87", "#72d5df"])
+            nodeColor = d3.scaleOrdinal(["blue", "orange", "green", "rose", "purple", "tan", "pink", "slate", "olive", "cyan"].map((color) => `var(--color-community-${color})`))
               .domain(Array.from(new Set(Object.values(tradeCommunityTimeline?.partition || {}))).sort((a, b) => a - b))
               .unknown(theme.muted);
             nodeSize = d3
@@ -7672,8 +7714,8 @@
             content.selectAll("*").remove();
             const gradient = content.append("defs").append("linearGradient")
               .attr("id", "networkCalloutSurface").attr("x2", "1").attr("y2", "1");
-            gradient.append("stop").attr("stop-color", "#24323f");
-            gradient.append("stop").attr("offset", "1").attr("stop-color", "#111b27");
+            gradient.append("stop").attr("stop-color", theme.elevated);
+            gradient.append("stop").attr("offset", "1").attr("stop-color", theme.canvas);
             content.append("rect").attr("class", "network-callout-surface")
               .attr("width", width).attr("height", height).attr("rx", 12);
             content.append("line").attr("class", "network-callout-accent")
@@ -8093,7 +8135,7 @@
               const label = `Focus on ${id}`;
               if (region.textContent !== label) region.textContent = label;
             }
-            nodeGroup?.selectAll(".nodeGroup")
+            nodeGroup?.selectAll(".nodeGroup, .nodeLabel")
               .classed("is-focused", (node) => node.id === id);
           }
 
@@ -8151,7 +8193,6 @@
               .filter((nd) => String(nd.id) === String(d.id))
               .attr("fill", theme.text)
               .attr("font-weight", "bold")
-              .attr("background", "red")
               .attr("font-size", "21px")
               .attr("filter", "url(#dropShadow)");
     
@@ -8308,15 +8349,7 @@
             d3.select(".trade-info-header").classed(classStringA, true);
             d3.select("#inArboContainer").classed(classStringA, true);
     
-            // Switch university logo to white version
-            fetchAsset("assets/files/herdlink/WUR_W_standard_2021.svg", "blob")
-              .then((blob) => {
-                const objectUrl = URL.createObjectURL(blob);
-                document.querySelector(".watermark-logo").src = objectUrl;
-              })
-              .catch((error) => {
-                console.error("Error loading watermark SVG:", error);
-              });
+
           }
     
           // Clear Selection (If Clicking Again/Unclicked)
@@ -8500,15 +8533,7 @@
               updateInOutArbos();
             }
     
-            // Switch the university logo back to the black version
-            fetchAsset("assets/files/herdlink/WUR_ZW_standard_2021.svg", "blob")
-              .then((blob) => {
-                const objectUrl = URL.createObjectURL(blob);
-                document.querySelector(".watermark-logo").src = objectUrl;
-              })
-              .catch((error) => {
-                console.error("Error loading watermark SVG:", error);
-              });
+
           }
     
           // Lookup coordinates from the geojson by statcode.
@@ -8605,7 +8630,7 @@
                           <span class="trade-icon"><i class="${icon}"></i></span>
                           <span class="trade-distance">
                             <svg class="distance-bar" viewBox="0 0 50 10" width="50" height="10" aria-hidden="true" focusable="false">
-                              <rect x="0" y="0" width="50" height="10" fill="rgba(255,255,255,0.18)"></rect>
+                              <rect x="0" y="0" width="50" height="10" fill="var(--color-chart-grid)"></rect>
                               <rect x="0" y="0" width="${barWidth}" height="10" fill="${barColor}"></rect>
                             </svg>
                           </span>
@@ -8707,7 +8732,7 @@
           // Focus-mode Trade Node Insight
           const FOCUS_OUT_COLOR = theme.outgoing;
           const FOCUS_IN_COLOR = theme.incoming;
-          const FOCUS_AXIS_COLOR = "rgba(255,255,255,0.6)";
+          const FOCUS_AXIS_COLOR = theme.muted;
     
           function getLinkSourceId(link) {
             return typeof link.source === "object" ? link.source.id : link.source;
@@ -8742,7 +8767,7 @@
               .attr("y", height / 2)
               .attr("text-anchor", "middle")
               .attr("dominant-baseline", "middle")
-              .attr("fill", "rgba(255,255,255,0.7)")
+              .attr("fill", theme.muted)
               .style("font-size", "12px")
               .text(msg);
           }
@@ -9060,7 +9085,7 @@
                   .attr("y", height / 2)
                   .attr("text-anchor", "middle")
                   .attr("dominant-baseline", "middle")
-                  .attr("fill", "rgba(255,255,255,0.7)")
+                  .attr("fill", theme.muted)
                   .style("font-size", "12px")
                   .style("opacity", 0)
                   .text((d) => d)
@@ -9087,7 +9112,7 @@
               .data([null])
               .join("line")
               .attr("class", "center")
-              .attr("stroke", "rgba(255,255,255,0.6)")
+              .attr("stroke", theme.muted)
               .transition(t)
               .attr("x1", x(0))
               .attr("x2", x(0))
@@ -9206,7 +9231,7 @@
               .style("font-size", "10px");
             g.selectAll("g.x-axis path, g.x-axis line").attr(
               "stroke",
-              "rgba(255,255,255,0.35)",
+              theme.border,
             );
           }
     
@@ -9268,7 +9293,7 @@
                       .attr("y", height / 2)
                       .attr("text-anchor", "middle")
                       .attr("dominant-baseline", "middle")
-                      .attr("fill", "rgba(255,255,255,0.7)")
+                      .attr("fill", theme.muted)
                       .style("font-size", "12px")
                       .style("opacity", 0)
                       .text((d) => d)
@@ -9507,7 +9532,7 @@
               .selectAll("text")
               .attr("fill", theme.text)
               .style("font-size", "10px");
-            axisG.selectAll("path,line").attr("stroke", "rgba(255,255,255,0.35)");
+            axisG.selectAll("path,line").attr("stroke", theme.border);
     
             // Weighted medians
             const outMed = weightedQuantile(
@@ -9593,7 +9618,7 @@
                       .attr("y", height / 2)
                       .attr("text-anchor", "middle")
                       .attr("dominant-baseline", "middle")
-                      .attr("fill", "rgba(255,255,255,0.7)")
+                      .attr("fill", theme.muted)
                       .style("font-size", "12px")
                       .style("opacity", 0)
                       .text((d) => d)
@@ -10591,10 +10616,10 @@
           }
 
           function distanceTradeFitColor(fit) {
-            if (fit.status === "fit") return "#39ff14";
-            if (fit.status === "exponential-limit") return "#00e5ff";
-            if (fit.status === "power-law-limit") return "#fff200";
-            return "#ff1744";
+            if (fit.status === "fit") return "var(--color-chart-green)";
+            if (fit.status === "exponential-limit") return "var(--color-chart-blue)";
+            if (fit.status === "power-law-limit") return "var(--color-chart-amber)";
+            return "var(--color-chart-rose)";
           }
 
           function distanceTradeFitDescription(fit) {
@@ -11055,7 +11080,7 @@
               .attr("r", (d) => sizeScale(d.massProduct));
     
             const fits = [
-              { label: "All", color: "fuchsia", model: renderDistanceTradeCurve(g, tradeDataAll, "distance-curve-all", "fuchsia", "5,5", xScale, yScale) },
+              { label: "All", color: "var(--color-chart-combined)", model: renderDistanceTradeCurve(g, tradeDataAll, "distance-curve-all", "var(--color-chart-combined)", "5,5", xScale, yScale) },
               { label: "Out", color: outgoingColor, model: renderDistanceTradeCurve(g, outgoingData, "distance-curve-outgoing", outgoingColor, "4,4", xScale, yScale) },
               { label: "In", color: incomingColor, model: renderDistanceTradeCurve(g, incomingData, "distance-curve-incoming", incomingColor, "4,4", xScale, yScale) },
             ];
@@ -12405,9 +12430,9 @@
                   .duration(200)
                   .attr("fill", (n) => {
                     if (n === d)
-                      return "orange"; // hovered node
+                      return "var(--color-chart-amber)"; // hovered node
                     else if (descendants.includes(n))
-                      return "cyan"; // its descendants
+                      return theme.accent; // its descendants
                     else return theme.grid; // all others
                   });
               })
@@ -12418,7 +12443,7 @@
                   .transition()
                   .duration(200)
                   .attr("fill", (n) =>
-                    n.data.name === rootId ? "salmon" : "cyan",
+                    n.data.name === rootId ? "var(--color-chart-coral)" : theme.accent,
                   );
               });
     
@@ -12436,7 +12461,7 @@
             nodeGroup
               .append("circle")
               .attr("r", 5)
-              .attr("fill", (d) => (d.data.name === rootId ? "salmon" : "cyan"))
+              .attr("fill", (d) => (d.data.name === rootId ? "var(--color-chart-coral)" : theme.accent))
               .attr("filter", "url(#edgeGlow)");
     
             // 13) Labels
@@ -13078,7 +13103,7 @@
             );
             const maxValue = d3.max(cells, (cell) => cell.value) || 1;
             const color = d3
-              .scaleSequential(d3.interpolateRgb(theme.surface, theme.accent))
+              .scaleSequential((value) => `color-mix(in srgb, ${theme.surface}, ${theme.accent} ${value * 100}%)`)
               .domain([0, maxValue]);
 
             const summaryItems = [
@@ -13173,7 +13198,7 @@
                   .attr("stroke", (cell) =>
                     cell.source === cell.target
                       ? theme.muted
-                      : "rgba(255,255,255,0.9)",
+                      : theme.text,
                   )
                   .attr("stroke-width", (cell) =>
                     cell.source === cell.target ? 1.2 : 0.6,
@@ -13508,9 +13533,9 @@
               .enter()
               .append("path")
               .attr("class", "clusterHull")
-              .style("fill", "orange")
+              .style("fill", "var(--color-chart-amber)")
               .style("fill-opacity", 0.15)
-              .style("stroke", "orange")
+              .style("stroke", "var(--color-chart-amber)")
               .style("stroke-width", 2)
               .style("stroke-opacity", 0.6);
     
@@ -13843,7 +13868,7 @@
           function handlesAppShortcut(event) {
             return !document.getElementById("mainContainer")?.closest("[inert]") &&
               !window.isComparisonOverlayOpen?.() &&
-              !screenshotInProgress && !window.isIntroOverlayOpen?.() && !event.defaultPrevented && !event.altKey && !event.ctrlKey && !event.metaKey &&
+              !window.isIntroOverlayOpen?.() && !event.defaultPrevented && !event.altKey && !event.ctrlKey && !event.metaKey &&
               !event.target?.closest("input, select, textarea, [contenteditable]:not([contenteditable='false'])") &&
               !(event.target?.closest("button, summary, [role='button'], [role='switch']") && [" ", "Enter"].includes(event.key));
           }
@@ -14113,8 +14138,8 @@
                       <svg viewBox="0 0 1000 36" preserveAspectRatio="none" role="img" aria-label="Simulated prevalence across the timeline">
                         <defs>
                           <linearGradient id="timelinePrevalenceFill" x1="0" y1="0" x2="0" y2="1">
-                            <stop offset="0%" stop-color="#f28b96" stop-opacity="0.26" />
-                            <stop offset="100%" stop-color="#f28b96" stop-opacity="0.02" />
+                            <stop offset="0%" stop-color="var(--color-chart-rose)" stop-opacity="0.26" />
+                            <stop offset="100%" stop-color="var(--color-chart-rose)" stop-opacity="0.02" />
                           </linearGradient>
                         </defs>
                         <path class="simulation-timeline-area" />
@@ -14321,8 +14346,6 @@
               });
 
             if (!persistentUiHandlersBound) {
-              window.addEventListener("resize", matchButtonWidths);
-
               document.getElementById("communityScaleSelect").addEventListener("change", function () {
                 setTradeCommunityScale(this.value);
               });
@@ -14413,11 +14436,29 @@
     
             function cleanupLines() {
               lines.forEach((l) => {
+                l.start.classList.remove("is-shortcut-active");
+                l.end.parentElement.classList.remove("is-shortcut-active");
                 try {
                   l.remove();
                 } catch (e) {}
               });
               lines = [];
+            }
+
+            function highlightShortcut(target) {
+              const shortcut = target?.closest(".kbd-callout, .intro-key--hot");
+              const card = lines.find((line) =>
+                line.start === shortcut || line.end.parentElement === shortcut,
+              )?.end.parentElement;
+              lines.forEach((line) => {
+                const active = line.end.parentElement === card;
+                line.start.classList.toggle("is-shortcut-active", active);
+                line.end.parentElement.classList.toggle("is-shortcut-active", active);
+                line.setOptions({
+                  color: active ? theme.accent : "var(--color-border-strong)",
+                  size: active ? 2.5 : 1.5,
+                });
+              });
             }
     
             function positionLines() {
@@ -14465,7 +14506,7 @@
                   {
                     class: "intro-key--hot",
                     buttons:
-                      "s e m h c q r f {space} {arrowleft} {arrowup} {arrowdown} {arrowright}",
+                      "t e m h c q r f {space} {arrowleft} {arrowup} {arrowdown} {arrowright}",
                   },
                 ],
                 onChange: () => {},
@@ -14488,18 +14529,17 @@
                 key === "{arrowdown}";
     
               const line = new LeaderLine(btn, dot, {
-                path: "magnet",
+                path: "fluid",
                 startSocket: lineSockets.start || (isArrow ? "bottom" : "auto"),
                 endSocket:
                   lineSockets.end || (dotId === "introDotArrows" ? "top" : "auto"),
+                startSocketGravity: 24,
+                endSocketGravity: 24,
                 startPlug: "disc",
-                endPlug: "arrow3",
-                size: 3,
-                color: theme.muted,
-                dash: { animation: false },
+                endPlug: "behind",
+                size: 1.5,
+                color: "var(--color-border-strong)",
               });
-    
-              line.show("draw", { duration: 450 });
               return line;
             }
     
@@ -14510,15 +14550,15 @@
               if (typeof LeaderLine === "undefined") return;
     
               const map = [
-                ["s", "introDotS"],
-                ["e", "introDotE", { start: "top", end: "right" }],
-                ["m", "introDotM"],
+                ["t", "introDotT", { start: "top", end: "bottom" }],
+                ["e", "introDotE", { start: "top", end: "bottom" }],
+                ["m", "introDotM", { start: "right", end: "left" }],
                 ["q", "introDotQ", { start: "left", end: "right" }],
-                ["h", "introDotH"],
-                ["r", "introDotR"],
-                ["f", "introDotF"],
+                ["h", "introDotH", { start: "top", end: "bottom" }],
+                ["r", "introDotR", { start: "top", end: "bottom" }],
+                ["f", "introDotF", { start: "right", end: "left" }],
                 ["c", "introDotC", { start: "left", end: "right" }],
-                ["{space}", "introDotSpace", { start: "bottom", end: "right" }],
+                ["{space}", "introDotSpace", { start: "bottom", end: "top" }],
                 ["{arrowleft}", "introDotArrows"],
                 ["{arrowright}", "introDotArrows"],
                 ["{arrowup}", "introDotArrows"],
@@ -14633,6 +14673,13 @@
             // Button bindings
             okBtn?.addEventListener("click", closeIntro);
             helpBtn?.addEventListener("click", openIntro);
+
+            guidePage.addEventListener("pointerover", (event) => highlightShortcut(event.target));
+            guidePage.addEventListener("pointerout", (event) => highlightShortcut(
+              event.relatedTarget?.closest(".kbd-callout, .intro-key--hot") || document.activeElement,
+            ));
+            guidePage.addEventListener("focusin", (event) => highlightShortcut(event.target));
+            guidePage.addEventListener("focusout", (event) => highlightShortcut(event.relatedTarget));
     
             // Reposition lines when the window resizes.
             window.addEventListener("resize", positionLines);
@@ -14691,7 +14738,6 @@
             );
             d3.select("#mapLayerButton").attr("disabled", true);
             d3.select("#toggleModeButton").attr("disabled", true);
-            d3.select("#screenshotButton").attr("disabled", true);
             d3.select("#restoreButton").attr("disabled", true);
             d3.selectAll(".simulation-restriction-point").property("disabled", true);
           }
@@ -14704,7 +14750,6 @@
                 d3.selectAll(".mode-switcher-frame").classed("disabled", false);
                 d3.select("#mapLayerButton").attr("disabled", currentMode === "map" ? null : true);
                 d3.select("#toggleModeButton").attr("disabled", null);
-                d3.select("#screenshotButton").attr("disabled", null);
                 d3.select("#restoreButton").attr("disabled", null);
                 d3.selectAll(".simulation-restriction-point").property("disabled", false);
                 window.herdlinkComparison?.refresh();
@@ -14733,77 +14778,12 @@
             }
           }
     
-          let screenshotInProgress = false;
-
-          async function downloadScreenshot() {
-            if (screenshotInProgress) return;
-            screenshotInProgress = true;
-            const timestamp = new Date()
-              .toISOString()
-              .replace(/[-:]/g, "")
-              .replace("T", "_")
-              .split(".")[0];
-            const filename = `herdlink_${timestamp}_${Math.random().toString(36).substring(7)}.png`;
-    
-            try {
-              await mapLayers.ready();
-              await window.downloadHerdLinkScreenshot(filename);
-            } catch (error) {
-              mapLayers.showError(error);
-            } finally {
-              screenshotInProgress = false;
-            }
-          }
-    
-          // Screenshot button handler.
-          document
-            .getElementById("screenshotButton")
-            .addEventListener("click", downloadScreenshot);
-    
           // Restore button handler.
           document
             .getElementById("restoreButton")
             .addEventListener("click", restoreLinks);
     
-          // Match screenshot and restore button widths.
-          function matchButtonWidths() {
-            const screenshotButton = document.getElementById("screenshotButton");
-            const restoreButton = document.getElementById("restoreButton");
-    
-            if (screenshotButton && restoreButton) {
-              const width = screenshotButton.offsetWidth; // Get the screenshot button's width
-              restoreButton.style.width = width + "px"; // Apply the same width to restore button
-            }
-          }
-    
-          matchButtonWidths();
-
           // Keyboard shortcuts
-    
-          // Shortcut: press "s" to take a screenshot.
-          const screenshotButton = document.getElementById("screenshotButton");
-          document.addEventListener("keydown", function (event) {
-            if (!handlesAppShortcut(event)) return;
-            if (
-              event.key === "s" &&
-              !event.repeat &&
-              !window.isSwitchingCSV &&
-              !window.isSwitchingAppMode &&
-              !window.isPlaying &&
-              !window.isDoingTemporalUpdate
-            ) {
-              if (
-                !screenshotButton.disabled &&
-                !window.isSwitchingCSV &&
-                !window.isSwitchingAppMode &&
-                !window.isPlaying &&
-                !window.isDoingTemporalUpdate
-              ) {
-                event.preventDefault();
-                screenshotButton.click();
-              }
-            }
-          });
 
           // Shortcut: press "m" to toggle network mode.
           const toggleModeButton = document.getElementById("toggleModeButton");
@@ -14963,7 +14943,7 @@
           }
 
           document.addEventListener("keydown", function (event) {
-            if (screenshotInProgress || event.defaultPrevented || !isIntroToggleShortcut(event)) return;
+            if (event.defaultPrevented || !isIntroToggleShortcut(event)) return;
             event.preventDefault();
             window.openIntroOverlay?.();
           });
@@ -15006,7 +14986,6 @@
             window.herdlinkSimulation.isPrivatePopulation(simulationState.settings?.population);
 
           window.herdlinkComparison = {
-            canOpen: () => !screenshotInProgress,
             read: () => {
               const data = getComparisonData();
               try {

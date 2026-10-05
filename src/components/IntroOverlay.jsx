@@ -23,7 +23,7 @@ const quickStartNotes = [
         first button at the bottom right of the network panel.
         <br />
         <i className="fa-solid fa-hexagon-nodes"></i>: Graph view /
-        <i className="fa-solid fa-map-location-dot"></i>: Map view / or press
+        <i className="fa-solid fa-map-location-dot"></i>: Map view / or press{" "}
         <kbd>M</kbd> to switch.
       </>
     ),
@@ -76,7 +76,7 @@ const quickStartNotes = [
     content: (
       <>
         In focus mode, links can be turned off in the right panel. Press{" "}
-        <kbd>R</kbd> to restore links and <kbd>S</kbd> to export a screenshot.
+        <kbd>R</kbd> to restore links and <kbd>T</kbd> to switch the colour theme.
         {" "}Press <kbd>C</kbd> to compare intervention effects.
       </>
     ),
@@ -94,17 +94,6 @@ const quickStartNotes = [
 
 const shortcutCallouts = [
   {
-    key: "s",
-    className: "kbd-callout--s",
-    dotId: "introDotS",
-    label: (
-      <>
-        <kbd>S</kbd> Screenshot
-      </>
-    ),
-    description: "Export the current view as PNG.",
-  },
-  {
     key: "e",
     className: "kbd-callout--e",
     dotId: "introDotE",
@@ -114,28 +103,6 @@ const shortcutCallouts = [
       </>
     ),
     description: "Switch between simulation and ledger modes.",
-  },
-  {
-    key: "m",
-    className: "kbd-callout--m",
-    dotId: "introDotM",
-    label: (
-      <>
-        <kbd>M</kbd> Map / Graph
-      </>
-    ),
-    description: "Toggle between map and network views.",
-  },
-  {
-    key: "q",
-    className: "kbd-callout--q",
-    dotId: "introDotQ",
-    label: (
-      <>
-        <kbd>Q</kbd> Exit focus
-      </>
-    ),
-    description: "Quit focus mode for the selected node.",
   },
   {
     key: "r",
@@ -149,6 +116,17 @@ const shortcutCallouts = [
     description: "Re-enable all links after filtering.",
   },
   {
+    key: "t",
+    className: "kbd-callout--t",
+    dotId: "introDotT",
+    label: (
+      <>
+        <kbd>T</kbd> Theme
+      </>
+    ),
+    description: "Switch between light and dark themes.",
+  },
+  {
     key: "h",
     className: "kbd-callout--h",
     dotId: "introDotH",
@@ -160,26 +138,26 @@ const shortcutCallouts = [
     description: "Toggle the help overlay.",
   },
   {
-    key: "space",
-    className: "kbd-callout--space",
-    dotId: "introDotSpace",
+    key: "q",
+    className: "kbd-callout--q",
+    dotId: "introDotQ",
     label: (
       <>
-        <kbd>Space</kbd> Play / pause
+        <kbd>Q</kbd> Exit focus
       </>
     ),
-    description: "Toggle time replay.",
+    description: "Quit focus mode for the selected node.",
   },
   {
-    key: "f",
-    className: "kbd-callout--f",
-    dotId: "introDotF",
+    key: "m",
+    className: "kbd-callout--m",
+    dotId: "introDotM",
     label: (
       <>
-        <kbd>F</kbd> From start
+        <kbd>M</kbd> Map / Graph
       </>
     ),
-    description: "Jump back to the first time step.",
+    description: "Toggle between map and network views.",
   },
   {
     key: "c",
@@ -191,6 +169,17 @@ const shortcutCallouts = [
       </>
     ),
     description: "Original vs edited data.",
+  },
+  {
+    key: "space",
+    className: "kbd-callout--space",
+    dotId: "introDotSpace",
+    label: (
+      <>
+        <kbd>Space</kbd> Play / pause
+      </>
+    ),
+    description: "Toggle time replay.",
   },
   {
     key: "arrows",
@@ -205,7 +194,28 @@ const shortcutCallouts = [
     ),
     description: "Time step / Switch node.",
   },
+  {
+    key: "f",
+    className: "kbd-callout--f",
+    dotId: "introDotF",
+    label: (
+      <>
+        <kbd>F</kbd> From start
+      </>
+    ),
+    description: "Jump back to the first time step.",
+  },
 ];
+
+function ShortcutCard({ callout }) {
+  return (
+    <div className={`kbd-callout ${callout.className}`} tabIndex={0}>
+      <span className="kbd-dot" id={callout.dotId}></span>
+      <div className="kbd-callout__title">{callout.label}</div>
+      <div>{callout.description}</div>
+    </div>
+  );
+}
 
 export function IntroOverlay() {
   const [showNetworks, setShowNetworks] = useState(false);
@@ -264,16 +274,17 @@ export function IntroOverlay() {
               </div>
 
               <div className="kbd-annotated" id="introShortcutDiagram">
-                {shortcutCallouts.slice(0, 3).map((callout) => (
-                  <div
-                    key={callout.key}
-                    className={`kbd-callout ${callout.className}`}
-                  >
-                    <span className="kbd-dot" id={callout.dotId}></span>
-                    <div className="kbd-callout__title">{callout.label}</div>
-                    <div>{callout.description}</div>
-                  </div>
-                ))}
+                <div className="kbd-top-callouts">
+                  {shortcutCallouts.slice(0, 4).map((callout) => (
+                    <ShortcutCard key={callout.key} callout={callout} />
+                  ))}
+                </div>
+
+                <div className="kbd-side-callouts">
+                  {shortcutCallouts.filter(({ key }) => key === "q" || key === "c").map((callout) => (
+                    <ShortcutCard key={callout.key} callout={callout} />
+                  ))}
+                </div>
 
                 <div
                   id="introKeyboard"
@@ -281,21 +292,14 @@ export function IntroOverlay() {
                   aria-label="Keyboard shortcuts diagram"
                 ></div>
 
-                {shortcutCallouts.slice(3).map((callout) => (
-                  <div
-                    key={callout.key}
-                    className={`kbd-callout ${callout.className}`}
-                  >
-                    <span className="kbd-dot" id={callout.dotId}></span>
-                    <div className="kbd-callout__title">{callout.label}</div>
-                    <div>{callout.description}</div>
-                  </div>
+                {shortcutCallouts.slice(4).filter(({ key }) => key !== "q" && key !== "c").map((callout) => (
+                  <ShortcutCard key={callout.key} callout={callout} />
                 ))}
               </div>
 
               <div className="intro-meta">
-                <i className="fa-solid fa-circle-info"></i> Highlighted keys are
-                active shortcuts.
+                <i className="fa-solid fa-circle-info"></i> Hover over or focus a
+                shortcut to trace its key.
               </div>
             </div>
           </div>

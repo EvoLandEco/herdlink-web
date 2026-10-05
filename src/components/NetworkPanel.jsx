@@ -1,4 +1,5 @@
 import wurLogoUrl from "../assets/files/herdlink/WUR_ZW_standard_2021.svg?url";
+import { ThemeToggle } from "./ThemeToggle";
 
 const mapContextLayers = [
   { id: "mapRoads", label: "Major roads" },
@@ -116,17 +117,7 @@ export function NetworkPanel({ onOpenComparison }) {
       >
         <i className="fa-solid fa-arrows-rotate"></i>
       </button>
-      <button
-        id="screenshotButton"
-        className="screenshot-button has-tip"
-        type="button"
-        disabled
-        data-tip="Export whole app screenshot (S)"
-        data-tip-placement="top"
-        aria-label="Export whole app screenshot (S)"
-      >
-        <i className="fa-solid fa-camera"></i>
-      </button>
+      <ThemeToggle />
       <div className="network-score-toolbar">
         <div id="networkTransRiskScore">
           <i className="fa-solid fa-virus"></i> Risk Score:

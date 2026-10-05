@@ -82,12 +82,94 @@ function textContent(tree) {
   return typeof tree === "object" ? textContent(tree.children) : String(tree);
 }
 
+test("comparison tooltips stay within scrollports and preserve fixed sidebar placement", () => {
+  let sidebar = false, cssOffset = -296, tipWidth = 320, resize, observedResize, cleanup;
+  const bounds = { left: 330, top: 80 };
+  const anchor = { left: 400, top: 100, bottom: 120 };
+  const listeners = new Map();
+  const body = {
+    clientLeft: 2, clientTop: 0, clientWidth: 600, clientHeight: 500,
+    classList: { contains: () => sidebar },
+    getBoundingClientRect: () => bounds,
+    addEventListener: (name, callback) => listeners.set(name, callback),
+    removeEventListener: (name) => listeners.delete(name),
+  };
+  const info = { clientLeft: 1, dataset: {}, closest: () => body, getBoundingClientRect: () => anchor };
+  const tip = {
+    style: {}, scrollHeight: 200,
+    getBoundingClientRect() {
+      const width = Math.min(tipWidth, parseFloat(this.style.maxWidth) || Infinity);
+      const left = this.style.left
+        ? anchor.left + info.clientLeft + parseFloat(this.style.left)
+        : anchor.left + info.clientLeft + cssOffset;
+      return { left, right: left + width, width };
+    },
+  };
+  const refs = [{ current: info }, { current: tip }];
+  const context = vm.createContext({
+    useRef: () => refs.shift(), useState: () => [true, () => {}],
+    useLayoutEffect: (effect) => { cleanup = effect(); },
+    ResizeObserver: class {
+      constructor(callback) { observedResize = callback; }
+      observe() {}
+      disconnect() { observedResize = null; }
+    },
+    window: {
+      addEventListener: (name, callback) => { assert.equal(name, "resize"); resize = callback; },
+      removeEventListener: (name) => { assert.equal(name, "resize"); resize = null; },
+    },
+  });
+  vm.runInContext(`${hook}\nuseComparisonTipPosition("Overall");`, context);
+  assert.equal(tip.getBoundingClientRect().left, 332);
+  assert.equal(tip.style.right, "auto");
+  assert.equal(info.dataset.placement, "below");
+
+  anchor.left = 880; cssOffset = 0;
+  observedResize();
+  assert.equal(tip.getBoundingClientRect().right, 932);
+
+  anchor.left = 570; cssOffset = -120;
+  listeners.get("scroll")();
+  assert.equal(tip.getBoundingClientRect().left, 451);
+
+  anchor.left = 400; cssOffset = -296; body.clientWidth = 180;
+  resize();
+  assert.equal(tip.style.maxWidth, "180px");
+  assert.deepEqual(tip.getBoundingClientRect(), { left: 332, right: 512, width: 180 });
+
+  bounds.left = 40; body.clientWidth = 1000;
+  resize();
+  assert.equal(tip.getBoundingClientRect().left, 105);
+  bounds.left = 130;
+  listeners.get("scroll")();
+  assert.equal(tip.getBoundingClientRect().left, 132);
+  bounds.left = 40;
+  observedResize();
+  assert.equal(tip.getBoundingClientRect().left, 105);
+
+  sidebar = true; tip.style = {}; tipWidth = 380; tip.scrollHeight = 500;
+  bounds.left = 18; body.clientWidth = 294;
+  anchor.left = 280; anchor.top = 490; anchor.bottom = 510;
+  listeners.get("scroll")();
+  assert.equal(tip.style.maxWidth, undefined);
+  assert.equal(tip.style.left, "280px");
+  assert.equal(tip.style.right, "auto");
+  assert.equal(tip.style.top, "80px");
+  assert.equal(tip.style.bottom, "auto");
+  assert.equal(tip.style.maxHeight, "400px");
+  assert.equal(info.dataset.placement, "above");
+  cleanup();
+  assert.equal(listeners.size, 0);
+  assert.equal(resize, null);
+  assert.equal(observedResize, null);
+});
+
 test("comparison sidebar switches views and groups custom scenarios with presets", () => {
   const states = [], loaded = [], patches = [];
   const props = { open: true, data: { status: "ready", mode: "trade", scenarioContext: { controlsValid: true,
     presetSettings: { targetBudget: 3, responseDays: 7, standstillDays: 14 } },
-    globalMetrics: [{ key: "totalTradeVolume" }, { key: "outDegree" }, { key: "inDegree" }],
-    nodeMetrics: [{ key: "outDegree" }, { key: "inDegree" }, { key: "eigenvector" }] },
+    globalMetrics: [{ key: "totalTradeVolume" }, { key: "outDegree" }, { key: "inDegree" }, { key: "modularity" }, { key: "spectralRadius" }],
+    nodeMetrics: [{ key: "outDegree" }, { key: "inDegree" }, { key: "betweenness" }, { key: "pageRank" }, { key: "eigenvector" }] },
     onLoadPreset: (id) => loaded.push(id), onChangePresetSettings: (patch) => patches.push(patch) };
   const render = () => elements(renderWrapper("ComparisonOverlay", props, states));
   const sidebar = () => render().find((node) => node.props.className === "comparison-sidebar");
@@ -132,12 +214,19 @@ test("comparison sidebar switches views and groups custom scenarios with presets
   assert.deepEqual(sidebar().children.filter((node) => node && typeof node === "object").map((node) => node.type), ["div", "scenario-details", "recommended-comparisons", "chart-controls"]);
   assert.equal(details().props.threeScenarios, true);
   assert.equal(customButton(), undefined);
-  assert.deepEqual(Array.from(chartControls().props.metrics, (metric) => metric.key), ["outDegree", "inDegree"]);
+  assert.deepEqual(Array.from(chartControls().props.metrics, (metric) => metric.key), ["totalTradeVolume", "outDegree", "inDegree", "modularity", "spectralRadius"]);
   assert.equal(chartControls().props.metric.key, "outDegree");
+  assert.equal(chartControls().props.nodeMetric.key, "outDegree");
   assert.equal(chartControls().props.regionView, "top-3");
-  chartControls().props.onMetricChange("inDegree");
+  assert.equal(chartControls().props.metricsLocked, true);
+  chartControls().props.onMetricsLockedChange(false);
+  chartControls().props.onMetricChange("modularity");
+  assert.equal(comparison().props.metric.key, "modularity");
+  assert.equal(comparison().props.nodeMetric.key, "outDegree");
+  chartControls().props.onNodeMetricChange("pageRank");
   chartControls().props.onRegionChange("CR01");
-  assert.equal(comparison().props.metric.key, "inDegree");
+  assert.equal(comparison().props.metric.key, "modularity");
+  assert.equal(comparison().props.nodeMetric.key, "pageRank");
   assert.equal(comparison().props.regionView, "CR01");
   props.recomputing = true;
   assert.equal(chartControls().props.disabled, true);
@@ -178,6 +267,77 @@ test("comparison sidebar switches views and groups custom scenarios with presets
   assert.ok(choices().every((node) => node.props.disabled));
   assert.equal(presets().props.context.disabled, true);
   assert.equal(elements(sidebar()).find((node) => node.type === "preset-settings").props.context.disabled, true);
+});
+
+test("Compare 3 metric locks synchronize both directions and retain each mode's selections", () => {
+  const states = [];
+  const definitions = {
+    trade: {
+      globalMetrics: ["outDegree", "inDegree", "modularity"].map((key) => ({ key })),
+      nodeMetrics: ["outDegree", "inDegree", "pageRank"].map((key) => ({ key })),
+    },
+    simulation: {
+      globalMetrics: ["prevalence", "I", "R"].map((key) => ({ key })),
+      nodeMetrics: ["prevalence", "I", "R", "incomingExposure"].map((key) => ({ key })),
+    },
+  };
+  const props = { open: true, data: { status: "ready", mode: "trade", ...definitions.trade,
+    scenarioContext: { controlsValid: true, presetSettings: { targetBudget: 3, responseDays: 7, standstillDays: 14 } } } };
+  const render = () => elements(renderWrapper("ComparisonOverlay", props, states));
+  const controls = () => render().find((node) => node.type === "chart-controls").props;
+  const view = (index) => elements(render().find((node) => node.props.className === "comparison-view-switch"))
+    .filter((node) => node.type === "button")[index].props.onClick();
+  const mode = (value) => { props.data = { ...props.data, mode: value, ...definitions[value] }; };
+  const assertSelection = (locked, overall, regional) => {
+    const current = controls();
+    assert.equal(current.metricsLocked, locked);
+    assert.equal(current.metric.key, overall);
+    assert.equal(current.nodeMetric.key, regional);
+  };
+
+  view(1);
+  assertSelection(true, "outDegree", "outDegree");
+  controls().onMetricChange("inDegree");
+  assertSelection(true, "inDegree", "inDegree");
+  controls().onNodeMetricChange("outDegree");
+  assertSelection(true, "outDegree", "outDegree");
+  controls().onMetricsLockedChange(false);
+  controls().onMetricChange("modularity");
+  assertSelection(false, "modularity", "outDegree");
+  controls().onNodeMetricChange("pageRank");
+  assertSelection(false, "modularity", "pageRank");
+
+  mode("simulation");
+  assertSelection(true, "prevalence", "prevalence");
+  controls().onMetricChange("I");
+  assertSelection(true, "I", "I");
+  controls().onNodeMetricChange("R");
+  assertSelection(true, "R", "R");
+  controls().onMetricsLockedChange(false);
+  controls().onMetricChange("I");
+  controls().onNodeMetricChange("incomingExposure");
+  assertSelection(false, "I", "incomingExposure");
+
+  mode("trade");
+  assertSelection(false, "modularity", "pageRank");
+  controls().onMetricChange("inDegree");
+  controls().onMetricsLockedChange(true);
+  assertSelection(true, "inDegree", "inDegree");
+  mode("simulation");
+  assertSelection(false, "I", "incomingExposure");
+  controls().onMetricsLockedChange(true);
+  assertSelection(true, "I", "I");
+  mode("trade");
+  assertSelection(true, "inDegree", "inDegree");
+
+  controls().onMetricsLockedChange(false);
+  mode("simulation");
+  controls().onMetricsLockedChange(false);
+  view(0);
+  view(1);
+  assertSelection(true, "prevalence", "prevalence");
+  mode("trade");
+  assertSelection(true, "outDegree", "outDegree");
 });
 
 test("dense event clusters mount one selected date's details during interaction", () => {
