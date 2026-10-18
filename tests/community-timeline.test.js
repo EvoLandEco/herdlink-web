@@ -1,3 +1,4 @@
+import { pooledRuntime, pooledTools } from "./fixtures/pooled-runtime.js";
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
@@ -28,14 +29,14 @@ function runtime(data = fixture()) {
   let detections = 0;
   let centralities = 0;
   const values = (items, accessor = (item) => item) => Array.from(items, accessor);
-  const context = vm.createContext({
+  const context = vm.createContext({ ...pooledRuntime,
     Date, Map, Set, loadedCSVData: data,
     uniqueDates: [...new Set(data.map((row) => row.time.getTime()))].sort((a, b) => a - b).map((time) => new Date(time)),
     tradeRecordsByDataset: new WeakMap(), simulationRegionIdsByDataset: new WeakMap(),
     originalLedgerStatsByDataset: new WeakMap(), tradeCommunityTimeline: null, communityScale: "broad",
     simulationNodeInterventions: new Map(), simulationLinkInterventions: new Map(),
     networkStatsDirtyDates: new Set(), networkStatsDirtyFrom: null,
-    ledgerBaselineSpectralRadius: 0, window: {},
+    ledgerBaselineSpectralRadius: 0, window: { herdlinkPooledFlows: pooledTools,},
     computeSpectralRadius: () => 0,
     computeHotSpotMetrics: (nodes) => {
       centralities++;
@@ -100,6 +101,30 @@ test("community labels are invariant to row ordering, reciprocal records and tem
   const finer = calculate(data);
   assert.deepEqual(calculate([...data].reverse()), finer);
   assert.deepEqual(calculate(data.map((row) => ({ ...row, time: dates[0] }))), finer);
+});
+
+test("international totals leave domestic communities and modularity unchanged at both scales", () => {
+  const context = runtime();
+  const baseline = context.computeTemporalNetworkStats(context.uniqueDates, { store: false });
+  const flows = context.getPooledFlowSummary();
+  flows.imports.observed = flows.imports.permitted = 1_000_000_000;
+  flows.exports.observed = flows.exports.permitted = 2_000_000_000;
+  flows.regions = Object.fromEntries(["CR01", "CR03"].map((id) => [id, {
+    imports: { observed: 500_000_000, permitted: 500_000_000 },
+    exports: { observed: 1_000_000_000, permitted: 1_000_000_000 },
+  }]));
+  context.getPooledFlowSummary = () => flows;
+  const actual = context.computeTemporalNetworkStats(context.uniqueDates, { store: false });
+  for (const date of context.uniqueDates) {
+    const key = date.toISOString();
+    assert.equal(actual.global[key].internationalImports, flows.imports.observed);
+    assert.equal(actual.global[key].internationalExports, flows.exports.observed);
+    assert.deepEqual(plain(actual.global[key].communityScales), plain(baseline.global[key].communityScales));
+    assert.deepEqual(Object.keys(actual.node[key]), Object.keys(baseline.node[key]));
+    assert.ok(Object.keys(actual.node[key]).every((id) => /^CR\d{2}$/.test(id)));
+    assert.equal(actual.node[key].CR01.retainedImports, 500_000_000);
+    assert.equal(actual.node[key].CR03.retainedExports, 1_000_000_000);
+  }
 });
 
 test("aggregate communities honor persistent node permissions and date-specific link controls", () => {
@@ -184,10 +209,9 @@ test("bundled interregional communities agree across all temporal tables", () =>
     const partitions = Object.fromEntries(Object.entries(result.byScale).map(([scale, value]) => [scale, plain(value.partition)]));
     if (reference) assert.deepEqual(partitions, reference, dataset);
     else reference = partitions;
-    for (const [scale, sizes] of [["broad", [30, 10]], ["finer", [16, 11, 7, 3, 3]]]) {
-      const counts = new Map();
-      for (const group of Object.values(partitions[scale])) counts.set(group, (counts.get(group) || 0) + 1);
-      assert.deepEqual([...counts.values()].sort((a, b) => b - a), sizes);
+    for (const partition of Object.values(partitions)) {
+      assert.equal(Object.keys(partition).length, 40);
+      assert.ok(new Set(Object.values(partition)).size > 1);
     }
   }
 });

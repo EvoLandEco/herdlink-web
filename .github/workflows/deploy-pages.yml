@@ -42,6 +42,9 @@ jobs:
       - name: Test site and asset retention
         run: node --test tests/*.test.js
 
+      - name: Check bundled data
+        run: python3 -m unittest discover -s tests -p 'test_*.py'
+
       - name: Retain published assets
         run: node scripts/retain-pages-assets.js
         env:

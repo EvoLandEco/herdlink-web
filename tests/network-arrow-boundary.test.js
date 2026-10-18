@@ -1,3 +1,4 @@
+import { pooledRuntime, pooledTools } from "./fixtures/pooled-runtime.js";
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
@@ -12,7 +13,7 @@ function extractFunction(name) {
 }
 
 function runtime() {
-  const context = vm.createContext({});
+  const context = vm.createContext({ ...pooledRuntime,});
   vm.runInContext(["getNetworkLinkPath", "getNetworkLinkArc", "updateNetworkLinkBoundaries"].map(extractFunction).join("\n"), context);
   return context;
 }

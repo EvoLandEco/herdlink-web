@@ -116,20 +116,8 @@ test("Louvain handles empty graphs and validates resolution", () => {
     assert.throws(() => context.jLouvain().resolution(resolution), /finite positive number/);
 });
 
-test("the bundled graph including local trade preserves its native Leiden reference", () => {
-  const rows = readFileSync(new URL("../src/assets/data/yearly_aggregation.csv", import.meta.url), "utf8")
-    .trim().split(/\r?\n/).slice(1);
-  const routes = new Map();
-  for (const row of rows) {
-    const [, , sourceId, targetId, count] = row.replaceAll('"', "").split(",");
-    if (!sourceId || !targetId || sourceId === "NA" || targetId === "NA" || !(+count > 0)) continue;
-    const [source, target] = [sourceId, targetId].sort();
-    const key = `${source}:${target}`;
-    if (!routes.has(key)) routes.set(key, { source, target, weight: 0 });
-    routes.get(key).weight += +count;
-  }
-  const edges = [...routes.values()].sort((a, b) =>
-    a.source.localeCompare(b.source) || a.target.localeCompare(b.target));
+test("the reference graph including local trade preserves its native Leiden result", () => {
+  const edges = JSON.parse(readFileSync(new URL("./fixtures/leiden-reference-graph.json", import.meta.url), "utf8"));
   const ids = [...new Set(edges.flatMap(({ source, target }) => [source, target]))].sort();
   // igraph 1.0.0 and leidenalg 0.12.0, reproduced by scripts/compare-community-methods.py.
   const references = [

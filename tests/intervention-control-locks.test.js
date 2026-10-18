@@ -1,3 +1,4 @@
+import { pooledRuntime, pooledTools } from "./fixtures/pooled-runtime.js";
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
@@ -43,13 +44,13 @@ function runtime() {
     } : () => selection,
   });
   const controls = { dataset: {}, addEventListener() {} };
-  const tradePanel = { childNodes: [], insertAdjacentHTML() {} };
+  const tradePanel = { childNodes: [], insertAdjacentHTML(_position, html) { this.innerHTML = html; } };
   panel.parentElement = tradePanel;
-  const context = vm.createContext({
+  const context = vm.createContext({ ...pooledRuntime,
     selectedNodeData: { id: "CR01", statnaam: "Region 1" },
     simulationControlView: "nodes", loadedCSVData: [], allNodes: [], allLinks: [],
     simulationState: { status: "ready" }, appModeSwitchLocked: false,
-    window: { isPlaying: false, isSwitchingCSV: false },
+    window: { herdlinkPooledFlows: pooledTools, isPlaying: false, isSwitchingCSV: false },
     ensureSimulationNodeControls: () => panel,
     getCurrentSliderDate: () => new Date("2020-01-01"),
     collectSimulationRegionIds: () => ["CR01"],
@@ -62,6 +63,7 @@ function runtime() {
     getCoordinatesForStatcode() {},
     getLinkKey: (a, b) => `${a}-${b}`,
     formatCount: String,
+    formatPct: String,
     attachTradeCheckboxListeners() {},
     checkboxDisableCalls: 0,
     disableAllCheckboxes() { context.checkboxDisableCalls += 1; },
@@ -74,8 +76,40 @@ function runtime() {
   vm.runInContext([
     "areNetworkControlsLocked", "renderSimulationNodeControls", "updateTradeTable",
   ].map(extractFunction).join("\n"), context);
-  return { context, inputs: [...Object.values(rowInputs), ...Object.values(bulkInputs)] };
+  return { context, tradePanel, inputs: [...Object.values(rowInputs), ...Object.values(bulkInputs)] };
 }
+
+test("international movements appear inside the corresponding trade and entry lists", () => {
+  const { context, tradePanel } = runtime();
+  context.getPooledFlowSummary = () => ({ regions: {
+    CR01: { imports: { observed: 167, permitted: 0 }, exports: { observed: 27967, permitted: 0 } },
+  } });
+  for (const simulationMode of [false, true]) {
+    context.isSimulationModeActive = () => simulationMode;
+    context.updateTradeTable();
+    const lists = [...tradePanel.innerHTML.matchAll(/<div class="trade-list">([\s\S]*?)<\/div>\s*<\/div>\s*<\/div>/g)].map((match) => match[1]);
+    assert.equal(lists.length, 2);
+    assert.match(lists[0], /data-flow-channel="exports"[\s\S]*Exports[\s\S]*27967/);
+    assert.match(lists[1], /data-flow-channel="imports"[\s\S]*Imports[\s\S]*167/);
+    assert.doesNotMatch(tradePanel.innerHTML, /pooled-focus-summary|no-trades/);
+    for (const list of lists) {
+      assert.equal(list.includes("Animal movements"), simulationMode);
+      assert.doesNotMatch(list, /trade-checkbox/);
+    }
+    assert.match(tradePanel.innerHTML, new RegExp(`Outgoing ${simulationMode ? "Entries" : "Trades"}`));
+  }
+});
+
+test("regions without international movements keep the empty trade lists", () => {
+  const { context, tradePanel } = runtime();
+  context.getPooledFlowSummary = () => ({ regions: {
+    CR01: { imports: { observed: 0 }, exports: { observed: 0 } },
+  } });
+  context.updateTradeTable();
+  assert.doesNotMatch(tradePanel.innerHTML, /data-flow-channel/);
+  assert.match(tradePanel.innerHTML, /No outgoing trades/);
+  assert.match(tradePanel.innerHTML, /No incoming trades/);
+});
 
 test("search and panel rendering preserve intervention locks throughout busy states", () => {
   const { context, inputs } = runtime();

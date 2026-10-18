@@ -1,3 +1,4 @@
+import { pooledRuntime, pooledTools } from "./fixtures/pooled-runtime.js";
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
@@ -12,9 +13,9 @@ function runtime() {
   const timers = new Map();
   let nextTimer = 0;
   const calls = [];
-  const context = vm.createContext({
+  const context = vm.createContext({ ...pooledRuntime,
     document: { getElementById: () => null },
-    window: {}, simulationRecomputeTimer: null, simulationRunId: 0,
+    window: { herdlinkPooledFlows: pooledTools,}, simulationRecomputeTimer: null, simulationRunId: 0,
     simulationState: {}, loadedCSVData: [{}], uniqueDates: [new Date("2020-01-01")],
     isSimulationModeActive: () => true,
     setTimeout: (callback) => { timers.set(++nextTimer, callback); return nextTimer; },
@@ -144,7 +145,7 @@ test("the prevalence peak includes initialization and every day at each display 
   const display = { style: {}, innerHTML: "", querySelector: () => null };
   const selection = {};
   for (const name of ["classed", "style", "html", "append", "attr", "text"]) selection[name] = () => selection;
-  const context = vm.createContext({
+  const context = vm.createContext({ ...pooledRuntime,
     simulationState: {}, selectedNodeData: null, theme: {},
     document: { getElementById: () => display },
     formatCount: String,
@@ -177,7 +178,7 @@ test("infection chart sources preserve interval totals and exclude starting stat
     population: createDeclaredSyntheticPopulationSnapshot({ ids, values: holdings }) };
   const daily = simulateDaily({ ids, dates, settings,
     data: dates.map((time) => ({ time, COROP_LEV: "A", COROP_AFN: "B", AANTAL: 20 })) });
-  const context = vm.createContext({ simulationState: {} });
+  const context = vm.createContext({ ...pooledRuntime, simulationState: {} });
   vm.runInContext(extract("getSimulationSeries"), context);
   assert.equal(context.getSimulationSeries().length, 0);
   for (const bins of [dates, [dates[0], dates[2]], [dates[0]]]) {
@@ -200,7 +201,7 @@ test("prevalence colors retain the regional daily peak across replay and display
   const ids = ["A", "B"], holdings = { A: 100, B: 900 };
   const dates = [1, 2, 3].map((day) => new Date(Date.UTC(2020, 0, day)));
   let fillDomain, textDomain;
-  const context = vm.createContext({
+  const context = vm.createContext({ ...pooledRuntime,
     simulationState: {}, selectedNodeData: null,
     isSimulationModeActive: () => true,
     simulationPrevalenceScale: { domain: (value) => { fillDomain = Array.from(value); } },

@@ -1,0 +1,100 @@
+.pooled-flows .imports,
+.pooled-ports .imports,
+[data-flow-channel="imports"] { --flow-accent: var(--color-chart-incoming); }
+.pooled-flows .exports,
+.pooled-ports .exports,
+[data-flow-channel="exports"] { --flow-accent: var(--color-chart-outgoing); }
+
+.pooled-flow-link {
+  fill: none;
+  stroke: var(--flow-accent);
+  stroke-dasharray: 7 7;
+  stroke-linecap: round;
+  pointer-events: none;
+  transition: opacity 160ms, filter 160ms;
+}
+.pooled-flow-route.is-hovered .pooled-flow-link {
+  opacity: 0.85;
+  filter: drop-shadow(0 0 3px color-mix(in srgb, var(--flow-accent) 55%, transparent));
+  animation: pooled-flow-travel 1.8s linear infinite;
+}
+.pooled-flow-halo {
+  fill: none;
+  stroke: var(--color-canvas);
+  stroke-width: 6;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 160ms;
+}
+.pooled-flow-route.is-hovered .pooled-flow-halo { opacity: 0.9; }
+#mainFigureSVG > .links { transition: opacity 160ms; }
+#mainFigureSVG.pooled-flow-focus > .links { opacity: 0.14; }
+#mainFigureSVG.pooled-flow-focus .pooled-flow-route:not(.is-hovered) .pooled-flow-link { opacity: 0.025; }
+.pooled-flow-hit {
+  fill: none;
+  stroke: transparent;
+  stroke-width: 12;
+  vector-effect: non-scaling-stroke;
+  pointer-events: stroke;
+  outline: none;
+}
+.pooled-flows marker path { fill: var(--flow-accent); }
+.port-gradient-start { stop-color: color-mix(in srgb, var(--flow-accent) 7%, var(--color-canvas)); }
+.port-gradient-end { stop-color: var(--color-canvas); }
+.pooled-port { outline: none; }
+.port-surface {
+  stroke: color-mix(in srgb, var(--color-border) 65%, transparent);
+  stroke-width: 0.7;
+  filter: drop-shadow(0 3px 6px rgb(0 0 0 / 7%));
+  transition: filter 180ms, stroke 180ms;
+}
+.port-orbit,
+.port-icon-orbit {
+  fill: none;
+  stroke: var(--flow-accent);
+  stroke-width: 0.8;
+  stroke-linecap: round;
+  opacity: 0.45;
+  pointer-events: none;
+  transition: opacity 180ms;
+}
+.port-icon-orbit { opacity: 0.3; }
+.port-icon {
+  fill: none;
+  stroke: var(--flow-accent);
+  stroke-width: 1.2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.pooled-port.is-hovered .port-surface,
+.pooled-port:focus-visible .port-surface {
+  stroke: color-mix(in srgb, var(--flow-accent) 60%, var(--color-border));
+  filter: drop-shadow(0 2px 5px rgb(0 0 0 / 10%));
+}
+.pooled-port.is-hovered .port-orbit,
+.pooled-port:focus-visible .port-orbit { opacity: 0.9; }
+.pooled-port text {
+  fill: var(--color-text);
+  font-family: var(--font-body);
+  pointer-events: none;
+}
+.pooled-port .port-name { font-size: 10px; font-weight: 600; letter-spacing: 1.2px; text-transform: uppercase; fill: color-mix(in srgb, var(--flow-accent) 65%, var(--color-text-muted)); }
+.pooled-port .port-value { font: 400 18px var(--font-data); letter-spacing: -0.4px; font-variant-numeric: tabular-nums; }
+.pooled-port .port-caption { font-size: 9px; fill: var(--color-text-muted); }
+.network-hover-callout[data-flow-channel] .network-callout-surface { stroke: color-mix(in srgb, var(--flow-accent) 55%, transparent); }
+.network-callout-connector[data-flow-channel],
+.network-hover-callout[data-flow-channel] .network-callout-accent { stroke: var(--flow-accent); }
+.network-hover-callout[data-flow-channel] .network-callout-code { fill: var(--flow-accent); }
+.network-hover-callout[data-flow-channel] .network-callout-row { fill: color-mix(in srgb, var(--flow-accent) 8%, transparent); }
+.network-callout-note { color: var(--color-text-muted); font: 11px/16px var(--font-body); }
+
+@keyframes pooled-flow-travel { to { stroke-dashoffset: -14; } }
+@media (prefers-reduced-motion: reduce) {
+  .pooled-flow-route.is-hovered .pooled-flow-link { animation: none; }
+  .pooled-flow-link, .pooled-flow-halo, .port-surface, .port-orbit, .port-icon-orbit, #mainFigureSVG > .links { transition: none; }
+}
+
+.trade-item[data-flow-channel] .trade-icon,
+.trade-item[data-flow-channel] .trade-route-label {
+  color: var(--flow-accent);
+}

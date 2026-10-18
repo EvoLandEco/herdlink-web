@@ -145,11 +145,22 @@ test("an entirely local ledger displays its unassigned volume with zero inferred
   assert.equal(context.getTradeCommunityLabel("NA"), "NA");
   assert.equal(context.getTradeCommunityColor("NA"), "neutral");
   let html;
-  const panel = { empty: () => false, on() { return this; }, style() { return this; }, html(value) { html = value; return this; } };
+  const regionButtons = {
+    datum(value) { assert.equal(value.call({ dataset: { region: "CR01" } }), "CR01"); return this; },
+    call(fn, ...args) { fn(this, ...args); return this; },
+  };
+  context.bindChartRegionFocus = (selection, regionId) => {
+    assert.equal(selection, regionButtons);
+    assert.equal(regionId("CR01"), "CR01");
+  };
+  const panel = { empty: () => false, on() { return this; }, style() { return this; }, html(value) { html = value; return this; },
+    selectAll(selector) { assert.equal(selector, ".partition-region-button"); return regionButtons; },
+  };
   context.renderSimulationPartitionMapping({ select: () => panel }, result.communities,
     { maxItems: 2, maxRows: 2, columns: 2, maxMembers: 3, compactHeight: 50, expandedHeight: 200 });
   assert.match(html, /0 fixed groups · 0 singletons/);
   assert.match(html, /40 regions/);
+  assert.match(html, /<button type="button" class="partition-region-button" data-region="CR01">CR01<\/button>/);
   assert.doesNotMatch(html, /PNA/);
 });
 

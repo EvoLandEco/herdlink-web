@@ -473,13 +473,13 @@ Meaning and units
 \endlastfoot
 Model & SEIR & Selects the compartment recurrence \\
 Seed region & CR35 & Region receiving the initial shares \\
-Introduction & 1 Jan 2020 for the bundled calendar & Exact
+Introduction & 1 Jan 2019 for the bundled calendar & Exact
 initialization boundary \\
 Initial infectious & 1\% of seed population & Starting infectious stock
 as a share of the seed population \\
 Initial exposed & 0\% & Starting exposed share in SEIR or SEIRS \\
 Initial recovered & 0\% & Starting recovered share outside SIS \\
-Contact \(\beta \) & 0.10 & Daily integrated contact hazard at unit
+Contact \(\beta \) & 0.16 & Daily integrated contact hazard at unit
 infectious share \\
 Movement \(\kappa \) & 0.04 & Model units of pressure per recorded
 animal at unit source infectious share \\
@@ -550,8 +550,8 @@ example}\label{a-complete-two-region-example}
 
 Consider fictional regions A and B, with populations 1,000 and 800 model
 units. Start with the following counts. There is one permitted record of
-80 animals from A to B and no other movement. Use the default SEIR
-coefficients.
+80 animals from A to B and no other movement. This SEIR example uses
+contact 0.10, movement 0.04, progression 0.22 and recovery 0.15.
 
 \begin{longtable}[]{@{}llllll@{}}
 \toprule\noalign{}
@@ -1049,7 +1049,7 @@ Peak timing may move even when final size changes little. Small
 deterministic fractional stocks can persist through repeated daily
 transitions.
 
-The illustrative defaults use contact 0.10, movement 0.04, progression
+The following example uses contact 0.10, movement 0.04, progression
 0.22 and recovery 0.15. Contact alone is below its local growth
 threshold. Recorded movements, including local records, can still
 support growth. This setting illustrates how continued movement
@@ -1071,19 +1071,19 @@ Cumulative infection entries
 \endhead
 \bottomrule\noalign{}
 \endlastfoot
-1 day & 0.0428\% & 2,963 \\
-2 days & 0.0496\% & 8,195 \\
-3 days & 0.0555\% & 8,707 \\
-7 days & 0.0680\% & 9,236 \\
+1 day & 0.0308\% & 641 \\
+2 days & 0.0308\% & 697 \\
+3 days & 0.0308\% & 739 \\
+7 days & 0.0308\% & 834 \\
 \end{longtable}
 
-These rounded values use the bundled daily ledger through its end, the
+These rounded values use the bundled daily ledger through 31 December 2023, the
 default synthetic population, CR35, introduction on 1 January 2020,
 initial infectious share 1\%, SEIR, and persistent Seed containment.
 Peaks include daily observations; cumulative entries exclude the
 introduced seed. Counts are expressed in the synthetic population units
-of the example. The two- and seven-day peaks differ by about 37\%, while
-the cumulative totals differ by about 13\%.
+of the example. The daily peak is the same for these four schedules,
+while cumulative entries differ.
 
 Response effects follow the shipment calendar and the evolving
 compartments. Weekend movement patterns, persistence of local

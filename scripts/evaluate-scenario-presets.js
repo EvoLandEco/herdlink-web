@@ -8,6 +8,7 @@ import { performance } from "node:perf_hooks";
 import vm from "node:vm";
 import { simulateDaily, aggregateDailyTrajectory } from "../src/runtime/simulation-engine.js";
 import { createSyntheticPopulationSnapshot } from "../src/runtime/simulation-population.js";
+import { createPooledFlows } from "../src/pooledFlows.js";
 import {
   getHistoricalPresetGraph, selectHubTargets, selectBridgeTargets, selectTraceRingTargets,
   getSeedCommunityMembers, isCommunityCordonRoute,
@@ -37,7 +38,7 @@ mkdirSync(outputDir, { recursive: true });
 const defaults = {
   engine: "daily-contact-v1", model: "SEIR", initialPct: 1, initialExposedPct: 0, initialRecoveredPct: 0,
   initializationConvention: "prevalence-shares",
-  beta: 0.10, movementBeta: 0.04, sigma: 0.22, gamma: 0.15, omega: 0.02,
+  beta: 0.16, movementBeta: 0.04, sigma: 0.22, gamma: 0.15, omega: 0.02,
   introductionDate: "2020-01-01",
 };
 const policy = { historyDays: 365, responseDays: 7, standstillDays: 14, targetBudget: 3 };
@@ -78,7 +79,7 @@ const metadata = {
   startedAt: new Date().toISOString(), suite, node: process.version, cpu: cpus()[0].model,
   gitCommit: execFileSync("git", ["rev-parse", "HEAD"], { cwd: root, encoding: "utf8" }).trim(),
   sourceHashes: Object.fromEntries(["src/runtime/simulation-engine.js", "src/runtime/simulation-population.js",
-    "src/runtime/intervention-presets.js", "src/runtime/jLouvain.js", "scripts/evaluate-scenario-presets.js"]
+    "src/runtime/intervention-presets.js", "src/runtime/jLouvain.js", "src/pooledFlows.js", "scripts/evaluate-scenario-presets.js"]
     .map((path) => [path, sha256(readFileSync(new URL(path, root)))])),
   defaults, policy, scales, configs, presets,
   method: "The application and this script import the same daily simulation engine and historical target selectors. This script constructs calendar schedules without browser controls. Each comparison holds every simulation control and the population snapshot fixed.",
@@ -99,7 +100,10 @@ const data = lines.map((line) => {
   const [, time, COROP_LEV, COROP_AFN, AANTAL] = line.replaceAll('\"', "").split(",");
   return { time: new Date(time), COROP_LEV, COROP_AFN, AANTAL: Number(AANTAL) };
 });
-const dates = [...new Set(data.map((row) => +row.time))].sort((a, b) => a - b).map((time) => new Date(time));
+const flowSource = readFileSync(new URL("src/assets/data/international_flows.json", root), "utf8");
+const flowBundle = JSON.parse(flowSource);
+assert.equal(sha256(csv), flowBundle.source.assets["daily_aggregation.csv"], "Calendar and movement ledger must share a source");
+const dates = createPooledFlows(flowBundle).calendars.get("daily");
 assert.ok(dates.every((date, index) => index === 0 || date - dates[index - 1] === DAY), "The daily ledger needs a complete calendar");
 const ids = Array.from({ length: 40 }, (_, index) => `CR${String(index + 1).padStart(2, "0")}`);
 const seeds = requestedSeeds || ids;
@@ -131,7 +135,7 @@ function computeModularity(nodes, links, resolution) {
   })) };
 }
 const partitions = Object.fromEntries(scales.map((scale) => [scale.key, computeModularity(graph.nodes, graph.links, scale.resolution).partition]));
-metadata.dataset = { dataset: "daily", csvHash: sha256(csv), records: data.length, dates: dates.map((date) => date.toISOString()), ids, seeds, partitions };
+metadata.dataset = { dataset: "daily", csvHash: sha256(csv), calendarHash: sha256(flowSource), records: data.length, dates: dates.map((date) => date.toISOString()), ids, seeds, partitions };
 metadata.populationSnapshot = populationSnapshot;
 metadata.populationHash = sha256(JSON.stringify(populationSnapshot));
 

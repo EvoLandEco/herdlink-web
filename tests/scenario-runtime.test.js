@@ -1,3 +1,4 @@
+import { pooledRuntime, pooledTools } from "./fixtures/pooled-runtime.js";
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
@@ -6,6 +7,7 @@ import * as simulationEngine from "../src/runtime/simulation-engine.js";
 import * as simulationPopulation from "../src/runtime/simulation-population.js";
 import { createHash } from "node:crypto";
 import * as presetTools from "../src/runtime/intervention-presets.js";
+import { createPooledFlows } from "../src/pooledFlows.js";
 
 const source = readFileSync(new URL("../src/runtime/herdlink-runtime.js", import.meta.url), "utf8");
 const functions = [
@@ -48,7 +50,7 @@ function runtime(parameters = {}, steps = 24, initialize = true) {
   let inert = false;
   const applied = [];
   const recomputes = [];
-  const context = vm.createContext({
+  const context = vm.createContext({ ...pooledRuntime,
     Date, Map, Set, structuredClone, loadedCSVData, uniqueDates, presetDailyData, presetDailyDates, presetDailyDataError: null,
     presetDailyDataHash: createHash("sha256").update(JSON.stringify(presetDailyData)).digest("hex"),
     dailySimulationCache: new Map(), simulationPopulationSource: null, simulationInitialStates: null,
@@ -65,7 +67,7 @@ function runtime(parameters = {}, steps = 24, initialize = true) {
     simulationState: { status: "idle" }, appDataMode: "trade", appModeSwitchLocked: false,
     simulationRecomputeTimer: null, simulationRunId: 0,
     networkStatsDirtyDates: new Set(), networkStatsDirtyFrom: null, comparisonDataError: null,
-    window: { herdlinkSimulation: { ...simulationEngine, ...simulationPopulation }, herdlinkPresetTools: presetTools, currentDate: uniqueDates[0], herdlinkComparison: { refresh() {} } },
+    window: { herdlinkPooledFlows: { ...pooledTools, calendars: new Map([["daily", presetDailyDates.map((time) => new Date(time))]]) }, herdlinkSimulation: { ...simulationEngine, ...simulationPopulation }, herdlinkPresetTools: presetTools, currentDate: uniqueDates[0], herdlinkComparison: { refresh() {} } },
     document: { getElementById: (id) => id === "mainContainer" ? { closest: () => inert } : elements[id] },
     ensureSimulationControls() {}, applyNetworkControlChanges: (label) => applied.push(label),
     isSimulationModeActive: () => context.appDataMode === "simulation",
@@ -368,6 +370,30 @@ test("history loaded before the displayed ledger initializes settings when that 
   assert.equal(elements.simulationIntroductionDate.value, "2020-01-01");
   assert.equal(Object.keys(context.simulationPresetHoldings).length, 40);
   assert.deepEqual(plain(context.simulationPresetHoldings), plain(context.getSimulationPopulationForDate("2020-01-01")));
+});
+
+test("daily history retains declared days without movements and rejects dates outside coverage", async () => {
+  for (const outside of [false, true]) {
+    const { context } = runtime({}, 24, false);
+    const dates = [...context.presetDailyDates];
+    const emptyDay = Date.parse("2020-01-02");
+    const records = context.presetDailyData.filter((row) => +row.time !== emptyDay);
+    if (outside) records.push({ ...records[0], time: new Date(dates[0] - dayMs) });
+    context.presetDailyData = null;
+    context.presetDailyDates = [];
+    context.fetchAsset = async () => "movement ledger";
+    context.d3.csvParse = (_csv, convert) => records.map((row) => convert({ ...row, time: row.time.toISOString() }));
+    const result = await context.ensurePresetDailyData();
+    if (outside) {
+      assert.equal(result, null);
+      assert.match(context.presetDailyDataError, /Movement dates must belong to the declared calendar/);
+    } else {
+      assert.ok(result);
+      assert.deepEqual(Array.from(context.presetDailyDates), dates);
+      assert.ok(context.presetDailyDates.includes(emptyDay));
+      assert.ok(!context.presetDailyData.some((row) => +row.time === emptyDay));
+    }
+  }
 });
 
 test("population initialization reports failures, commits settings together, and retries with cached history", async () => {
@@ -802,13 +828,14 @@ test("saved daily scenarios retain their dynamics when loaded with another displ
 });
 
 test("all four bundled display resolutions preserve daily dynamics and dated controls", async () => {
+  const flows = createPooledFlows(JSON.parse(readFileSync(new URL("../src/assets/data/international_flows.json", import.meta.url))));
   const datasets = Object.fromEntries(["daily", "weekly", "monthly", "yearly"].map((resolution) => {
     const csv = readFileSync(new URL(`../src/assets/data/${resolution}_aggregation.csv`, import.meta.url), "utf8");
     const data = csv.trim().split(/\r?\n/).slice(1).map((line) => {
       const [, time, COROP_LEV, COROP_AFN, AANTAL] = line.replaceAll('"', "").split(",");
       return { time: new Date(time), COROP_LEV, COROP_AFN, AANTAL: Number(AANTAL) };
     });
-    const dates = [...new Set(data.map((row) => +row.time))].sort((a, b) => a - b).map((time) => new Date(time));
+    const dates = flows.calendars.get(resolution);
     return [resolution, { data, dates }];
   }));
   const { context } = runtime({ seedRegion: "CR35" }, 24, false);

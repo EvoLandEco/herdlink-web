@@ -100,13 +100,13 @@ test("simulation settings views preserve edits without recomputing", async () =>
   assert.equal(more.listeners.get("keydown").length, 1);
 });
 
-test("vertical settings tabs support arrow keys, Home and End", async () => {
+test("horizontal settings tabs support arrow keys, Home and End", async () => {
   const { nodes, document, calls } = runtime();
   const basic = nodes.get("simulationSettingsTab-basic");
   const more = nodes.get("simulationSettingsTab-additional");
   for (const [tab, key, destination] of [
-    [basic, "ArrowDown", more], [more, "ArrowUp", basic],
-    [basic, "ArrowUp", more], [more, "ArrowDown", basic],
+    [basic, "ArrowRight", more], [more, "ArrowLeft", basic],
+    [basic, "ArrowLeft", more], [more, "ArrowRight", basic],
     [basic, "End", more], [more, "Home", basic],
   ]) {
     const event = { key, preventDefault() { this.prevented = true; }, stopPropagation() { this.stopped = true; } };
@@ -173,4 +173,16 @@ test("population imports and numerical edits obey the same operation lock", asyn
   await fileInput.dispatch("change");
   assert.equal(calls.length, 4);
   assert.ok(nodes.get("simulationSettingsError").textContent);
+});
+
+test("initialization counts use hundredth steps and shares retain their percentage input", () => {
+  const { context, nodes } = runtime();
+  for (const [convention, step, max] of [["absolute-counts", "0.01", undefined], ["prevalence-shares", "any", "100"]]) {
+    context.simulationInitializationConvention = convention;
+    context.syncSimulationPopulationControls();
+    for (const id of ["simulationInitialPct", "simulationInitialExposedPct", "simulationInitialRecoveredPct"]) {
+      assert.equal(nodes.get(id).step, step);
+      assert.equal(nodes.get(id).max, max);
+    }
+  }
 });

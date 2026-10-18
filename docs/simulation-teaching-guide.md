@@ -171,11 +171,11 @@ The model is a discrete daily recurrence: the equations above define one complet
 | --- | --- | --- |
 | Model | SEIR | Selects the compartment recurrence |
 | Seed region | CR35 | Region receiving the initial shares |
-| Introduction | 1 Jan 2020 for the bundled calendar | Exact initialization boundary |
+| Introduction | 1 Jan 2019 for the bundled calendar | Exact initialization boundary |
 | Initial infectious | 1% of seed population | Starting infectious stock as a share of the seed population |
 | Initial exposed | 0% | Starting exposed share in SEIR or SEIRS |
 | Initial recovered | 0% | Starting recovered share outside SIS |
-| Contact `β` | 0.10 | Daily integrated contact hazard at unit infectious share |
+| Contact `β` | 0.16 | Daily integrated contact hazard at unit infectious share |
 | Movement `κ` | 0.04 | Model units of pressure per recorded animal at unit source infectious share |
 | Progression `σ` | 0.22 | Daily fraction of starting `E` entering `I` |
 | Recovery `γ` | 0.15 | Daily fraction of starting `I` leaving infectiousness |
@@ -203,7 +203,7 @@ Changing `σ` redistributes the timing of infectiousness. Changing `γ` changes 
 
 ## 6 A complete two-region example
 
-Consider fictional regions A and B, with populations 1,000 and 800 model units. Start with the following counts. There is one permitted record of 80 animals from A to B and no other movement. Use the default SEIR coefficients.
+Consider fictional regions A and B, with populations 1,000 and 800 model units. Start with the following counts. There is one permitted record of 80 animals from A to B and no other movement. This SEIR example uses contact 0.10, movement 0.04, progression 0.22 and recovery 0.15.
 
 | Region | S | E | I | R | N |
 | --- | --- | --- | --- | --- | --- |
@@ -401,16 +401,16 @@ The bundled example introduces infection in CR35 on 1 January 2020. There are no
 
 The parameter regime determines what happens after escape. Under a hypothetical contact coefficient 0.32 and recovery fraction 0.15, contact alone can amplify a small introduction in a largely susceptible region. Once several regions have positive compartments, closing the seed's later exports can leave a similar eventual susceptible depletion. Peak timing may move even when final size changes little. Small deterministic fractional stocks can persist through repeated daily transitions.
 
-The illustrative defaults use contact 0.10, movement 0.04, progression 0.22 and recovery 0.15. Contact alone is below its local growth threshold. Recorded movements, including local records, can still support growth. This setting illustrates how continued movement contributes to the trajectory.
+The following example uses contact 0.10, movement 0.04, progression 0.22 and recovery 0.15. Contact alone is below its local growth threshold. Recorded movements, including local records, can still support growth. This setting illustrates how continued movement contributes to the trajectory.
 
 | Seed response delay | Daily network prevalence peak | Cumulative infection entries |
 | --- | --- | --- |
-| 1 day | 0.0428% | 2,963 |
-| 2 days | 0.0496% | 8,195 |
-| 3 days | 0.0555% | 8,707 |
-| 7 days | 0.0680% | 9,236 |
+| 1 day | 0.0308% | 641 |
+| 2 days | 0.0308% | 697 |
+| 3 days | 0.0308% | 739 |
+| 7 days | 0.0308% | 834 |
 
-These rounded values use the bundled daily ledger through its end, the default synthetic population, CR35, introduction on 1 January 2020, initial infectious share 1%, SEIR, and persistent Seed containment. Peaks include daily observations; cumulative entries exclude the introduced seed. Counts are expressed in the synthetic population units of the example. The two- and seven-day peaks differ by about 37%, while the cumulative totals differ by about 13%.
+These rounded values use the bundled daily ledger through 31 December 2023, the default synthetic population, CR35, introduction on 1 January 2020, initial infectious share 1%, SEIR, and persistent Seed containment. Peaks include daily observations; cumulative entries exclude the introduced seed. Counts are expressed in the synthetic population units of the example. The daily peak is the same for these four schedules, while cumulative entries differ.
 
 Response effects follow the shipment calendar and the evolving compartments. Weekend movement patterns, persistence of local transmission, susceptible depletion, target changes in Trace Ring, and Standstill reopening can all shape the result. Read both the size and timing of peaks, and use a common horizon long enough to include the features being compared.
 

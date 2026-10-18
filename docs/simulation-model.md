@@ -105,7 +105,7 @@ For valid inputs, the recurrence preserves nonnegative compartments and
 
 | Control | Meaning | Default |
 | --- | --- | --- |
-| Contact beta, \(\beta\) | Local integrated contact hazard per day at unit infectious prevalence. | 0.10 |
+| Contact beta, \(\beta\) | Local integrated contact hazard per day at unit infectious prevalence. | 0.16 |
 | Movement beta, \(\kappa\) | Exposure yield in model population units per recorded animal. It is not a probability. | 0.04 |
 | Progression, \(\sigma\) | Fraction of the exposed compartment entering I each day in SEIR/SEIRS. | 0.22 |
 | Recovery, \(\gamma\) | Fraction of I leaving infectiousness each day. SIS sends it to S; other models send it to R. | 0.15 |
@@ -120,18 +120,19 @@ residence-time assumption.
 
 The default SEIR example starts CR35 with 1% infectious and no exposed or
 recovered units. Contact transmission alone has an early growth threshold at
-\(\beta=\gamma\); the default ratio is \(0.10/0.15\). Continuing movements,
-including recorded movements within a region, can support growth even when
-contact alone cannot. This makes the example useful for comparing movement
-restrictions without assuming that every small introduction grows locally.
+\(\beta=\gamma\); the default ratio is \(0.16/0.15\). Contact alone can
+support early growth when susceptibility is high. Movement restrictions affect
+the recorded movement contribution without disabling contact transmission.
 
 The shipment calendar still matters. For introduction on 1 January 2020, CR35
 has no outgoing movements to other regions that day and reaches ten regions
 on 2 January. A one-day export response blocks that first shipment day; a
-two-day response allows it. With the default synthetic population and Seed
-containment, daily network prevalence peaks at approximately 0.0428%, 0.0496%,
-0.0555% and 0.0680% for response delays of 1, 2, 3 and 7 days. These are model
-examples, not disease estimates. Weekly samples can miss daily peaks.
+two-day response allows it. With contact set to 0.10, the synthetic population and Seed
+containment through 31 December 2023, daily network prevalence peaks at
+approximately 0.0308% for response delays of 1, 2, 3 and 7 days. Cumulative
+infection entries are approximately 641, 697, 739 and 834 model units,
+respectively. These are model examples, not disease estimates. Weekly
+samples can miss daily peaks.
 Trace Ring also changes its target set with the tracing window, and a
 temporary standstill allows movement to resume. Neither policy guarantees a
 smooth or monotone relationship between response delay and the final peak.

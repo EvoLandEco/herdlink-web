@@ -90,5 +90,5 @@ test("a sparse recorded graph retains a positive dominant vector under mixed res
   const residual = Math.hypot(...ids.map((id) => action[id] - eigenvalue * vector[id])) / eigenvalue;
   assert.ok(ids.every((id) => Number.isFinite(vector[id]) && vector[id] >= 0));
   assert.ok(residual <= 1e-6);
-  assert.ok(Math.abs(eigenvalue - 2432.134643321087) <= 1e-6 * eigenvalue);
+  assert.ok(Math.abs(eigenvalue - 1216.0669391734523) <= 1e-6 * eigenvalue);
 });

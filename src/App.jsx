@@ -14,6 +14,8 @@ import herdLinkRuntimeUrl from "./runtime/herdlink-runtime.js?url";
 import * as interventionPresets from "./runtime/intervention-presets.js";
 import * as simulationEngine from "./runtime/simulation-engine.js";
 import * as simulationPopulation from "./runtime/simulation-population.js";
+import { createPooledFlows, flowMetrics } from "./pooledFlows.js";
+import "./styles/pooled-flows.css";
 
 window.createHerdLinkMapLayers = createMapLayers;
 window.HERDLINK_ASSET_URLS = assetUrls;
@@ -29,10 +31,10 @@ const runtimeScripts = [
   {
     src: "https://cdnjs.cloudflare.com/ajax/libs/leader-line/1.0.6/leader-line.min.js",
   },
-  { src: herdLinkRuntimeUrl },
 ];
 
 const scriptLoaders = new Map();
+let pooledFlowsLoader = null;
 const minimumViewportWidth = 1024;
 const minimumScreenEdge = 600;
 const tooltipGap = 10;
@@ -65,13 +67,13 @@ const importsExportsGuide = {
   title: "Imports & Exports",
   iconClass: "fa-solid fa-arrow-right-arrow-left",
   intro:
-    "Choose whether each region can send livestock to or receive livestock from other regions. These permissions are shared by network and simulation modes.",
+    "Choose whether each region can send livestock to or receive livestock from other regions and the pooled international boundary. These permissions are shared by network and simulation modes.",
   sections: [
     {
       iconClass: "fa-solid fa-route",
       title: "Directions",
       text:
-        "Exports allow movement out of a region. Imports allow movement into it. These permissions cover every partner, including routes that appear on future dates. The local checkbox controls movement within a region separately.",
+        "Exports allow movement out of a region. Imports allow movement into it. These permissions cover every partner, including international movements and routes that appear on future dates. The local checkbox controls movement within a region separately.",
     },
     {
       iconClass: "fa-solid fa-calendar-days",
@@ -95,7 +97,7 @@ const importsExportsGuide = {
       iconClass: "fa-solid fa-flask",
       title: "Shared network",
       text:
-        "Ledger mode applies permissions at each aggregated record's date label. Simulation mode applies restrictions to each calendar day and sums attributed infection entries. Use the daily ledger for trade totals that account for closures within coarse bins.",
+        "Ledger mode applies permissions at each aggregated record's date label. Simulation mode applies restrictions to each calendar day and sums attributed infection entries. The ports and regional details show observed Imports and Exports. International movement measures in scenario comparisons apply permissions on each movement day before summing display periods. The ports have no population or infection state. Use the daily ledger for domestic trade totals that account for closures within coarse bins.",
     },
   ],
 };
@@ -224,7 +226,8 @@ const richTips = {
     options: [
       ["Active Regions", "Regions with trade activity at that time step."],
       ["Trade Routes", "Active directed routes between regions."],
-      ["Total Volume", "Total livestock movement volume across all active routes."],
+      ["Domestic Volume", "Allowed animal movements between mapped Dutch regions, including movements within a region once."],
+      ["Imports / Exports", "Observed international animal movements. Exports include only records with a known Dutch sender region. Import and Export pool all foreign partners. Their map positions are schematic; dashed connections show the recorded Dutch regions."],
       ["Avg. Volume/Route", "Average volume carried by each active route."],
       ["Avg. Volume/Area", "Average volume associated with each active region."],
       ["Risk Score", "Spectral radius relative to the highest unrestricted value across the loaded period at this temporal resolution. A score of 1 marks that reference peak."],
@@ -661,6 +664,24 @@ function useScreenRequirement() {
   return requirement;
 }
 
+function loadPooledFlows() {
+  if (!pooledFlowsLoader) {
+    pooledFlowsLoader = fetch(assetUrls["assets/data/international_flows.json"])
+      .then((response) => {
+        if (!response.ok) throw new Error(`Failed to load international flows (${response.status})`);
+        return response.json();
+      })
+      .then((data) => {
+        window.herdlinkPooledFlows = { ...createPooledFlows(data), flowMetrics };
+      })
+      .catch((error) => {
+        pooledFlowsLoader = null;
+        throw error;
+      });
+  }
+  return pooledFlowsLoader;
+}
+
 function loadRuntimeScript({ src, crossOrigin }) {
   const existing = document.querySelector(`script[data-herdlink-src="${src}"]`);
 
@@ -920,6 +941,7 @@ export default function App() {
 
       activeTarget = target;
       tooltip.classList.toggle("is-rich", Boolean(richTip));
+      tooltip.classList.toggle("is-chart", target.dataset.tipKind === "chart");
       if (richTip) {
         tooltip.replaceChildren(createRichTooltipContent(richTip));
       } else {
@@ -968,6 +990,7 @@ export default function App() {
     document.addEventListener("pointerout", handlePointerOut);
     document.addEventListener("focusin", handleFocusIn);
     document.addEventListener("focusout", hideTooltip);
+    document.addEventListener("click", hideTooltip);
     window.addEventListener("resize", placeTooltip);
     window.addEventListener("scroll", placeTooltip, true);
 
@@ -976,6 +999,7 @@ export default function App() {
       document.removeEventListener("pointerout", handlePointerOut);
       document.removeEventListener("focusin", handleFocusIn);
       document.removeEventListener("focusout", hideTooltip);
+      document.removeEventListener("click", hideTooltip);
       window.removeEventListener("resize", placeTooltip);
       window.removeEventListener("scroll", placeTooltip, true);
     };
@@ -989,8 +1013,9 @@ export default function App() {
     let frameId = null;
     let cancelled = false;
 
-    runtimeScripts
-      .reduce((chain, script) => {
+    Promise.all([
+      loadPooledFlows(),
+      runtimeScripts.reduce((chain, script) => {
         return chain.then(() => {
           if (cancelled) {
             return undefined;
@@ -998,7 +1023,11 @@ export default function App() {
 
           return loadRuntimeScript(script);
         });
-      }, Promise.resolve())
+      }, Promise.resolve()),
+    ])
+      .then(() => {
+        if (!cancelled) return loadRuntimeScript({ src: herdLinkRuntimeUrl });
+      })
       .then(() => {
         if (cancelled) {
           return;

@@ -1,3 +1,4 @@
+import { pooledRuntime, pooledTools } from "./fixtures/pooled-runtime.js";
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
@@ -22,8 +23,8 @@ function runtime() {
     nodes() { return this; },
     force() { return { links() {} }; },
   };
-  const context = vm.createContext({
-    forceSim, forceState, currentMode: "map", isMovingToMap: false, window: { isPlaying: false },
+  const context = vm.createContext({ ...pooledRuntime,
+    forceSim, forceState, currentMode: "map", isMovingToMap: false, window: { herdlinkPooledFlows: pooledTools, isPlaying: false },
     selectedNodeData: null, hoveredNode: null, hoveredLink: null, annotationGroup: {},
     allNodes: [], allLinks: [], nonZeroLinks: [], nlMapData: {}, nlLabelPoints: null,
     linkGroup: selection, linkSelection: selection, nodeGroup: selection, svg: selection,

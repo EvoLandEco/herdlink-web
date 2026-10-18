@@ -1,3 +1,4 @@
+import { pooledRuntime, pooledTools } from "./fixtures/pooled-runtime.js";
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
@@ -25,9 +26,9 @@ test("ledger node colors follow the current partition after a same-date network 
   const chain = selection();
   const scale = () => "risk-color";
   for (const name of ["domain", "range", "interpolate", "clamp"]) scale[name] = () => scale;
-  const context = vm.createContext({
+  const context = vm.createContext({ ...pooledRuntime,
     allNodes, enabledLinks: [], selectedNodeData: null,
-    window: {
+    window: { herdlinkPooledFlows: pooledTools,
       currentDate: date,
       allTemporalStats: { [date.toISOString()]: stats },
       allTemporalNodeStats: { [date.toISOString()]: {} },
@@ -71,8 +72,8 @@ test("risk score projects cached radii against the shared fixed baseline while p
     "2020-01-01T00:00:00.000Z": Object.freeze({ spectralRadius: 10, totalTradeVolume: 500 }),
     "2020-01-08T00:00:00.000Z": Object.freeze({ spectralRadius: 8, totalTradeVolume: 300 }),
   });
-  const context = vm.createContext({
-    window: { allTemporalStats: stats }, ledgerBaselineSpectralRadius: 20,
+  const context = vm.createContext({ ...pooledRuntime,
+    window: { herdlinkPooledFlows: pooledTools, allTemporalStats: stats }, ledgerBaselineSpectralRadius: 20,
     computeSpectralRadius() { assert.fail("Chart projection uses cached radii"); },
   });
   const chart = extractFunction("updateGlobalStatsChart");
@@ -97,7 +98,7 @@ test("zero-valued global series retain a visible axis range and ordinary series 
   const chart = extractFunction("updateGlobalStatsChart");
   const domain = chart.slice(chart.indexOf("const minValue ="), chart.indexOf("const y = d3.scaleLinear()"));
   assert.match(domain, /let yDomain/);
-  const context = vm.createContext({
+  const context = vm.createContext({ ...pooledRuntime,
     d3: {
       min: (items, value) => Math.min(...items.map(value)),
       max: (items, value) => Math.max(...items.map(value)),
@@ -112,7 +113,7 @@ test("zero-valued global series retain a visible axis range and ordinary series 
 
 test("radar axes remain finite when restrictions remove a metric across all dates", () => {
   const zeroMetrics = { inDegree: 0, outDegree: 0, betweenness: 0, pageRank: 0, eigenvector: 0 };
-  const context = vm.createContext({
+  const context = vm.createContext({ ...pooledRuntime,
     isSimulationModeActive: () => false,
     hotspots: { CR35: { ...zeroMetrics } }, hotspotsMax: { ...zeroMetrics },
   });
@@ -137,10 +138,12 @@ test("node callouts separate permitted local trades from imports and exports", (
     { source: "CR10", target: node, weight: 200, disabled: false },
   ];
   let info;
-  const context = vm.createContext({
+  const flows = { regions: { CR35: { imports: { observed: 40, permitted: 0 }, exports: { observed: 75, permitted: 0 } } } };
+  const context = vm.createContext({ ...pooledRuntime,
     currentMode: "graph", allNodes: [node], allLinks,
     theme: { incoming: "blue", outgoing: "orange", accent: "mint" },
     isSimulationModeActive: () => false, getRadarValuesForNode: () => [0, 0, 0, 0, 0],
+    getPooledFlowSummary: () => flows,
     formatCount: String, renderNetworkCallout: (_group, _x, _y, data) => { info = data; },
   });
   vm.runInContext(["getNodeId", "getNodeCalloutData", "updateAnnotationForNode"].map(extractFunction).join("\n"), context);
@@ -150,28 +153,36 @@ test("node callouts separate permitted local trades from imports and exports", (
   assert.equal(info.hero, "100.0%");
   assert.deepEqual(Array.from(info.rows, ({ label, value, color }) => [label, value, color]), [
     ["Incoming trade", "200", "blue"], ["Outgoing trade", "0", "orange"], ["Local trade", "100", "mint"],
+    ["Imports", "40", "blue"], ["Exports", "75", "orange"],
   ]);
 
   allLinks[0].disabled = true;
   allLinks[2].disabled = true;
   context.updateAnnotationForNode(node, selection());
-  assert.deepEqual(Array.from(info.rows, ({ value }) => value), ["0", "0", "0"]);
+  assert.deepEqual(Array.from(info.rows, ({ value }) => value), ["0", "0", "0", "40", "75"]);
   assert.equal(info.hero, "—");
 
   allLinks[0].disabled = false;
   allLinks[1].disabled = false;
   context.updateAnnotationForNode(node, selection());
-  assert.deepEqual(Array.from(info.rows, ({ value }) => value), ["0", "300", "100"]);
+  assert.deepEqual(Array.from(info.rows, ({ value }) => value), ["0", "300", "100", "40", "75"]);
   assert.equal(info.hero, "25.0%");
+  flows.regions.CR35.exports.observed = 125;
+  context.updateAnnotationForNode(node, selection());
+  assert.equal(info.rows.at(-1).value, "125");
+  flows.regions = {};
+  context.updateAnnotationForNode(node, selection());
+  assert.deepEqual(Array.from(info.rows.slice(-2), ({ value }) => value), ["0", "0"]);
 });
 
 test("simulation node callouts use the displayed frame for compartments, pressure and radar", () => {
   const node = { id: "CR35", statnaam: "Region", community: 0 };
   const state = { N: 1000, S: 650, E: 100, I: 200, R: 50,
     exposedShare: 0.1, prevalence: 0.2, recoveredShare: 0.05, incomingExposure: 80, outgoingPressure: 40 };
-  const context = vm.createContext({
+  const context = vm.createContext({ ...pooledRuntime,
     allNodes: [node], simulationState: { currentFrame: { nodeStates: { CR35: state } } },
     isSimulationModeActive: () => true, formatCount: String, formatSmall: String,
+    getPooledFlowSummary: () => ({ regions: { CR35: { imports: { observed: 40 }, exports: { observed: 75 } } } }),
     theme: { incoming: "blue", outgoing: "orange" },
     simulationCompartmentLabels: { S: "Susceptible", E: "Exposed", I: "Infectious", R: "Recovered" },
     simulationCompartmentColors: { S: "green", E: "amber", I: "red", R: "blue" },
@@ -189,6 +200,7 @@ test("simulation node callouts use the displayed frame for compartments, pressur
   ]);
   assert.deepEqual(Array.from(info.rows, ({ label, value }) => [label, value]), [
     ["Incoming exposure", "80"], ["Outgoing pressure", "40"],
+    ["Imports", "40"], ["Exports", "75"],
   ]);
   state.N = state.S = state.E = state.I = state.R = 0;
   state.exposedShare = state.prevalence = state.recoveredShare = null;
@@ -200,9 +212,9 @@ test("simulation node callouts use the displayed frame for compartments, pressur
 
 test("simulation recomputes dirty network partitions before building and displaying its trajectory", async () => {
   const order = [];
-  const context = vm.createContext({
+  const context = vm.createContext({ ...pooledRuntime,
     clearTimeout, simulationRecomputeTimer: null, simulationRunId: 0,
-    window: {},
+    window: { herdlinkPooledFlows: pooledTools,},
     document: { getElementById: () => null },
     loadedCSVData: [{}], uniqueDates: [new Date("2020-01-01T00:00:00Z")], simulationState: {},
     readSimulationSettings: () => ({}),

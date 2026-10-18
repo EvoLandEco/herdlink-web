@@ -10,6 +10,96 @@ const extract = (name) => {
   return match[0];
 };
 
+function chartRuntime() {
+  const nodes = [{ id: "CR35" }, { id: "CR10" }];
+  const focused = [];
+  const context = vm.createContext({
+    allNodes: nodes, selectedNodeData: null, window: {}, simulationState: { status: "ready" },
+    getStatnaam: (id) => ({ CR35: "Noordoost-Noord-Brabant", CR10: "Noord-Overijssel" })[id],
+    formatCount: (value) => value.toLocaleString("en-US"),
+    onClickNode(event, node) {
+      assert.equal(event.defaultPrevented, false);
+      focused.push(node);
+      context.selectedNodeData = node;
+    },
+    document: { getElementById: () => ({ focus() {} }) },
+  });
+  vm.runInContext(["focusChartRegion", "bindChartRegionFocus", "getDistanceTradeFocusId", "getDistanceTradeTip", "bindDistanceTradePoints"].map(extract).join("\n"), context);
+  return { context, nodes, focused };
+}
+
+test("chart focus resolves the current network node and respects pending updates", () => {
+  const { context, nodes, focused } = chartRuntime();
+  const event = { defaultPrevented: false, type: "click" };
+  for (const flag of ["isSwitchingCSV", "isSwitchingAppMode", "isDoingTemporalUpdate"]) {
+    context.window[flag] = true;
+    context.focusChartRegion(event, "CR35");
+    context.window[flag] = false;
+  }
+  context.simulationState.status = "running";
+  context.focusChartRegion(event, "CR35");
+  context.simulationState.status = "ready";
+  context.focusChartRegion({ ...event, defaultPrevented: true }, "CR35");
+  context.focusChartRegion(event, "missing");
+  assert.equal(focused.length, 0);
+  context.focusChartRegion(event, "CR35");
+  context.focusChartRegion(event, "CR35");
+  context.focusChartRegion(event, "CR10");
+  assert.deepEqual(focused, nodes);
+});
+
+test("distance bubbles focus the source globally and the partner from either direction in focus mode", () => {
+  const { context, nodes, focused } = chartRuntime();
+  const point = { sourceId: "CR35", targetId: "CR10", weight: 12345, distance: 86.52 };
+  const handlers = {}, attributes = {};
+  const selection = {
+    call(fn, ...args) { fn(this, ...args); return this; },
+    classed() { return this; },
+    attr(name, value) { attributes[name] = typeof value === "function" ? value(point) : value; return this; },
+    on(name, value) { handlers[name] = value; return this; },
+  };
+  const event = (type, key) => ({
+    type, key, defaultPrevented: false,
+    preventDefault() { this.defaultPrevented = true; }, stopPropagation() { this.stopped = true; },
+  });
+  context.bindDistanceTradePoints(selection);
+  assert.equal(attributes.role, "button");
+  assert.equal(attributes.tabindex, 0);
+  assert.equal(attributes["data-focus-region"], "CR35");
+  assert.equal(attributes["data-tip"], "CR35 · Noordoost-Noord-Brabant\n→ CR10 · Noord-Overijssel\n12,345 animals · 86.5 km\nClick to focus CR35");
+  handlers["click.region-focus"](event("click"), point);
+  assert.equal(focused.at(-1), nodes[0]);
+
+  point.type = "outgoing";
+  context.bindDistanceTradePoints(selection);
+  assert.equal(attributes["data-focus-region"], "CR10");
+  assert.match(attributes["data-tip"], /Click to focus CR10$/);
+  const enter = event("keydown", "Enter");
+  handlers["keydown.region-focus"](enter, point);
+  assert.equal(focused.at(-1), nodes[1]);
+  assert.ok(enter.defaultPrevented && enter.stopped);
+
+  point.type = "incoming";
+  context.bindDistanceTradePoints(selection);
+  assert.equal(attributes["data-focus-region"], "CR35");
+  const space = event("keydown", " ");
+  handlers["keydown.region-focus"](space, point);
+  assert.equal(focused.at(-1), nodes[0]);
+  assert.ok(space.defaultPrevented && space.stopped);
+  assert.equal(focused.length, 3);
+  const arrow = event("keydown", "ArrowRight");
+  handlers["keydown.region-focus"](arrow, point);
+  assert.equal(arrow.defaultPrevented, false);
+  point.type = "outgoing";
+  handlers["keydown.region-focus"]({ ...event("keydown", "Enter"), repeat: true }, point);
+  assert.equal(focused.length, 3);
+
+  point.weight = 17;
+  context.bindDistanceTradePoints(selection);
+  assert.match(attributes["data-tip"], /17 animals/);
+  assert.doesNotMatch(attributes["data-tip"], /12,345/);
+});
+
 function textElement() {
   let text = "";
   return {

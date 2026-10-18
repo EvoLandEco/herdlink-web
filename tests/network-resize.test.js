@@ -1,3 +1,4 @@
+import { pooledRuntime, pooledTools } from "./fixtures/pooled-runtime.js";
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
@@ -93,13 +94,13 @@ function runtime(mode = "map") {
     alphaTarget(value) { forceState.target = value; return this; },
     restart() { forceState.running = true; forceState.starts += 1; return this; },
   };
-  const context = vm.createContext({
+  const context = vm.createContext({ ...pooledRuntime,
     allNodes, allLinks, nodeEnter, nodeGroup, labelSelection, linkSelection, svg, calloutSvg,
     nlMapData, nlLabelPoints, forceSim, selectedNodeData: allNodes[0],
     hoveredNode: null, hoveredLink: null, annotationGroup: {},
     currentMode: mode, isMovingToMap: false, w: 800, h: 600,
     containerCol2: { clientWidth: 800, clientHeight: 600 },
-    window: { isPlaying: true, currentDate: new Date("2020-04-01") },
+    window: { herdlinkPooledFlows: pooledTools, isPlaying: true, currentDate: new Date("2020-04-01") },
     mapLayers: { mount: (value) => mapMounts.push(value) },
     updateAnnotationForNode: (node) => annotations.push({ type: "node", id: node.id, x: node.x, y: node.y, x0: node.x0, y0: node.y0 }),
     updateAnnotationForLink: (link) => annotations.push({ type: "link", source: link.source.id, target: link.target.id }),
@@ -450,7 +451,7 @@ test("callouts clear invalid coordinates and degenerate links", () => {
 });
 
 test("callout placement keeps full cards inside the panel at every edge", () => {
-  const context = vm.createContext({});
+  const context = vm.createContext({ ...pooledRuntime,});
   vm.runInContext(extractFunction("getNetworkCalloutPosition"), context);
   for (const [panelWidth, panelHeight] of [[400, 540], [800, 600], [1200, 1000]]) {
     for (const [width, height] of [[270, 309], [270, 368], [296, 239]]) {

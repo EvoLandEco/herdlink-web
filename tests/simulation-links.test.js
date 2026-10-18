@@ -1,3 +1,4 @@
+import { pooledRuntime, pooledTools } from "./fixtures/pooled-runtime.js";
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
@@ -41,7 +42,7 @@ function runtime(edges = [["CR01", "CR02", 1000], ["CR02", "CR01", 100], ["CR02"
     COROP_LEV, COROP_AFN, AANTAL, time,
   })));
   const values = (items, accessor = (item) => item) => Array.from(items, accessor);
-  const context = vm.createContext({
+  const context = vm.createContext({ ...pooledRuntime,
     Date, Map, Set, uniqueDates, loadedCSVData,
     presetDailyData: loadedCSVData, presetDailyDates: uniqueDates.map(Number), dailySimulationCache: new Map(),
     simulationRegionIdsByDataset: new WeakMap(),
@@ -51,7 +52,7 @@ function runtime(edges = [["CR01", "CR02", 1000], ["CR02", "CR01", 100], ["CR02"
     simulationState: {}, simulationLinkInterventions: new Map(),
     simulationNodeInterventions: new Map(),
     networkStatsDirtyDates: new Set(), networkStatsDirtyFrom: null, ledgerBaselineSpectralRadius: 0,
-    window: { currentDate: uniqueDates[0], herdlinkSimulation: { ...simulationEngine, ...simulationPopulation } }, tradeIntensity: null, exposureIntensity: null,
+    window: { herdlinkPooledFlows: pooledTools, currentDate: uniqueDates[0], herdlinkSimulation: { ...simulationEngine, ...simulationPopulation } }, tradeIntensity: null, exposureIntensity: null,
     computeSpectralRadius: () => 0,
     computeHotSpotMetrics: (nodes) => Object.fromEntries(nodes.map(({ id }) => [id, {
       inDegree: 0, outDegree: 0, betweenness: 0, pageRank: 1 / nodes.length, eigenvector: 0,
@@ -88,6 +89,19 @@ function toggle(context, sourceId, targetId, disabled, date = context.uniqueDate
 function snapshot(trajectory) {
   return JSON.stringify(trajectory, (_, value) => value instanceof Map ? Array.from(value) : value);
 }
+
+test("international accounting does not change the Dutch simulation trajectory", () => {
+  const context = runtime();
+  const inputs = settingsFor(context);
+  const baseline = snapshot(context.buildSimulationTrajectory(inputs));
+  context.getPooledFlowSummary = () => ({
+    imports: { observed: 1000000, permitted: 0 }, exports: { observed: 2000000, permitted: 2000000 },
+    regions: { CR01: { imports: { observed: 1000000, permitted: 0 }, exports: { observed: 2000000, permitted: 2000000 } } },
+  });
+  context.dailySimulationCache.clear();
+  assert.equal(snapshot(context.buildSimulationTrajectory(inputs)), baseline);
+  assert.equal(context.allNodes.some(({ id }) => id === "IMPORT" || id === "EXPORT"), false);
+});
 
 test("Restore skips recomputation when no controls have been changed", () => {
   const context = runtime();
@@ -254,7 +268,7 @@ test("region IDs are reused within a dataset and include new partners when its d
 });
 
 test("empty and acyclic networks have finite spectral and centrality values", () => {
-  const graph = vm.createContext({});
+  const graph = vm.createContext({ ...pooledRuntime,});
   vm.runInContext([
     "getNodeId", "buildAdjList", "getStronglyConnectedComponents", "computePerronPair", "computePerronRoot",
     "computeModularity", "computeSpectralRadius", "computeEigenvectorCentrality",

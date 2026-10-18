@@ -1,7 +1,9 @@
 const globalMetrics = [
   { value: "totalNodes", label: "Active Regions" },
   { value: "totalEdges", label: "Trade Routes" },
-  { value: "totalTradeVolume", label: "Total Volume" },
+  { value: "totalTradeVolume", label: "Domestic Volume" },
+  { value: "internationalImports", label: "Imports" },
+  { value: "internationalExports", label: "Exports" },
   { value: "avgTradeEdge", label: "Avg. Volume/Route" },
   { value: "avgTradeNode", label: "Avg. Volume/Area" },
   { value: "riskScore", label: "Risk Score" },

@@ -2,7 +2,8 @@ import csv
 from collections import Counter
 from datetime import date, timedelta
 from pathlib import Path
-from statistics import mean
+import hashlib
+import json
 import unittest
 
 
@@ -18,30 +19,28 @@ def read_ledger(resolution):
 
 
 class TradeAggregationTest(unittest.TestCase):
-    def test_corrected_entry_and_time_aggregates(self):
+    def test_source_accounting_and_time_aggregates(self):
         daily = read_ledger("daily")
-        reference = [
-            count for day, sender, receiver, count in daily
-            if (sender, receiver) == ("CR35", "CR15")
-            and day.year in (2019, 2020) and day.month == 12 and day.weekday() == 0
-        ]
-        self.assertEqual(len(reference), 6)
-        self.assertEqual(sum(reference), 8918)
-        replacement = round(mean(reference))
-        self.assertEqual(replacement, 1486)
-        self.assertNotIn(replacement, reference)
-        self.assertEqual([
-            count for day, sender, receiver, count in daily
-            if (day, sender, receiver) == (date(2021, 12, 20), "CR35", "CR15")
-        ], [replacement])
-        self.assertEqual(sum(count for _, _, _, count in daily), 215083918)
+        bundle = json.loads((DATA / "international_flows.json").read_text())
+        expected_totals = [33570217, 33391131, 33036716, 32861746, 32570225, 31091800]
+        self.assertEqual([annual["year"] for annual in bundle["years"]], list(range(2018, 2024)))
+        for annual, expected in zip(bundle["years"], expected_totals):
+            mapped = sum(count for day, _, _, count in daily if day.year == annual["year"])
+            unmapped = sum(day["unmappedDomestic"] for day in annual["days"])
+            self.assertEqual(mapped + unmapped, expected)
+        for filename, digest in bundle["source"]["assets"].items():
+            self.assertEqual(hashlib.sha256((DATA / filename).read_bytes()).hexdigest(), digest)
+        self.assertEqual(min(day for day, *_ in daily), date(2018, 1, 1))
+        self.assertEqual(max(day for day, *_ in daily), date(2023, 12, 31))
+        self.assertEqual(sum(count for day, _, _, count in daily if day.year == 2018), 33562395)
+        self.assertEqual(sum(day["unmappedDomestic"] for day in bundle["years"][0]["days"]), 7822)
 
         for resolution in ("daily", "weekly", "monthly", "yearly"):
             with self.subTest(resolution=resolution):
                 expected = Counter()
                 for day, sender, receiver, count in daily:
                     if resolution == "weekly":
-                        day -= timedelta(days=(day.weekday() + 1) % 7)
+                        day -= timedelta(days=day.weekday())
                     elif resolution == "monthly":
                         day = day.replace(day=1)
                     elif resolution == "yearly":

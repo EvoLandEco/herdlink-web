@@ -1,6 +1,6 @@
 <h1><img src="public/assets/herdlink-logo.svg" alt="HerdLink — Livestock Trade Networks" width="560"></h1>
 
-![Version](https://img.shields.io/badge/version-v0.9.9-2f6fed)
+![Version](https://img.shields.io/badge/version-v1.0.0-2f6fed)
 ![Deployment](https://img.shields.io/badge/deployment-GitHub%20Pages-121013?logo=github)
 ![Website](https://img.shields.io/website?url=https%3A%2F%2Fherdlink.nl&label=HerdLink.nl)
 ![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)
@@ -21,6 +21,7 @@ The [graduate simulation guide](docs/simulation-teaching-guide.md) explains the 
 ## Main Features
 
 - Daily, weekly, monthly, and yearly trade summaries with timeline replay.
+- Built-in [international flows](docs/international-flows.md) for 2018–2023, with pooled Import and Export nodes, regional statistics and movement accounting for intervention schedules.
 - Interactive maps and networks, with regional focus views for incoming and outgoing movements.
 - Network metrics, trade concentration, distance patterns, communities, and hotspots.
 - Uncalibrated [SIR/SIS/SEIR/SEIRS simulations](docs/simulation-model.md) with compartment charts and regional prevalence. Daily simulation dynamics are preserved across display resolutions.

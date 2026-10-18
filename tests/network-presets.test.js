@@ -40,8 +40,6 @@ test("canonical daily history keeps real target sets across display resolutions"
         [id, plain(context.getNetworkPresetSelection(id, graph, scale, "CR35", 3).targets)]))]));
     if (reference) assert.deepEqual(targets, reference, display);
     else reference = targets;
-    assert.deepEqual(targets.broad["hub-controls"], ["CR13", "CR10", "CR35"]);
-    assert.deepEqual(targets.broad["trade-bottlenecks"], ["CR13", "CR10", "CR17"]);
     assert.deepEqual(targets.broad["hub-controls"], targets.finer["hub-controls"]);
     assert.deepEqual(targets.broad["trade-bottlenecks"], targets.finer["trade-bottlenecks"]);
   }
@@ -55,8 +53,9 @@ test("subsequent trade and local volumes leave historical graphs and targets unc
     : row.COROP_LEV === row.COROP_AFN ? { ...row, AANTAL: row.AANTAL * 1000 } : row);
   const graph = context.getNetworkPresetGraph(changed, introduction);
   assert.deepEqual(graph, reference);
-  assert.equal(graph.ids.length, 39);
-  assert.equal(graph.links.length, 675);
+  const history = daily.filter((row) => +row.time >= start && +row.time < end && row.COROP_LEV !== row.COROP_AFN && row.AANTAL > 0);
+  assert.equal(graph.ids.length, new Set(history.flatMap((row) => [row.COROP_LEV, row.COROP_AFN])).size);
+  assert.equal(graph.links.length, new Set(history.map((row) => `${row.COROP_LEV}/${row.COROP_AFN}`)).size);
   for (const scale of ["broad", "finer"]) for (const id of ["hub-controls", "trade-bottlenecks", "seed-community"]) {
     assert.deepEqual(plain(context.getNetworkPresetSelection(id, graph, scale, "CR35", 3).targets),
       plain(context.getNetworkPresetSelection(id, reference, scale, "CR35", 3).targets));

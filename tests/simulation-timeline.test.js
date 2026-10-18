@@ -24,6 +24,8 @@ function runtime(data = trajectory()) {
   const calls = { max: 0, line: 0, area: 0 };
   const paths = new Map();
   const pathData = new Map();
+  const transitions = [];
+  const interrupted = [];
   const marker = { hidden: true, style: {}, attributes: {}, setAttribute(name, value) { this.attributes[name] = value; } };
   const point = { style: {} };
   const lane = { hidden: true, querySelector: (selector) => ({
@@ -38,6 +40,9 @@ function runtime(data = trajectory()) {
     return {
       attr(name, value) { assert.equal(name, "d"); selectors.forEach((key) => paths.set(key, value)); },
       datum(value) { selectors.forEach((key) => pathData.set(key, value == null ? undefined : value)); },
+      interrupt() { interrupted.push(...selectors); return this; },
+      transition() { transitions.push({ selector }); return this; },
+      duration(value) { transitions.at(-1).duration = value; return this; },
     };
   };
   const chart = {
@@ -63,7 +68,7 @@ function runtime(data = trajectory()) {
   };
   const elements = { simulationTimeline: lane, timeSlider: slider };
   const context = vm.createContext({
-    window: {}, simulationState: { status: "ready", trajectory: data },
+    window: { matchMedia: () => ({ matches: false }) }, simulationState: { status: "ready", trajectory: data },
     isSimulationModeActive: () => true,
     document: { getElementById: (id) => elements[id] },
     d3: {
@@ -72,8 +77,8 @@ function runtime(data = trajectory()) {
       line: () => generator("line"), area: () => generator("area"),
     },
   });
-  vm.runInContext(extract("renderSimulationTimeline"), context);
-  return { context, lane, marker, point, slider, calls, paths, pathData, chart, elements };
+  vm.runInContext(["transitionSelection", "renderSimulationTimeline"].map(extract).join("\n"), context);
+  return { context, lane, marker, point, slider, calls, paths, pathData, chart, elements, transitions, interrupted };
 }
 
 test("prevalence samples follow slider indices and mark the bin containing introduction", () => {
@@ -156,11 +161,60 @@ test("scrubbing reuses path geometry and replacing the trajectory rebuilds it on
   assert.ok([...app.pathData.values()].every((value) => value === undefined));
 });
 
-test("ledger, dataset changes, unfinished runs and empty trajectories hide the timeline", () => {
+test("reruns retain the displayed curve until the completed result can transition in", () => {
+  const app = runtime();
+  app.context.renderSimulationTimeline();
+  assert.deepEqual(app.transitions, []);
+  const geometry = app.chart.datum();
+  const originalPath = app.paths.get(".simulation-timeline-curve");
+  app.context.simulationState.status = "running";
+  app.context.renderSimulationTimeline();
+  app.context.simulationState.trajectory = trajectory([0.2, 0.1, 0]);
+  app.context.renderSimulationTimeline();
+  assert.equal(app.lane.hidden, false);
+  assert.equal(app.chart.datum(), geometry);
+  assert.equal(app.paths.get(".simulation-timeline-curve"), originalPath);
+  assert.deepEqual(app.calls, { max: 1, line: 1, area: 1 });
+  app.context.simulationState.status = "ready";
+  app.context.renderSimulationTimeline();
+  assert.equal(app.lane.hidden, false);
+  assert.equal(app.chart.datum().trajectory, app.context.simulationState.trajectory);
+  assert.deepEqual(app.transitions, [
+    { selector: ".simulation-timeline-curve", duration: 400 },
+    { selector: ".simulation-timeline-area", duration: 400 },
+  ]);
+  assert.deepEqual(app.paths.get(".simulation-timeline-curve"), [[0, 4], [500, 18], [1000, 32]]);
+  app.context.renderSimulationTimeline();
+  assert.equal(app.transitions.length, 2);
+});
+
+test("reduced motion applies replacement curves without a transition", () => {
+  const app = runtime();
+  app.context.window.matchMedia = () => ({ matches: true });
+  app.context.renderSimulationTimeline();
+  app.context.simulationState.trajectory = trajectory([0.2, 0.1, 0]);
+  app.context.renderSimulationTimeline();
+  assert.deepEqual(app.transitions, []);
+  assert.deepEqual(app.paths.get(".simulation-timeline-curve"), [[0, 4], [500, 18], [1000, 32]]);
+});
+
+test("the first run has no curve until its result is ready", () => {
+  const app = runtime();
+  app.context.simulationState.status = "running";
+  app.context.renderSimulationTimeline();
+  assert.equal(app.lane.hidden, true);
+  assert.equal(app.chart.datum(), undefined);
+  app.context.simulationState.status = "ready";
+  app.context.renderSimulationTimeline();
+  assert.equal(app.lane.hidden, false);
+  assert.deepEqual(app.transitions, []);
+});
+
+test("ledger, dataset changes, failed runs and empty trajectories hide the timeline", () => {
   const app = runtime();
   app.context.renderSimulationTimeline();
   const original = app.context.simulationState.trajectory;
-  for (const status of ["idle", "running", "error"]) {
+  for (const status of ["idle", "error"]) {
     app.context.simulationState.status = status;
     app.context.renderSimulationTimeline();
     assert.equal(app.lane.hidden, true, status);
@@ -193,7 +247,6 @@ test("hiding the timeline releases every cached trajectory reference", () => {
   for (const hide of [
     (app) => { app.context.isSimulationModeActive = () => false; app.context.simulationState.trajectory = null; },
     (app) => { app.context.simulationState.status = "error"; },
-    (app) => { app.context.simulationState.status = "running"; },
     (app) => { app.context.window.isSwitchingCSV = true; },
   ]) {
     const app = runtime();
@@ -207,5 +260,6 @@ test("hiding the timeline releases every cached trajectory reference", () => {
     assert.equal(app.lane.hidden, true);
     assert.equal(app.chart.datum(), undefined);
     assert.ok([...app.pathData.values()].every((value) => value === undefined));
+    assert.deepEqual(app.interrupted.slice(-2), [".simulation-timeline-curve", ".simulation-timeline-area"]);
   }
 });

@@ -75,7 +75,7 @@ test("blocked CR35 exports do not count within-region trades as seeding", () => 
   const csv = readFileSync(new URL("../src/assets/data/weekly_aggregation.csv", import.meta.url), "utf8");
   const links = csv.trim().split("\n").slice(1).flatMap((line) => {
     const [, date, source, target, weight] = line.replaceAll('"', "").split(",");
-    if (date !== "2019-01-20" || source === "NA" || target === "NA") return [];
+    if (date !== "2019-01-21" || source === "NA" || target === "NA") return [];
     return [[source, target, +weight, source === "CR35" && target !== "CR35"]];
   });
   assert.ok(links.some(([source, target, weight]) => source === "CR35" && target === "CR35" && weight > 0));

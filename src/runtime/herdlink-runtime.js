@@ -35,6 +35,7 @@
           let communityFlowGeometry = null;
           let communityFlowLayoutId = 0;
           let uniqueDates = [];
+          let pooledFlowFrame = null;
           let temporalUpdateTimeout;
           window.allTemporalStats = {};
           window.allTemporalNodeStats = {};
@@ -126,6 +127,7 @@
           let hoveredNode = null;
           let hoveredLink = null;
           let hoveredLinkElement = null;
+          let hoveredPooledFlow = null;
           const linkHoverGeometry = new WeakMap();
           let annotationGroup = null;
           const metricNames = [
@@ -709,6 +711,10 @@
                 <span class="simulation-controls-heading-text">
                   <i class="fa-solid fa-flask"></i> Simulation Controls
                 </span>
+                <div class="simulation-settings-switch" role="tablist" aria-label="Simulation settings" aria-orientation="horizontal">
+                  <button id="simulationSettingsTab-basic" type="button" role="tab" aria-controls="simulationSettings-basic" aria-selected="true" aria-label="Basic settings">Basic</button>
+                  <button id="simulationSettingsTab-additional" type="button" role="tab" aria-controls="simulationSettings-additional" aria-selected="false" aria-label="Additional settings" tabindex="-1">More</button>
+                </div>
                 <button
                   class="panel-info-button simulation-controls-info has-tip"
                   type="button"
@@ -720,28 +726,9 @@
                 </button>
               </div>
               <div id="simulationSettingsLayout" class="simulation-settings-layout" data-view="basic">
-                <div class="simulation-settings-switch" role="tablist" aria-label="Simulation settings" aria-orientation="vertical">
-                  <button id="simulationSettingsTab-basic" type="button" role="tab" aria-controls="simulationSettings-basic" aria-selected="true" aria-label="Basic settings" title="Basic settings">
-                    <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" aria-hidden="true"><rect x="2" y="2" width="4" height="4" rx="1"/><rect x="10" y="2" width="4" height="4" rx="1"/><rect x="2" y="10" width="4" height="4" rx="1"/><rect x="10" y="10" width="4" height="4" rx="1"/></svg>
-                    <span>Basic</span>
-                  </button>
-                  <button id="simulationSettingsTab-additional" type="button" role="tab" aria-controls="simulationSettings-additional" aria-selected="false" aria-label="Additional settings" title="Additional settings" tabindex="-1">
-                    <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" aria-hidden="true"><path d="M3 2v4m0 4v4M8 2v8M13 2v1m0 4v7"/><circle cx="3" cy="8" r="2"/><circle cx="8" cy="12" r="2"/><circle cx="13" cy="5" r="2"/></svg>
-                    <span>More</span>
-                  </button>
-                </div>
                 <div class="simulation-settings-pages">
                   <section id="simulationSettings-basic" class="simulation-settings-page simulation-settings-page--basic" role="tabpanel" aria-labelledby="simulationSettingsTab-basic" aria-hidden="false">
                     <div class="simulation-control-grid">
-                      <label>
-                        Model
-                        <select id="simulationModel">
-                          <option value="SEIR">SEIR</option>
-                          <option value="SIR">SIR</option>
-                          <option value="SIS">SIS</option>
-                          <option value="SEIRS">SEIRS</option>
-                        </select>
-                      </label>
                       <label class="simulation-seed-region">
                         Seed region
                         <select id="simulationSeedRegion">
@@ -753,16 +740,25 @@
                         <input id="simulationIntroductionDate" type="date" aria-label="Simulation introduction date" title="Infection starts on this date. Load a preset to build its response schedule from this date.">
                       </label>
                       <label>
+                        Model
+                        <select id="simulationModel">
+                          <option value="SEIR">SEIR</option>
+                          <option value="SIR">SIR</option>
+                          <option value="SIS">SIS</option>
+                          <option value="SEIRS">SEIRS</option>
+                        </select>
+                      </label>
+                      <label>
                         Contact
-                        <input id="simulationBeta" type="number" min="0" step="any" value="0.10">
+                        <input id="simulationBeta" type="number" min="0" step="0.01" value="0.16">
                       </label>
                       <label>
                         Movement
-                        <input id="simulationMovementBeta" type="number" min="0" step="any" value="0.04" title="Population units per recorded animal">
+                        <input id="simulationMovementBeta" type="number" min="0" step="0.01" value="0.04" title="Population units per recorded animal">
                       </label>
                       <label>
                         Recovery
-                        <input id="simulationGamma" type="number" min="0" max="1" step="any" value="0.15">
+                        <input id="simulationGamma" type="number" min="0" max="1" step="0.01" value="0.15">
                       </label>
                     </div>
                   </section>
@@ -776,6 +772,14 @@
                         </select>
                       </label>
                       <label>
+                        Progression
+                        <input id="simulationSigma" type="number" min="0" max="1" step="0.01" value="0.22">
+                      </label>
+                      <label>
+                        Immunity loss
+                        <input id="simulationOmega" type="number" min="0" max="1" step="0.01" value="0.02" title="Daily recovered exit fraction for SEIRS">
+                      </label>
+                      <label>
                         <span id="simulationInitialPctLabel">Initial infectious %</span>
                         <input id="simulationInitialPct" type="number" min="0" max="100" step="any" value="1">
                       </label>
@@ -786,14 +790,6 @@
                       <label>
                         <span id="simulationInitialRecoveredPctLabel">Initial recovered %</span>
                         <input id="simulationInitialRecoveredPct" type="number" min="0" max="100" step="any" value="0">
-                      </label>
-                      <label>
-                        Progression
-                        <input id="simulationSigma" type="number" min="0" max="1" step="any" value="0.22">
-                      </label>
-                      <label>
-                        Immunity loss
-                        <input id="simulationOmega" type="number" min="0" max="1" step="any" value="0.02" title="Daily recovered exit fraction for SEIRS">
                       </label>
                     </div>
                     <div id="simulationPopulationControls" class="simulation-population" role="group" aria-label="Population" hidden>
@@ -826,8 +822,8 @@
               tab.addEventListener("click", () => selectSettingsView(views[index]));
               tab.addEventListener("keydown", (event) => {
                 let next;
-                if (event.key === "ArrowDown") next = (index + 1) % tabs.length;
-                else if (event.key === "ArrowUp") next = (index + tabs.length - 1) % tabs.length;
+                if (event.key === "ArrowRight") next = (index + 1) % tabs.length;
+                else if (event.key === "ArrowLeft") next = (index + tabs.length - 1) % tabs.length;
                 else if (event.key === "Home") next = 0;
                 else if (event.key === "End") next = tabs.length - 1;
                 else return;
@@ -1360,6 +1356,10 @@
           function getComparisonMetricDefinitions(mode) {
             const metric = (key, label, format, description) => ({ key, label, format, description });
             const retainedMovements = metric("totalTradeVolume", "Retained movements", "count", "Animals moved on permitted trade records during the displayed period, including movements within a region once. Regional values count movements sent by that region.");
+            const boundaryMetrics = [
+              metric("retainedImports", "Imports", "count", "Recorded imports assigned to a Dutch region whose incoming permission is enabled on the movement day."),
+              metric("retainedExports", "Exports", "count", "Recorded exports assigned to a Dutch region whose outgoing permission is enabled on the movement day."),
+            ];
             if (mode === "simulation") {
               const compartments = [
                 metric("S", "Susceptible", "decimal", "Susceptible model population units at the end of the displayed period."),
@@ -1372,8 +1372,8 @@
                 metric("cumulativeInfections", "Cumulative infections", "decimal", "New infection events summed across daily steps, excluding the initial seed. Reinfections count again in SIS and SEIRS."),
               ];
               return {
-                globalMetrics: compartments.concat(retainedMovements),
-                nodeMetrics: compartments.concat([
+                globalMetrics: compartments.concat(retainedMovements, boundaryMetrics),
+                nodeMetrics: compartments.concat(boundaryMetrics, [
                   retainedMovements,
                   metric("incomingExposure", "Incoming exposure", "decimal", "Incoming movement pressure from other regions, weighted by source prevalence at each day's start, multiplied by the movement coefficient and summed across the displayed period."),
                   metric("outgoingPressure", "Outgoing pressure", "decimal", "Outgoing movement pressure to other regions, weighted by this region's prevalence at each day's start, multiplied by the movement coefficient and summed across the displayed period."),
@@ -1382,7 +1382,7 @@
             }
             return {
               globalMetrics: [
-                retainedMovements,
+                retainedMovements, ...boundaryMetrics,
                 metric("totalNodes", "Trading regions", "count", "Regions with at least one enabled positive ledger record."),
                 metric("totalEdges", "Trade records", "count", "Enabled positive ledger records, including records within a region."),
                 metric("avgTradeEdge", "Movements per record", "decimal", "Total animal movements divided by enabled positive ledger records."),
@@ -1395,7 +1395,7 @@
                 metric("inDegree", "Incoming movements", "count", "Cross-region animal movements received on enabled records, summed across all regions. Movements within a region are excluded."),
               ],
               nodeMetrics: [
-                retainedMovements,
+                retainedMovements, ...boundaryMetrics,
                 metric("inDegree", "Incoming movements", "count", "Animal movements arriving from other regions on enabled records."),
                 metric("outDegree", "Outgoing movements", "count", "Animal movements sent to other regions on enabled records."),
                 metric("betweenness", "Betweenness", "decimal", "Directed weighted shortest path betweenness, using inverse movement volume as distance."),
@@ -1420,12 +1420,20 @@
             return series;
           }
 
-          function buildSimulationComparisonSeries(trajectory) {
+          function buildSimulationComparisonSeries(trajectory, schedule = simulationNodeInterventions) {
             const series = buildComparisonSeries(uniqueDates, trajectory.ids, getComparisonMetricDefinitions("simulation"),
               (key) => trajectory.frameByKey[key]?.summary, (key) => trajectory.frameByKey[key]?.nodeStates);
             for (const [index, point] of series.global.entries()) {
+              const flows = getPooledFlowSummary(new Date(point.date), schedule);
+              Object.assign(point, window.herdlinkPooledFlows.flowMetrics(flows));
               point.totalTradeVolume = 0;
-              for (const id of trajectory.ids) series.nodes[id][index].totalTradeVolume = 0;
+              for (const id of trajectory.ids) {
+                Object.assign(series.nodes[id][index], {
+                  totalTradeVolume: 0,
+                  retainedImports: flows.regions[id]?.imports.permitted || 0,
+                  retainedExports: flows.regions[id]?.exports.permitted || 0,
+                });
+              }
               for (const link of trajectory.frameByKey[point.date].linkStates.values()) {
                 point.totalTradeVolume += link.ledgerWeight;
                 series.nodes[link.source][index].totalTradeVolume += link.ledgerWeight;
@@ -1454,7 +1462,7 @@
               const trajectory = originalTrajectory
                 ? window.herdlinkSimulation.aggregateDailyTrajectory(originalTrajectory, uniqueDates)
                 : buildSimulationTrajectory(settings, { nodeInterventions: new Map(), linkInterventions: new Map() });
-              cache.original = buildSimulationComparisonSeries(trajectory);
+              cache.original = buildSimulationComparisonSeries(trajectory, new Map());
               cache.originalKey = originalKey;
             }
             return cache.original;
@@ -1496,10 +1504,15 @@
             presetDailyDataError = null;
             presetDailyDataPromise = fetchAsset("assets/data/daily_aggregation.csv", "text").then(async (csv) => {
               const data = d3.csvParse(csv, (row) => ({ ...row, time: new Date(row.time), AANTAL: +row.AANTAL }));
-              const times = [...new Set(data.map((row) => row.time.getTime()))].sort((a, b) => a - b);
+              if (!data.length) throw new Error("Daily history contains no recorded movements.");
+              const times = window.herdlinkPooledFlows.calendars.get("daily").map(Number);
               if (!times.length || times.some((time, index) => !Number.isFinite(time) ||
                 (index > 0 && time - times[index - 1] !== 86400000))) {
-                throw new Error("Daily history needs a complete calendar with one recorded date per day.");
+                throw new Error("Daily history needs a complete declared calendar.");
+              }
+              const calendar = new Set(times);
+              if (data.some((row) => !calendar.has(row.time.getTime()))) {
+                throw new Error("Movement dates must belong to the declared calendar.");
               }
               presetDailyDataHash = await window.herdlinkSimulation.hashSimulationContent(csv);
               presetDailyData = data;
@@ -1601,6 +1614,7 @@
             for (const [suffix, label] of [["InitialPct", "infectious"], ["InitialExposedPct", "exposed"], ["InitialRecoveredPct", "recovered"]]) {
               document.getElementById(`simulation${suffix}Label`).textContent = `Initial ${label}${absolute ? "" : " %"}`;
               const input = document.getElementById(`simulation${suffix}`);
+              input.step = absolute ? "0.01" : "any";
               if (absolute) input.removeAttribute("max");
               else input.max = "100";
             }
@@ -1988,7 +2002,7 @@
             let series;
             if (appDataMode === "simulation") {
               const trajectory = buildSimulationTrajectory(settings, { nodeInterventions, linkInterventions });
-              series = buildSimulationComparisonSeries(trajectory);
+              series = buildSimulationComparisonSeries(trajectory, nodeInterventions);
             } else {
               const stats = computeTemporalNetworkStats(uniqueDates, { data: loadedCSVData, nodeInterventions, linkInterventions, store: false });
               series = buildComparisonSeries(uniqueDates, ids, definitions,
@@ -2833,6 +2847,7 @@
               .append("path")
               .attr("class", "simulation-spatial-region")
               .merge(regions)
+              .call(bindChartRegionFocus, (feature) => feature.properties.statcode)
               .attr("d", path)
               .attr("fill", (feature) => {
                 const state = frame.nodeStates[feature.properties.statcode];
@@ -2947,6 +2962,11 @@
               .attr("stroke-width", 0.7)
               .attr("opacity", 0.88)
               .merge(bubbles)
+              .call(bindChartRegionFocus, (item) => item.id)
+              .classed("has-tip", true)
+              .attr("data-tip-kind", "chart")
+              .attr("data-tip", (item) => `${item.id} · ${getStatnaam(item.id)}\n${formatSmall(item.newInfections)} new infection entries\nClick to focus ${item.id}`)
+              .attr("aria-describedby", "herdlinkTooltip")
               .call((selection) =>
                 transitionSelection(selection)
                   .attr("cx", (item) => item.x)
@@ -2954,9 +2974,6 @@
                   .attr("r", (item) => bubbleRadius(item.newInfections))
                   .attr("fill", theme.accent),
               );
-            g.selectAll("circle.simulation-spatial-bubble").selectAll("title")
-              .data((item) => [item]).join("title")
-              .text((item) => `${item.id} · ${getStatnaam(item.id)}: ${formatSmall(item.newInfections)} new infection entries`);
             bubbles
               .exit()
               .call((selection) =>
@@ -3170,7 +3187,7 @@
                     ${getSimulationPartitionDisplayKey(partition.key)}
                   </span>
                   <span class="simulation-partition-map-regions">
-                    ${members.length} region${members.length === 1 ? "" : "s"} · ${visibleMembers.join(" ")}${hiddenMembers ? ` +${hiddenMembers}` : ""}
+                    ${members.length} region${members.length === 1 ? "" : "s"} · ${visibleMembers.map((id) => `<button type="button" class="partition-region-button" data-region="${id}">${id}</button>`).join(" ")}${hiddenMembers ? ` +${hiddenMembers}` : ""}
                   </span>
                 </div>
               `;
@@ -3203,6 +3220,9 @@
                   ${fullRows}
                 </div>
               `);
+            panel.selectAll(".partition-region-button")
+              .datum(function () { return this.dataset.region; })
+              .call(bindChartRegionFocus, (id) => id);
           }
 
           function getSelectedSimulationPartitionStats(frame) {
@@ -5299,7 +5319,7 @@
               },
               {
                 icon: '<i class="fa-solid fa-dolly"></i>',
-                label: "Total Volume",
+                label: "Domestic Volume",
                 value: safeToFixed(totalTradeVolume, 0),
               },
               {
@@ -6389,7 +6409,13 @@
               for (const node of Object.values(nodeStats)) node.totalTradeVolume = 0;
               for (const link of enabledLinks) nodeStats[link.source.id].totalTradeVolume += link.weight;
               // Combine all stats into an object.
+              const flowSummary = getPooledFlowSummary(date, nodeInterventions);
+              for (const [id, node] of Object.entries(nodeStats)) {
+                node.retainedImports = flowSummary.regions[id]?.imports.permitted || 0;
+                node.retainedExports = flowSummary.regions[id]?.exports.permitted || 0;
+              }
               const stats = {
+                ...window.herdlinkPooledFlows.flowMetrics(flowSummary),
                 totalNodes: simpleStats.totalNodes,
                 totalEdges: simpleStats.totalEdges,
                 totalTradeVolume: simpleStats.totalTradeVolume,
@@ -7032,6 +7058,7 @@
             });
             if (changed) {
               linkSelection.attr("d", getNetworkLinkPath);
+              renderPooledFlowPositions();
               if (hoveredLink) updateAnnotationForLink(hoveredLink, annotationGroup);
             }
             linkBoundaryFrame = requestAnimationFrame(updateNetworkLinkBoundaries);
@@ -7171,6 +7198,8 @@
           }
 
           function handleNetworkLinkPointerMove(event) {
+            if (event.target.closest(".pooled-flows") || event.target.closest(".pooled-ports")) return;
+            if (hoveredPooledFlow) clearPooledFlowHover();
             if (event.target.closest(".nodes")) return;
             const root = svg.node();
             const [x, y] = d3.pointer(event, root);
@@ -7189,6 +7218,173 @@
             linkSelection.each(function (d) {
               if (d.id === id && isNetworkLinkHoverable(this, d)) showNetworkLinkCallout(this, d);
             });
+          }
+
+          function getPooledFlowSummary(date = window.currentDate, schedule = simulationNodeInterventions) {
+            return window.herdlinkPooledFlows.summarize(date, currentTimeSpan, schedule);
+          }
+
+          function getPooledPortRegionCount(channel) {
+            return Object.values(pooledFlowFrame.regions).filter((counts) => counts[channel].observed > 0).length;
+          }
+
+          function getPooledFlowLinks() {
+            // Simulation edges represent attributed infections; the model has no international attribution.
+            if (isSimulationModeActive()) return [];
+            return Object.entries(pooledFlowFrame.regions).flatMap(([region, counts]) =>
+              ["imports", "exports"].filter((channel) => counts[channel].observed > 0)
+                .map((channel) => ({ region, channel, ...counts[channel] })));
+          }
+
+          function refreshPooledFlows() {
+            if (!window.currentDate) return;
+            pooledFlowFrame = getPooledFlowSummary();
+            const layer = svg.selectAll("g.pooled-flows").data([null]).join((enter) => enter.insert("g", ".nodes")).attr("class", "pooled-flows");
+            const portLayer = svg.selectAll("g.pooled-ports").data([null]).join("g").attr("class", "pooled-ports").raise();
+            const links = getPooledFlowLinks();
+            const routes = layer.selectAll("g.pooled-flow-route").data(links, (d) => `${d.region}/${d.channel}`)
+              .join((enter) => {
+                const group = enter.append("g");
+                group.append("path").attr("class", "pooled-flow-halo");
+                group.append("path").attr("class", "pooled-flow-link");
+                group.append("path").attr("class", "pooled-flow-hit");
+                return group;
+              }).attr("class", (d) => `pooled-flow-route ${d.channel}`);
+            routes.select(".pooled-flow-link")
+              .attr("stroke-width", (d) => 0.8 + Math.log10(1 + d.observed) / 5)
+              .attr("opacity", (d) => selectedNodeData ? (selectedNodeData.id === d.region ? 0.65 : 0.025) : 0.18)
+              .attr("marker-end", (d) => `url(#pooled-arrow-${d.channel})`);
+            routes.select(".pooled-flow-hit").attr("role", "img").attr("aria-describedby", "pooled-flow-callout")
+              .attr("tabindex", (d) => selectedNodeData && selectedNodeData.id !== d.region ? -1 : 0)
+              .style("pointer-events", (d) => selectedNodeData && selectedNodeData.id !== d.region ? "none" : null)
+              .attr("aria-label", (d) => `${d.channel === "imports" ? "Import to " : "Export from "}${getStatnaam(d.region)}: ${formatCount(d.observed)} animal movements.`);
+            const defs = layer.selectAll("defs").data([null]).join("defs");
+            defs.selectAll("marker").data(["imports", "exports"]).join("marker")
+              .attr("id", (d) => `pooled-arrow-${d}`).attr("viewBox", "0 -3 6 6")
+              .attr("refX", 6).attr("markerUnits", "userSpaceOnUse").attr("markerWidth", 7).attr("markerHeight", 7).attr("orient", "auto")
+              .selectAll("path").data((d) => [d]).join("path").attr("d", "M0,-3L6,0L0,3Z")
+              .attr("class", (d) => d);
+            const gradients = defs.selectAll("linearGradient").data(["imports", "exports"]).join("linearGradient")
+              .attr("id", (d) => `pooled-surface-${d}`).attr("x2", "0.8").attr("y2", "1")
+              .attr("class", (d) => d);
+            gradients.selectAll("stop").data([0, 1]).join("stop")
+              .attr("offset", (d) => d).attr("class", (d) => d ? "port-gradient-end" : "port-gradient-start");
+            const ports = portLayer.selectAll("g.pooled-port").data(["imports", "exports"]).join((enter) => {
+              const group = enter.append("g").attr("role", "img").attr("tabindex", 0);
+              group.append("rect").attr("class", "port-surface")
+                .attr("x", -68).attr("y", -34).attr("width", 136).attr("height", 68).attr("rx", 20);
+              group.append("path").attr("class", "port-orbit")
+                .attr("d", "M-72,-2V-14A24,24 0 0 1 -48,-38H-22M22,38H48A24,24 0 0 0 72,14V2");
+              group.append("path").attr("class", "port-icon-orbit")
+                .attr("d", "M-56,-11A11,11 0 0 1 -43,-27M-36,-22A11,11 0 0 1 -49,-6");
+              group.append("path").attr("class", "port-icon").attr("transform", "translate(3,1) scale(0.95)")
+                .attr("d", (d) => d === "imports" ? "M-53,-18H-44M-48,-22L-44,-18L-48,-14M-54,-24H-57V-12H-54" : "M-54,-18H-45M-49,-22L-45,-18L-49,-14M-45,-24H-42V-12H-45");
+              group.append("text").attr("class", "port-name").attr("x", -27).attr("y", -13);
+              group.append("text").attr("class", "port-value").attr("x", -50).attr("y", 9);
+              group.append("text").attr("class", "port-caption").attr("x", -50).attr("y", 24);
+              return group;
+            }).attr("class", (d) => `pooled-port ${d}`).raise();
+            ports.select(".port-surface").attr("fill", (d) => `url(#pooled-surface-${d})`);
+            ports.select(".port-name").text((d) => d === "imports" ? "Import" : "Export");
+            ports.select(".port-value").text((d) => formatCount(pooledFlowFrame[d].observed));
+            ports.select(".port-caption").text((d) => `movements · ${getPooledPortRegionCount(d)} regions`);
+            ports.attr("aria-label", (d) => `Pooled ${d}: ${formatCount(pooledFlowFrame[d].observed)} recorded animal movements across ${getPooledPortRegionCount(d)} Dutch regions.`);
+            svg.selectAll(".pooled-port, .pooled-flow-hit")
+              .on("pointerenter.pooled focus.pooled", (event, d) => showPooledFlowCallout(d))
+              .on("pointerleave.pooled blur.pooled", clearPooledFlowHover)
+              .on("click.pooled", (event) => event.stopPropagation())
+              .on("keydown.pooled", (event) => { if (event.key === "Escape") clearPooledFlowHover(); });
+            renderPooledFlowPositions();
+          }
+
+          function getPooledPortPosition(channel) {
+            return channel === "imports" ? [110, h * (currentMode === "map" ? 0.4 : 0.52)]
+              : [w - 110, h * (currentMode === "map" ? 0.66 : 0.52)];
+          }
+
+          function getPooledFlowGeometry(d, node) {
+            if (!node || !Number.isFinite(node.x) || !Number.isFinite(node.y)) return null;
+            const port = getPooledPortPosition(d.channel);
+            const dx = node.x - port[0], dy = node.y - port[1], distance = Math.hypot(dx, dy);
+            if (!distance) return null;
+            const control = [
+              Math.max(12, Math.min(w - 12, (port[0] + node.x) / 2 + dy * 0.22)),
+              Math.max(12, Math.min(h - 12, (port[1] + node.y) / 2 - dx * 0.22)),
+            ];
+            const portDistance = Math.hypot(control[0] - port[0], control[1] - port[1]);
+            const ux = (control[0] - port[0]) / portDistance, uy = (control[1] - port[1]) / portDistance;
+            let portRadius = Math.min(68 / Math.abs(ux), 34 / Math.abs(uy));
+            if (Math.abs(ux) * portRadius > 48 && Math.abs(uy) * portRadius > 14) {
+              const projection = 48 * Math.abs(ux) + 14 * Math.abs(uy);
+              portRadius = projection + Math.sqrt(projection ** 2 - 48 ** 2 - 14 ** 2 + 20 ** 2);
+            }
+            const nodeRadius = node.linkBoundaryRadius ?? node.r ?? 8;
+            if (distance <= portRadius + nodeRadius) return null;
+            const a = [port[0] + ux * portRadius, port[1] + uy * portRadius];
+            const nodeDistance = Math.hypot(control[0] - node.x, control[1] - node.y);
+            const b = [node.x + (control[0] - node.x) / nodeDistance * nodeRadius,
+              node.y + (control[1] - node.y) / nodeDistance * nodeRadius];
+            return { start: d.channel === "imports" ? a : b, control, end: d.channel === "imports" ? b : a };
+          }
+
+          function getPooledFlowPath(d, node) {
+            const curve = getPooledFlowGeometry(d, node);
+            return curve ? `M${curve.start}Q${curve.control} ${curve.end}` : null;
+          }
+
+          function renderPooledFlowPositions() {
+            if (!pooledFlowFrame) return;
+            const nodes = new Map(allNodes.map((node) => [node.id, node]));
+            const layer = svg.select("g.pooled-flows");
+            svg.selectAll("g.pooled-port").attr("transform", (d) => `translate(${getPooledPortPosition(d)})`);
+            layer.selectAll(".pooled-flow-halo, .pooled-flow-link, .pooled-flow-hit").attr("d", (d) => getPooledFlowPath(d, nodes.get(d.region)));
+            if (hoveredPooledFlow) renderPooledFlowCallout();
+          }
+
+          function clearPooledFlowHover() {
+            if (!hoveredPooledFlow) return;
+            hoveredPooledFlow = null;
+            svg.classed("pooled-flow-focus", false);
+            svg.selectAll(".pooled-flow-route, .pooled-port").classed("is-hovered", false);
+            clearNetworkCallout();
+          }
+
+          function showPooledFlowCallout(d) {
+            clearHoveredLinkState();
+            hoveredNode = null;
+            hoveredPooledFlow = typeof d === "string" ? { channel: d } : { channel: d.channel, region: d.region };
+            renderPooledFlowCallout();
+          }
+
+          function getPooledFlowCalloutData({ channel, region }) {
+            const importing = channel === "imports", total = pooledFlowFrame[channel];
+            const volume = pooledFlowFrame.regions[region]?.[channel].observed;
+            if (!volume || selectedNodeData && selectedNodeData.id !== region) return null;
+            return {
+              kind: "link", channel,
+              code: importing ? `IMPORT → ${region}` : `${region} → EXPORT`,
+              source: importing ? "International origins" : getStatnaam(region),
+              target: importing ? getStatnaam(region) : "International destinations",
+              heroLabel: "Observed animals", hero: formatCount(volume),
+              rows: [{ label: `Share of ${channel}`, value: formatPct(volume / total.observed) }],
+              note: `Share of ${importing ? "all recorded imports" : "exports with a known Dutch sender region"} in the selected period.`,
+            };
+          }
+
+          function renderPooledFlowCallout() {
+            if (isSimulationModeActive()) { clearPooledFlowHover(); return; }
+            const { channel, region } = hoveredPooledFlow;
+            svg.classed("pooled-flow-focus", true);
+            svg.selectAll(".pooled-port").classed("is-hovered", (d) => d === channel);
+            svg.selectAll(".pooled-flow-route").classed("is-hovered", (d) => d.channel === channel &&
+              (region ? d.region === region : !selectedNodeData || d.region === selectedNodeData.id));
+            if (!region) return;
+            const info = getPooledFlowCalloutData(hoveredPooledFlow);
+            const curve = getPooledFlowGeometry(hoveredPooledFlow, allNodes.find((node) => node.id === region));
+            if (!info || !curve) { clearPooledFlowHover(); return; }
+            const x = (curve.start[0] + 2 * curve.control[0] + curve.end[0]) / 4;
+            const y = (curve.start[1] + 2 * curve.control[1] + curve.end[1]) / 4;
+            renderNetworkCallout(annotationGroup, x, y, info);
           }
 
           function renderGraphPositions() {
@@ -7218,6 +7414,7 @@
                 return `translate(${d.x},${d.y})`;
               });
               linkSelection.attr("d", getNetworkLinkPath);
+              renderPooledFlowPositions();
               // Update text labels positions.
               labelSelection
                 .attr("x", (d) => d.x)
@@ -7232,6 +7429,7 @@
 
           // Create Network
           function initNetwork(isReplot = false) {
+            clearPooledFlowHover();
             cancelAnimationFrame(linkBoundaryFrame);
             linkBoundaryFrame = null;
             nodeGroup?.interrupt("map-position");
@@ -7604,6 +7802,11 @@
           function getNodeCalloutData(d) {
             const state = isSimulationModeActive() ? simulationState.currentFrame?.nodeStates[d.id] : null;
             const community = allNodes.find((node) => node.id === d.id)?.community;
+            const flows = getPooledFlowSummary().regions[d.id];
+            const internationalRows = [
+              { label: "Imports", value: formatCount(flows?.imports.observed ?? 0), color: theme.incoming },
+              { label: "Exports", value: formatCount(flows?.exports.observed ?? 0), color: theme.outgoing },
+            ];
             const info = {
               kind: "node", code: d.id, name: d.statnaam || getStatnaam(d.id),
               tag: community == null || community < 0 ? "Unassigned" : `P${community}`,
@@ -7620,6 +7823,7 @@
               rows: [
                 { label: "Incoming exposure", value: formatSmall(state.incomingExposure), color: theme.incoming },
                 { label: "Outgoing pressure", value: formatSmall(state.outgoingPressure), color: theme.outgoing },
+                ...internationalRows,
               ],
             };
             let incoming = 0, outgoing = 0, local = 0;
@@ -7637,11 +7841,13 @@
                 { label: "Incoming trade", value: formatCount(incoming), color: theme.incoming },
                 { label: "Outgoing trade", value: formatCount(outgoing), color: theme.outgoing },
                 { label: "Local trade", value: formatCount(local), color: theme.accent },
+                ...internationalRows,
               ],
             };
           }
 
           function updateAnnotationForNode(d, annotationGroup) {
+            if (hoveredPooledFlow) { renderPooledFlowCallout(); return; }
             if (!d) {
               clearNetworkCallout(annotationGroup);
               return;
@@ -7696,16 +7902,19 @@
             const node = info.kind === "node";
             const width = node ? 270 : 296;
             const rowsTop = node ? (info.compartments ? 304 : 220) : 150;
-            const height = rowsTop + info.rows.length * 25 + 14;
+            const height = rowsTop + info.rows.length * 25 + 14 + (info.note ? 58 : 0);
             const position = getNetworkCalloutPosition(x, y, width, height, w, h);
             const edgeX = Math.max(position.x, Math.min(position.x + width, x));
             const edgeY = Math.max(position.y, Math.min(position.y + height, y));
             group.selectAll("path.network-callout-connector").data([null]).join("path")
               .attr("class", "network-callout-connector")
+              .attr("data-flow-channel", info.channel || null)
               .attr("d", `M${x},${y}L${(x + edgeX) / 2},${edgeY}L${edgeX},${edgeY}`);
             let card = group.select("g.network-hover-callout");
             if (card.empty()) card = group.append("g").attr("class", "network-hover-callout");
             card.attr("transform", `translate(${position.x},${position.y})`)
+              .attr("data-flow-channel", info.channel || null)
+              .attr("id", info.channel ? "pooled-flow-callout" : null).attr("role", info.channel ? "tooltip" : null)
               .classed("node-annotation", node).classed("link-annotation", !node);
             const signature = JSON.stringify(info);
             if (card.datum() === signature) { group.raise(); return; }
@@ -7746,6 +7955,7 @@
                 });
               }
             } else {
+              if (info.channel) text("OBSERVED", width - 16, 26, "network-callout-tag").attr("text-anchor", "end");
               text("FROM", 16, 51, "network-callout-caption");
               name(info.source, 60, 38, width - 76);
               text("TO", 16, 90, "network-callout-caption");
@@ -7762,6 +7972,9 @@
               text(item.label, 17, cy + 17, "network-callout-label");
               text(item.value, width - 17, cy + 17, "network-callout-value", item.color).attr("text-anchor", "end");
             });
+            if (info.note) content.append("foreignObject")
+              .attr("x", 17).attr("y", rowsTop + info.rows.length * 25 + 10).attr("width", width - 34).attr("height", 54)
+              .append("xhtml:div").attr("class", "network-callout-note").text(info.note);
             group.raise();
           }
 
@@ -8146,6 +8359,46 @@
             const model = isSimulationModeActive() && document.getElementById("simulationModel");
             document.getElementById(model && !model.disabled ? "simulationModel" : "mainFigureSVG")
               ?.focus({ preventScroll: true });
+          }
+
+          function focusChartRegion(event, id) {
+            if (event.defaultPrevented || window.isSwitchingCSV || window.isSwitchingAppMode ||
+                window.isDoingTemporalUpdate || simulationState.status === "running") return;
+            const node = allNodes.find((item) => item.id === id);
+            if (!node || selectedNodeData?.id === id) return;
+            onClickNode(event, node);
+            if (event.type === "keydown") document.getElementById("mainFigureSVG")?.focus({ preventScroll: true });
+          }
+
+          function bindChartRegionFocus(selection, regionId) {
+            return selection.classed("chart-region-target", true)
+              .attr("role", "button").attr("tabindex", 0)
+              .attr("data-focus-region", regionId)
+              .attr("aria-label", (item) => `Focus ${regionId(item)} · ${getStatnaam(regionId(item))}`)
+              .on("click.region-focus", (event, item) => focusChartRegion(event, regionId(item)))
+              .on("keydown.region-focus", (event, item) => {
+                if (event.key !== "Enter" && event.key !== " ") return;
+                if (!event.repeat) focusChartRegion(event, regionId(item));
+                event.preventDefault();
+                event.stopPropagation();
+              });
+          }
+
+          function getDistanceTradeFocusId(point) {
+            return point.type === "outgoing" ? point.targetId : point.sourceId;
+          }
+
+          function getDistanceTradeTip(point) {
+            return `${point.sourceId} · ${getStatnaam(point.sourceId)}\n→ ${point.targetId} · ${getStatnaam(point.targetId)}\n${formatCount(point.weight)} animals · ${point.distance.toFixed(1)} km\nClick to focus ${getDistanceTradeFocusId(point)}`;
+          }
+
+          function bindDistanceTradePoints(selection) {
+            return selection.call(bindChartRegionFocus, getDistanceTradeFocusId)
+              .classed("has-tip", true)
+              .attr("data-tip-kind", "chart")
+              .attr("data-tip", getDistanceTradeTip)
+              .attr("aria-label", getDistanceTradeTip)
+              .attr("aria-describedby", "herdlinkTooltip");
           }
 
           // Node Click Handler
@@ -8560,12 +8813,26 @@
             const maxDistance = d3.max(distances.values()) || 0;
             const localVolume = d3.sum(allLinks.filter((link) =>
               getNodeId(link.source) === focalId && getNodeId(link.target) === focalId), (link) => link.weight);
+            const internationalFlows = getPooledFlowSummary().regions[focalId];
 
             function renderRows(rows, section) {
-              if (!rows.length) {
+              const channel = section === "outgoing" ? "exports" : "imports";
+              const volume = internationalFlows?.[channel]?.observed || 0;
+              const internationalRow = volume > 0 ? `
+                <div class="trade-item" data-flow-channel="${channel}" title="Recorded international animal movements">
+                  <div class="trade-item-main">
+                    <span class="${section === "outgoing" ? "trade-dest" : "trade-src"}">
+                      <span class="trade-icon"><i class="fa-solid fa-globe" aria-hidden="true"></i></span>
+                      <span class="trade-route-label">${channel === "exports" ? "Exports" : "Imports"}${simulationMode ? '<small class="simulation-link-status">Animal movements</small>' : ""}</span>
+                    </span>
+                    <span class="trade-volume">${formatCount(volume)}</span>
+                  </div>
+                </div>
+              ` : "";
+              if (!rows.length && !internationalRow) {
                 return `<div class="trade-item no-trades">No ${section} ${simulationMode ? "exposure" : "trades"}.</div>`;
               }
-              return rows
+              return internationalRow + rows
                 .map((link) => {
                   const sourceId = getNodeId(link.source);
                   const targetId = getNodeId(link.target);
@@ -9941,6 +10208,7 @@
           }
     
           function updateNetwork(instant = false) {
+            refreshPooledFlows();
             // Disable buttons and checkboxes during transitions.
             disableAllButtons();
             disableAllCheckboxes();
@@ -10767,6 +11035,7 @@
               .data(tradeData, (d) => d.sourceId + "-" + d.targetId);
             circles.exit().transition().duration(750).attr("r", 0).remove();
             circles
+              .call(bindDistanceTradePoints)
               .attr("fill", (d) => nodeColor(communityByNode[d.sourceId]))
               .transition()
               .duration(750)
@@ -10777,6 +11046,7 @@
               .enter()
               .append("circle")
               .attr("class", "trade-circle")
+              .call(bindDistanceTradePoints)
               .attr("cx", (d) => xScale(d.distance))
               .attr("cy", (d) => yScale(d.weight))
               .attr("r", 0)
@@ -11008,6 +11278,7 @@
               .data(sampledData, (d) => d.sourceId + "-" + d.targetId);
             circles.exit().transition().duration(750).attr("r", 0).remove();
             circles
+              .call(bindDistanceTradePoints)
               .transition()
               .duration(750)
               .attr("cx", (d) => xScale(d.distance))
@@ -11020,6 +11291,7 @@
               .enter()
               .append("circle")
               .attr("class", "trade-circle")
+              .call(bindDistanceTradePoints)
               .attr("cx", (d) => xScale(d.distance))
               .attr("cy", (d) => yScale(d.weight))
               .attr("r", 0)
@@ -11522,6 +11794,7 @@
               renderSimulationPanels();
             }
     
+            refreshPooledFlows();
             isDoingTemporalUpdate = false;
             window.isDoingTemporalUpdate = false;
           }
@@ -11530,15 +11803,17 @@
             const lane = document.getElementById("simulationTimeline");
             if (!lane) return;
             const trajectory = simulationState.trajectory;
-            lane.hidden = !isSimulationModeActive() || window.isSwitchingCSV ||
-              simulationState.status !== "ready" || !trajectory?.frames.length;
             const chart = d3.select(lane).select("svg");
+            let geometry = chart.datum();
+            const running = simulationState.status === "running";
+            lane.hidden = !isSimulationModeActive() || window.isSwitchingCSV ||
+              (simulationState.status !== "ready" && !(running && geometry)) || !trajectory?.frames.length;
             if (lane.hidden) {
-              chart.datum(null).selectAll("path").datum(null);
+              chart.datum(null).selectAll("path").interrupt().datum(null);
               return;
             }
+            if (running) return;
 
-            let geometry = chart.datum();
             if (geometry?.trajectory !== trajectory) {
               const frames = trajectory.frames;
               const peak = d3.max(frames, (frame) => frame.summary.prevalence);
@@ -11546,8 +11821,11 @@
               const y = (frame) => 32 - (peak > 0 ? frame.summary.prevalence / peak * 28 : 0);
               const line = d3.line().x((frame, index) => x(index)).y(y);
               const area = d3.area().x((frame, index) => x(index)).y0(32).y1(y);
-              chart.selectAll(".simulation-timeline-curve").attr("d", line(frames));
-              chart.selectAll(".simulation-timeline-area").attr("d", area(frames));
+              const animate = geometry && !window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+              for (const [selector, path] of [[".simulation-timeline-curve", line(frames)], [".simulation-timeline-area", area(frames)]]) {
+                const selection = chart.selectAll(selector);
+                (animate ? transitionSelection(selection, 400) : selection.interrupt()).attr("d", path);
+              }
 
               const introductionTime = trajectory.settings.introductionDate
                 ? Date.parse(trajectory.settings.introductionDate) : frames[0].date.getTime();
@@ -11602,7 +11880,7 @@
               if (currentTimeSpan === "daily") {
                 dateValueEl.innerHTML = dateObj.toDateString();
               } else if (currentTimeSpan === "weekly") {
-                dateValueEl.innerHTML = `Week ${dateObj.getWeekNumber()} of ${dateObj.getFullYear()}`;
+                dateValueEl.textContent = d3.utcFormat("Week %-V of %G")(dateObj);
               } else if (currentTimeSpan === "monthly") {
                 let month = dateObj.toLocaleString("default", { month: "long" });
                 // Capitalize first letter
@@ -12092,6 +12370,7 @@
               }
               nodeEnter.attr("transform", (d) => `translate(${d.x},${d.y})`);
               linkSelection.attr("d", getNetworkLinkPath);
+              renderPooledFlowPositions();
               labelSelection
                 .attr("x", (d) => d.x)
                 .attr("y", (d) => d.y - (d.r + 13));
@@ -12774,7 +13053,7 @@
                 (update) => update,
                 (exit) => {
                   exit.attr("aria-hidden", true).selectAll(".community-flow-node")
-                    .attr("tabindex", -1).on("mouseenter focus mouseleave blur", null);
+                    .attr("tabindex", -1).on("mouseenter focus mouseleave blur .region-focus", null);
                   exitFlow(exit);
                 },
               )
@@ -12837,7 +13116,8 @@
               .attr("opacity", 1);
             const nodes = plot.selectAll("g.community-flow-nodes").data([null]).join("g").attr("class", "community-flow-nodes")
               .selectAll("g.community-flow-node").data(data.nodes, (node) => node.id).join("g")
-              .attr("class", "community-flow-node").attr("tabindex", 0).attr("role", "img").attr("data-region", (node) => node.id)
+              .attr("class", "community-flow-node").attr("data-region", (node) => node.id)
+              .call(bindChartRegionFocus, (node) => node.id)
               .attr("transform", (node) => `rotate(${geometry.nodesById.get(node.id).x * 180 / Math.PI - 90}) translate(${radius},0)`)
               .style("color", (node) => getTradeCommunityColor(node.key))
               .attr("aria-label", (node) => `${node.id}, ${getStatnaam(node.id)}, ${getTradeCommunityLabel(node.key)}. Incoming ${formatSmall(node.incoming)}, outgoing ${formatSmall(node.outgoing)}, local ${formatSmall(node.local)} ${simulation ? "infection entries" : "animals"}.`);
@@ -13841,6 +14121,7 @@
           }
     
           function initHerdLink(csvUrl) {
+            clearPooledFlowHover();
             cancelAnimationFrame(linkBoundaryFrame);
             linkBoundaryFrame = null;
             nodeGroup?.interrupt("map-position");
@@ -14021,20 +14302,6 @@
                 }
     
                 if (hasTime) {
-                  // Extend Date prototype with getWeekNumber method
-                  Date.prototype.getWeekNumber = function () {
-                    const d = new Date(
-                      Date.UTC(this.getFullYear(), this.getMonth(), this.getDate()),
-                    );
-                    // Set to nearest Thursday: current date + 4 - current day number, with Sunday as 7
-                    const dayNum = d.getUTCDay() || 7;
-                    d.setUTCDate(d.getUTCDate() + 4 - dayNum);
-                    // Get first day of year
-                    const yearStart = new Date(Date.UTC(d.getUTCFullYear(), 0, 1));
-                    // Calculate full weeks to nearest Thursday
-                    return Math.ceil(((d - yearStart) / 86400000 + 1) / 7);
-                  };
-    
                   // Find the actual column name that equals "time" (preserving original casing).
                   const timeCol = data.columns.find(
                     (h) => h.toLowerCase() === "time",
@@ -14044,11 +14311,7 @@
                   });
     
                   // Get unique dates and sort them.
-                  uniqueDates = Array.from(
-                    new Set(data.map((d) => d.time.getTime())),
-                  )
-                    .map((t) => new Date(t))
-                    .sort((a, b) => a - b);
+                  uniqueDates = window.herdlinkPooledFlows.calendars.get(currentTimeSpan);
     
                   // Append time control widgets to the preexisting container.
                   let timeControls = document.getElementById(

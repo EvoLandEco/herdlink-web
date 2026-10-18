@@ -31,7 +31,7 @@ function runtime(elements = []) {
   let nodeCard = false;
   const root = { getScreenCTM: () => ({ a: 1, b: 0 }) };
   const context = vm.createContext({
-    selectedNodeData: null, hoveredLink: null, hoveredLinkElement: null,
+    selectedNodeData: null, hoveredLink: null, hoveredLinkElement: null, hoveredPooledFlow: null,
     linkHoverGeometry: new WeakMap(),
     linkSelection: { each(callback) { elements.forEach((element) => callback.call(element, element.datum)); } },
     svg: { node: () => root },
@@ -210,6 +210,21 @@ test("repeated movement reuses the card and a replacement datum refreshes it", (
   app.showNetworkLinkCallout(second, second.datum);
   assert.equal(cards.length, 3);
   assert.equal(cards.at(-1).weight, 2);
+});
+
+test("international hover owns its hit area and releases it when the pointer returns to domestic routes", () => {
+  const element = route("route", "M0,0A10,10 0 0,1 20,0");
+  const { context: app, cards } = runtime([element]);
+  app.hoveredPooledFlow = { channel: "imports" };
+  app.clearPooledFlowHover = () => { app.hoveredPooledFlow = null; };
+  for (const surface of [".pooled-flows", ".pooled-ports"]) {
+    app.handleNetworkLinkPointerMove({ target: { closest: (selector) => selector === surface }, point: [10, -10] });
+  }
+  assert.equal(cards.length, 0);
+  assert.equal(app.hoveredPooledFlow.channel, "imports");
+  app.handleNetworkLinkPointerMove({ target: { closest: () => null }, point: [10, -10] });
+  assert.equal(app.hoveredPooledFlow, null);
+  assert.equal(app.hoveredLinkElement, element);
 });
 
 test("restoring a route binds its current element and respects exclusions", () => {
