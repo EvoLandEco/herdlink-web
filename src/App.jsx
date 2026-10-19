@@ -752,6 +752,28 @@ function appendIcon(parent, iconClass) {
   parent.append(icon);
 }
 
+function createChartTooltipContent(tip) {
+  const card = document.createElement("div");
+  card.className = "chart-tip";
+  const add = (parent, tag, className, text) => {
+    const element = document.createElement(tag);
+    element.className = className;
+    element.textContent = text;
+    parent.append(element);
+    return element;
+  };
+  for (const { id, name, direction } of tip.regions) {
+    const row = add(card, "div", `chart-tip-region ${direction}`, "");
+    add(row, "span", "chart-tip-code", id === tip.focus ? `${id} ↗` : id);
+    add(row, "span", "chart-tip-name", name);
+  }
+  const metrics = add(card, "div", "chart-tip-metrics", "");
+  add(metrics, "strong", "chart-tip-value", tip.value);
+  add(metrics, "span", "chart-tip-unit", tip.unit);
+  if (tip.detail) add(metrics, "span", "chart-tip-detail", tip.detail);
+  return card;
+}
+
 function createRichTooltipContent(tip) {
   const wrapper = document.createElement("div");
   wrapper.className = "tip-card";
@@ -942,7 +964,9 @@ export default function App() {
       activeTarget = target;
       tooltip.classList.toggle("is-rich", Boolean(richTip));
       tooltip.classList.toggle("is-chart", target.dataset.tipKind === "chart");
-      if (richTip) {
+      if (target.dataset.tipKind === "chart") {
+        tooltip.replaceChildren(createChartTooltipContent(JSON.parse(target.dataset.tipCard)));
+      } else if (richTip) {
         tooltip.replaceChildren(createRichTooltipContent(richTip));
       } else {
         tooltip.textContent = tip;

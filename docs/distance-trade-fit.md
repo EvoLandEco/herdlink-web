@@ -4,6 +4,8 @@ The panel describes the volume of recorded movements between regions at the
 displayed date. Each dot is an allowed directed route. Distances are straight
 line distances in kilometres between the COROP reference points in EPSG:28992.
 Volume is the number of animals traded. Both axes use logarithmic scales.
+Their ranges follow the displayed routes, with a small margin at each end.
+Axes, bubbles and curves transition together when the date or focused region changes.
 The plot uses allowed interregional routes with positive finite distances
 and volumes.
 

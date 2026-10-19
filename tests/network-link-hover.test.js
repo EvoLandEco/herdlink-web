@@ -5,6 +5,7 @@ import vm from "node:vm";
 
 const source = readFileSync(new URL("../src/runtime/herdlink-runtime.js", import.meta.url), "utf8");
 const names = [
+  "updateNodeHoverLinks", "handleNetworkNodeEnter", "handleNetworkNodeLeave",
   "getNodeId", "getLinkBaseClass", "getLinkHoverClass", "restoreLinkClass", "clearNetworkCallout", "clearHoveredLinkState",
   "getNetworkLinkArc", "distanceToNetworkLinkArc", "isNetworkLinkHoverable", "findNearestNetworkLink",
   "showNetworkLinkCallout", "handleNetworkLinkPointerMove", "handleNetworkLinkPointerLeave", "restoreNetworkLinkCallout",
@@ -24,17 +25,29 @@ function route(id, path, data = {}) {
   };
 }
 
-function runtime(elements = []) {
+function runtime(elements = [], international = []) {
   const cards = [];
   const interruptions = [];
   let clears = 0;
   let nodeCard = false;
+  const classes = {};
   const root = { getScreenCTM: () => ({ a: 1, b: 0 }) };
   const context = vm.createContext({
+    hoveredNode: null, theme: { text: "#fff" },
     selectedNodeData: null, hoveredLink: null, hoveredLinkElement: null, hoveredPooledFlow: null,
     linkHoverGeometry: new WeakMap(),
-    linkSelection: { each(callback) { elements.forEach((element) => callback.call(element, element.datum)); } },
-    svg: { node: () => root },
+    linkSelection: {
+      each(callback) { elements.forEach((element) => callback.call(element, element.datum)); },
+      attr(name, callback) { elements.forEach((element) => { element.attrs[name] = callback(element.datum); }); },
+    },
+    svg: {
+      node: () => root,
+      classed(name, value) { classes[name] = value; },
+      selectAll(selector) {
+        assert.equal(selector, ".pooled-flow-route");
+        return { classed(name, callback) { international.forEach((element) => { element[name] = callback(element); }); } };
+      },
+    },
     annotationGroup: {
       select(selector) { assert.equal(selector, ".node-annotation"); return { empty: () => !nodeCard }; },
       selectAll: () => ({
@@ -42,17 +55,20 @@ function runtime(elements = []) {
         remove() { clears += 1; nodeCard = false; },
       }),
     },
+    clearPooledFlowHover() { context.hoveredPooledFlow = null; },
+    updateAnnotationForNode: (datum) => cards.push(datum),
     updateAnnotationForLink: (datum) => cards.push(datum),
     d3: {
       pointer: (event) => event.point,
       select: (element) => ({
         datum: () => element.datum,
+        select() { return this; },
         attr(name, value) { element.attrs[name] = value; return this; },
       }),
     },
   });
   vm.runInContext(functions, context);
-  return { context, cards, root, interruptions, get clears() { return clears; },
+  return { context, cards, root, classes, interruptions, get clears() { return clears; },
     showNodeCard() { nodeCard = true; } };
 }
 
@@ -268,4 +284,54 @@ test("pointer targeting preserves node priority and uses a screen sized hit radi
   const clears = state.clears;
   app.handleNetworkLinkPointerLeave();
   assert.equal(state.clears, clears);
+});
+
+
+test("regional hover emphasizes live domestic directions and international routes, then clears", () => {
+  const outgoing = route("out", "", { source: { id: "CR01" }, target: { id: "CR02" } });
+  const incoming = route("in", "", { source: "CR03", target: "CR01" });
+  const unrelated = route("other", "", { source: "CR02", target: "CR03" });
+  const disabled = route("disabled", "", { disabled: true });
+  const zero = route("zero", "", { weight: 0 });
+  const invalid = route("invalid", "", { weight: NaN });
+  const links = [outgoing, incoming, unrelated, disabled, zero, invalid];
+  const imports = { region: "CR01", observed: 10, channel: "imports" };
+  const exports = { region: "CR01", observed: 20, channel: "exports" };
+  const empty = { region: "CR01", observed: 0, channel: "exports" };
+  const other = { region: "CR02", observed: 10, channel: "imports" };
+  const { context: app, classes, cards } = runtime(links, [imports, exports, empty, other]);
+  const element = { attrs: {} }, node = { id: "CR01" };
+  app.hoveredPooledFlow = { channel: "imports" };
+  app.handleNetworkNodeEnter.call(element, {}, node);
+  assert.equal(app.hoveredPooledFlow, null);
+  assert.equal(app.hoveredNode, node);
+  assert.equal(classes["region-flow-focus"], true);
+  assert.deepEqual(links.map((link) => link.attrs["data-node-flow"]), ["outgoing", "incoming", null, null, null, null]);
+  assert.deepEqual([imports, exports, empty, other].map((link) => link["is-region-hovered"]), [true, true, false, false]);
+  assert.equal(cards.at(-1), node);
+  app.handleNetworkNodeLeave.call(element);
+  assert.equal(app.hoveredNode, null);
+  assert.equal(classes["region-flow-focus"], false);
+  assert.ok(links.every((link) => link.attrs["data-node-flow"] === null));
+  assert.ok([imports, exports, empty, other].every((link) => !link["is-region-hovered"]));
+});
+
+test("regional emphasis follows refreshed data and yields to node focus", () => {
+  const link = route("out", "", { weight: 0 });
+  const { context: app, classes } = runtime([link]);
+  app.hoveredNode = { id: "CR01" };
+  app.updateNodeHoverLinks();
+  assert.equal(link.attrs["data-node-flow"], null);
+  link.datum = { ...link.datum, weight: 100 };
+  app.updateNodeHoverLinks();
+  assert.equal(link.attrs["data-node-flow"], "outgoing");
+  link.datum.disabled = true;
+  app.updateNodeHoverLinks();
+  assert.equal(link.attrs["data-node-flow"], null);
+  link.datum.disabled = false;
+  app.selectedNodeData = { id: "CR02" };
+  app.updateNodeHoverLinks();
+  assert.equal(classes["region-flow-focus"], false);
+  assert.equal(link.attrs["data-node-flow"], null);
+  assert.equal(app.getLinkBaseClass(link.datum), "linkSelectIn");
 });

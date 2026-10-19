@@ -24,7 +24,7 @@ function chartRuntime() {
     },
     document: { getElementById: () => ({ focus() {} }) },
   });
-  vm.runInContext(["focusChartRegion", "bindChartRegionFocus", "getDistanceTradeFocusId", "getDistanceTradeTip", "bindDistanceTradePoints"].map(extract).join("\n"), context);
+  vm.runInContext(["focusChartRegion", "bindChartRegionFocus", "getDistanceTradeFocusId", "getChartTooltipText", "bindChartTooltip", "getDistanceTradeTipData", "bindDistanceTradePoints"].map(extract).join("\n"), context);
   return { context, nodes, focused };
 }
 
@@ -66,6 +66,14 @@ test("distance bubbles focus the source globally and the partner from either dir
   assert.equal(attributes.role, "button");
   assert.equal(attributes.tabindex, 0);
   assert.equal(attributes["data-focus-region"], "CR35");
+  assert.equal(attributes["data-tip-kind"], "chart");
+  assert.deepEqual(JSON.parse(attributes["data-tip-card"]), {
+    regions: [
+      { id: "CR35", name: "Noordoost-Noord-Brabant", direction: "outgoing" },
+      { id: "CR10", name: "Noord-Overijssel", direction: "incoming" },
+    ],
+    value: "12,345", unit: "animals", detail: "86.5 km", focus: "CR35",
+  });
   assert.equal(attributes["data-tip"], "CR35 · Noordoost-Noord-Brabant\n→ CR10 · Noord-Overijssel\n12,345 animals · 86.5 km\nClick to focus CR35");
   handlers["click.region-focus"](event("click"), point);
   assert.equal(focused.at(-1), nodes[0]);
@@ -73,6 +81,7 @@ test("distance bubbles focus the source globally and the partner from either dir
   point.type = "outgoing";
   context.bindDistanceTradePoints(selection);
   assert.equal(attributes["data-focus-region"], "CR10");
+  assert.equal(JSON.parse(attributes["data-tip-card"]).focus, "CR10");
   assert.match(attributes["data-tip"], /Click to focus CR10$/);
   const enter = event("keydown", "Enter");
   handlers["keydown.region-focus"](enter, point);
@@ -254,4 +263,50 @@ test("Q exits from the canvas or focused buttons and respects typing, overlays a
   elements.mainContainer.closest = () => ({});
   assert.equal(send("q").prevented, false);
   assert.deepEqual(calls, []);
+});
+
+
+test("compact route cards preserve names as text and mark the destination of a focus click", () => {
+  const appSource = readFileSync(new URL("../src/App.jsx", import.meta.url), "utf8");
+  const match = appSource.match(/^function createChartTooltipContent\([^]*?^}/m);
+  const document = {
+    createElement(tag) {
+      return { tag, children: [], append(child) { this.children.push(child); } };
+    },
+  };
+  const context = vm.createContext({ document });
+  vm.runInContext(match[0], context);
+  const card = context.createChartTooltipContent({
+    regions: [
+      { id: "CR35", name: "<img onerror=alert(1)>", direction: "outgoing" },
+      { id: "CR10", name: "Noord-Overijssel", direction: "incoming" },
+    ],
+    value: "12,345", unit: "animals", detail: "86.5 km", focus: "CR10",
+  });
+  assert.equal(card.children.length, 3);
+  assert.equal(card.children[0].children[0].textContent, "CR35");
+  assert.equal(card.children[1].children[0].textContent, "CR10 ↗");
+  assert.equal(card.children[0].children[1].textContent, "<img onerror=alert(1)>");
+  assert.equal(card.children[0].children[1].children.length, 0);
+  assert.deepEqual(Array.from(card.children[2].children, (child) => child.textContent), ["12,345", "animals", "86.5 km"]);
+  for (const [value, unit] of [["17.5", "new infection entries"], ["1.25%", "infectious"], ["—", "No population denominator"]]) {
+    const region = context.createChartTooltipContent({
+      regions: [{ id: "CR35", name: "Noordoost-Noord-Brabant", direction: "region" }], value, unit, focus: "CR35",
+    });
+    assert.equal(region.children.length, 2);
+    assert.equal(region.children[0].children[0].textContent, "CR35 ↗");
+    assert.deepEqual(Array.from(region.children[1].children, (child) => child.textContent), [value, unit]);
+  }
+});
+
+
+test("spatial tooltip text retains model units and keeps flow cards free of focus actions", () => {
+  const { context } = chartRuntime();
+  const region = { id: "CR35", name: "Noordoost-Noord-Brabant", direction: "region" };
+  assert.equal(context.getChartTooltipText({ regions: [region], value: "17.5", unit: "new infection entries", focus: "CR35" }),
+    "CR35 · Noordoost-Noord-Brabant\n17.5 new infection entries\nClick to focus CR35");
+  assert.equal(context.getChartTooltipText({ regions: [region], value: "—", unit: "No population denominator", focus: "CR35" }),
+    "CR35 · Noordoost-Noord-Brabant\n— No population denominator\nClick to focus CR35");
+  assert.equal(context.getChartTooltipText({ regions: [region, { id: "CR10", name: "Noord-Overijssel" }], value: "2.75", unit: "attributed infection entries" }),
+    "CR35 · Noordoost-Noord-Brabant\n→ CR10 · Noord-Overijssel\n2.75 attributed infection entries");
 });

@@ -36,6 +36,7 @@
           let communityFlowLayoutId = 0;
           let uniqueDates = [];
           let pooledFlowFrame = null;
+          const pooledPortPositions = { map: {}, graph: {} };
           let temporalUpdateTimeout;
           window.allTemporalStats = {};
           window.allTemporalNodeStats = {};
@@ -2848,6 +2849,15 @@
               .attr("class", "simulation-spatial-region")
               .merge(regions)
               .call(bindChartRegionFocus, (feature) => feature.properties.statcode)
+              .call(bindChartTooltip, (feature) => {
+                const id = feature.properties.statcode;
+                const prevalence = frame.nodeStates[id]?.prevalence;
+                return {
+                  regions: [{ id, name: getStatnaam(id), direction: "region" }],
+                  value: prevalence == null ? "—" : formatPct(prevalence),
+                  unit: prevalence == null ? "No population denominator" : "infectious", focus: id,
+                };
+              })
               .attr("d", path)
               .attr("fill", (feature) => {
                 const state = frame.nodeStates[feature.properties.statcode];
@@ -2858,13 +2868,6 @@
               .attr("stroke", theme.text)
               .attr("stroke-width", 0.7)
               .attr("opacity", 0.86);
-            g.selectAll("path.simulation-spatial-region").selectAll("title")
-              .data((feature) => [feature]).join("title")
-              .text((feature) => {
-                const id = feature.properties.statcode;
-                const state = frame.nodeStates[id];
-                return `${id} · ${getStatnaam(id)}: ${state?.prevalence == null ? "No population denominator" : `${formatPct(state.prevalence)} infectious`}`;
-              });
             regions.exit().remove();
 
             const flowPath = (item) => {
@@ -2928,6 +2931,14 @@
               .attr("stroke-width", 0)
               .attr("opacity", 0)
               .merge(flowPaths)
+              .attr("role", "img").attr("tabindex", 0)
+              .call(bindChartTooltip, (item) => ({
+                regions: [
+                  { id: item.source, name: getStatnaam(item.source), direction: "outgoing" },
+                  { id: item.target, name: getStatnaam(item.target), direction: "incoming" },
+                ],
+                value: formatSmall(item.riskLoad), unit: "attributed infection entries",
+              }))
               .call((selection) =>
                 transitionSelection(selection)
                   .attr("d", flowPath)
@@ -2935,9 +2946,6 @@
                   .attr("stroke-width", (item) => flowWidth(item.riskLoad))
                   .attr("opacity", 1),
               );
-            flowLayer.selectAll("path.simulation-spatial-flow").selectAll("title")
-              .data((item) => [item]).join("title")
-              .text((item) => `${item.source} → ${item.target}: ${formatSmall(item.riskLoad)} attributed infection entries`);
             flowPaths
               .exit()
               .call((selection) =>
@@ -2963,10 +2971,10 @@
               .attr("opacity", 0.88)
               .merge(bubbles)
               .call(bindChartRegionFocus, (item) => item.id)
-              .classed("has-tip", true)
-              .attr("data-tip-kind", "chart")
-              .attr("data-tip", (item) => `${item.id} · ${getStatnaam(item.id)}\n${formatSmall(item.newInfections)} new infection entries\nClick to focus ${item.id}`)
-              .attr("aria-describedby", "herdlinkTooltip")
+              .call(bindChartTooltip, (item) => ({
+                regions: [{ id: item.id, name: getStatnaam(item.id), direction: "region" }],
+                value: formatSmall(item.newInfections), unit: "new infection entries", focus: item.id,
+              }))
               .call((selection) =>
                 transitionSelection(selection)
                   .attr("cx", (item) => item.x)
@@ -7064,6 +7072,35 @@
             linkBoundaryFrame = requestAnimationFrame(updateNetworkLinkBoundaries);
           }
 
+          function updateNodeHoverLinks() {
+            const node = selectedNodeData ? null : hoveredNode;
+            svg.classed("region-flow-focus", !!node);
+            linkSelection?.attr("data-node-flow", (d) => {
+              if (!node || !(d.weight > 0) || d.disabled) return null;
+              if (getNodeId(d.source) === node.id) return "outgoing";
+              if (getNodeId(d.target) === node.id) return "incoming";
+              return null;
+            });
+            svg.selectAll(".pooled-flow-route").classed("is-region-hovered", (d) =>
+              !!node && d.region === node.id && d.observed > 0);
+          }
+
+          function handleNetworkNodeEnter(event, d) {
+            clearPooledFlowHover();
+            clearHoveredLinkState();
+            hoveredNode = d;
+            d3.select(this).select("circle.primary").attr("stroke", theme.text);
+            updateNodeHoverLinks();
+            updateAnnotationForNode(d, annotationGroup);
+          }
+
+          function handleNetworkNodeLeave() {
+            hoveredNode = null;
+            d3.select(this).select("circle.primary").attr("stroke", null).attr("stroke-width", null);
+            updateNodeHoverLinks();
+            clearNetworkCallout();
+          }
+
           function getLinkBaseClass(d) {
             const srcId = typeof d.source === "object" ? d.source.id : d.source;
             const tgtId = typeof d.target === "object" ? d.target.id : d.target;
@@ -7270,7 +7307,9 @@
             gradients.selectAll("stop").data([0, 1]).join("stop")
               .attr("offset", (d) => d).attr("class", (d) => d ? "port-gradient-end" : "port-gradient-start");
             const ports = portLayer.selectAll("g.pooled-port").data(["imports", "exports"]).join((enter) => {
-              const group = enter.append("g").attr("role", "img").attr("tabindex", 0);
+              const group = enter.append("g").attr("class", (d) => `pooled-port ${d}`)
+                .attr("role", "img").attr("tabindex", 0)
+                .call(dragPooledPort()).on("keydown.port-move", handlePooledPortKeydown);
               group.append("rect").attr("class", "port-surface")
                 .attr("x", -68).attr("y", -34).attr("width", 136).attr("height", 68).attr("rx", 20);
               group.append("path").attr("class", "port-orbit")
@@ -7283,23 +7322,62 @@
               group.append("text").attr("class", "port-value").attr("x", -50).attr("y", 9);
               group.append("text").attr("class", "port-caption").attr("x", -50).attr("y", 24);
               return group;
-            }).attr("class", (d) => `pooled-port ${d}`).raise();
+            }).raise();
             ports.select(".port-surface").attr("fill", (d) => `url(#pooled-surface-${d})`);
             ports.select(".port-name").text((d) => d === "imports" ? "Import" : "Export");
             ports.select(".port-value").text((d) => formatCount(pooledFlowFrame[d].observed));
             ports.select(".port-caption").text((d) => `movements · ${getPooledPortRegionCount(d)} regions`);
-            ports.attr("aria-label", (d) => `Pooled ${d}: ${formatCount(pooledFlowFrame[d].observed)} recorded animal movements across ${getPooledPortRegionCount(d)} Dutch regions.`);
+            ports.attr("aria-label", (d) => `Pooled ${d}: ${formatCount(pooledFlowFrame[d].observed)} recorded animal movements across ${getPooledPortRegionCount(d)} Dutch regions. Drag or use arrow keys to move.`);
             svg.selectAll(".pooled-port, .pooled-flow-hit")
               .on("pointerenter.pooled focus.pooled", (event, d) => showPooledFlowCallout(d))
               .on("pointerleave.pooled blur.pooled", clearPooledFlowHover)
               .on("click.pooled", (event) => event.stopPropagation())
               .on("keydown.pooled", (event) => { if (event.key === "Escape") clearPooledFlowHover(); });
             renderPooledFlowPositions();
+            updateNodeHoverLinks();
           }
 
           function getPooledPortPosition(channel) {
-            return channel === "imports" ? [110, h * (currentMode === "map" ? 0.4 : 0.52)]
-              : [w - 110, h * (currentMode === "map" ? 0.66 : 0.52)];
+            const saved = pooledPortPositions[currentMode][channel];
+            const position = saved ? [saved[0] * w, saved[1] * h]
+              : channel === "imports" ? [110, h * (currentMode === "map" ? 0.4 : 0.52)]
+                : [w - 110, h * (currentMode === "map" ? 0.66 : 0.52)];
+            return clampPooledPortPosition(...position);
+          }
+
+          function clampPooledPortPosition(x, y) {
+            const marginX = Math.min(80, w / 2), marginY = Math.min(46, h / 2);
+            return [Math.max(marginX, Math.min(w - marginX, x)), Math.max(marginY, Math.min(h - marginY, y))];
+          }
+
+          function movePooledPort(channel, x, y) {
+            const position = clampPooledPortPosition(x, y);
+            pooledPortPositions[currentMode][channel] = [position[0] / w, position[1] / h];
+            renderPooledFlowPositions();
+          }
+
+          function dragPooledPort() {
+            return d3.drag().container(() => svg.node()).clickDistance(3)
+              .subject((event, channel) => {
+                const [x, y] = getPooledPortPosition(channel);
+                return { x, y };
+              })
+              .on("start", function () {
+                clearPooledFlowHover();
+                clearHoveredLinkState();
+                d3.select(this).classed("is-dragging", true);
+              })
+              .on("drag", (event, channel) => movePooledPort(channel, event.x, event.y))
+              .on("end", function () { d3.select(this).classed("is-dragging", false); });
+          }
+
+          function handlePooledPortKeydown(event, channel) {
+            const direction = { ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1] }[event.key];
+            if (!direction || event.altKey || event.ctrlKey || event.metaKey) return;
+            event.preventDefault();
+            event.stopPropagation();
+            const [x, y] = getPooledPortPosition(channel), step = event.shiftKey ? 1 : 10;
+            movePooledPort(channel, x + direction[0] * step, y + direction[1] * step);
           }
 
           function getPooledFlowGeometry(d, node) {
@@ -7352,6 +7430,7 @@
           function showPooledFlowCallout(d) {
             clearHoveredLinkState();
             hoveredNode = null;
+            updateNodeHoverLinks();
             hoveredPooledFlow = typeof d === "string" ? { channel: d } : { channel: d.channel, region: d.region };
             renderPooledFlowCallout();
           }
@@ -7487,28 +7566,11 @@
               .attr("class", "nodeGroup")
               .call(drag(forceSim))
               .on("click", debouncedOnClickNode)
-              .on("mouseover", function (event, d) {
-                if (hoveredLink) clearHoveredLinkState();
-                hoveredNode = d;
-                d3.select(this).select("circle.primary").attr("stroke", theme.text);
-    
-                updateAnnotationForNode(d, annotationGroup);
+              .on("pointerenter", handleNetworkNodeEnter)
+              .on("pointermove", function (event, d) {
+                if (hoveredNode === d) updateAnnotationForNode(d, annotationGroup);
               })
-              .on("mousemove", function (event, d) {
-                if (hoveredNode === d) {
-                  updateAnnotationForNode(d, annotationGroup);
-                }
-              })
-              .on("mouseout", function (event, d) {
-                hoveredNode = null;
-                d3.select(this)
-                  .select("circle.primary")
-                  .attr("stroke", null)
-                  .attr("stroke-width", null);
-    
-                clearNetworkCallout();
-    
-              });
+              .on("pointerleave", handleNetworkNodeLeave);
     
             // Append primary node shape (circle for active, FontAwesome icon for inactive).
             nodeEnter.each(function (d) {
@@ -7884,14 +7946,28 @@
           }
     
           function getNetworkCalloutPosition(x, y, width, height, panelWidth, panelHeight) {
-            const left = x > panelWidth / 2;
-            const beside = Math.max(x, panelWidth - x) >= width + 42;
-            return {
-              x: Math.max(12, Math.min(panelWidth - width - 12,
-                beside ? (left ? x - width - 30 : x + 30) : x - width / 2)),
-              y: Math.max(12, Math.min(panelHeight - height - 12,
-                beside ? y - height / 2 : (y > panelHeight / 2 ? y - height - 30 : y + 30))),
-            };
+            const margin = 12, gap = 72, offset = 48;
+            const sides = [
+              { side: "left", room: x - width - margin },
+              { side: "right", room: panelWidth - x - width - margin },
+              { side: "top", room: y - height - margin },
+              { side: "bottom", room: panelHeight - y - height - margin },
+            ];
+            const { side } = sides.reduce((best, candidate) => candidate.room > best.room ? candidate : best);
+            const horizontal = side === "left" || side === "right";
+            const clamp = (value, min, max) => Math.max(min, Math.min(max, value));
+            const cardX = clamp(horizontal ? (side === "left" ? x - width - gap : x + gap)
+              : x - width / 2 + (x < panelWidth / 2 ? offset : -offset), margin, panelWidth - width - margin);
+            const cardY = clamp(horizontal ? y - height / 2 + (y < panelHeight / 2 ? offset : -offset)
+              : (side === "top" ? y - height - gap : y + gap), margin, panelHeight - height - margin);
+            const edgeX = horizontal ? cardX + (side === "left" ? width : 0)
+              : clamp(x + (x < cardX + width / 2 ? offset : -offset), cardX + 20, cardX + width - 20);
+            const edgeY = horizontal
+              ? clamp(y + (y < cardY + height / 2 ? offset : -offset), cardY + 20, cardY + height - 20)
+              : cardY + (side === "top" ? height : 0);
+            const elbowX = horizontal ? edgeX + Math.sign(x - edgeX) * Math.min(24, Math.abs(x - edgeX) / 2) : edgeX;
+            const elbowY = horizontal ? edgeY : edgeY + Math.sign(y - edgeY) * Math.min(24, Math.abs(y - edgeY) / 2);
+            return { x: cardX, y: cardY, connector: `M${x},${y}L${elbowX},${elbowY}L${edgeX},${edgeY}` };
           }
 
           function renderNetworkCallout(group, x, y, info) {
@@ -7904,12 +7980,10 @@
             const rowsTop = node ? (info.compartments ? 304 : 220) : 150;
             const height = rowsTop + info.rows.length * 25 + 14 + (info.note ? 58 : 0);
             const position = getNetworkCalloutPosition(x, y, width, height, w, h);
-            const edgeX = Math.max(position.x, Math.min(position.x + width, x));
-            const edgeY = Math.max(position.y, Math.min(position.y + height, y));
             group.selectAll("path.network-callout-connector").data([null]).join("path")
               .attr("class", "network-callout-connector")
               .attr("data-flow-channel", info.channel || null)
-              .attr("d", `M${x},${y}L${(x + edgeX) / 2},${edgeY}L${edgeX},${edgeY}`);
+              .attr("d", position.connector);
             let card = group.select("g.network-hover-callout");
             if (card.empty()) card = group.append("g").attr("class", "network-hover-callout");
             card.attr("transform", `translate(${position.x},${position.y})`)
@@ -8388,17 +8462,35 @@
             return point.type === "outgoing" ? point.targetId : point.sourceId;
           }
 
-          function getDistanceTradeTip(point) {
-            return `${point.sourceId} · ${getStatnaam(point.sourceId)}\n→ ${point.targetId} · ${getStatnaam(point.targetId)}\n${formatCount(point.weight)} animals · ${point.distance.toFixed(1)} km\nClick to focus ${getDistanceTradeFocusId(point)}`;
+          function getDistanceTradeTipData(point) {
+            return {
+              regions: [
+                { id: point.sourceId, name: getStatnaam(point.sourceId), direction: "outgoing" },
+                { id: point.targetId, name: getStatnaam(point.targetId), direction: "incoming" },
+              ],
+              value: formatCount(point.weight), unit: "animals", detail: `${point.distance.toFixed(1)} km`,
+              focus: getDistanceTradeFocusId(point),
+            };
+          }
+
+          function getChartTooltipText(tip) {
+            return tip.regions.map(({ id, name }) => `${id} · ${name}`).join("\n→ ") +
+              `\n${tip.value} ${tip.unit}${tip.detail ? ` · ${tip.detail}` : ""}` +
+              (tip.focus ? `\nClick to focus ${tip.focus}` : "");
+          }
+
+          function bindChartTooltip(selection, getTip) {
+            return selection.classed("has-tip", true)
+              .attr("data-tip-kind", "chart")
+              .attr("data-tip-card", (item) => JSON.stringify(getTip(item)))
+              .attr("data-tip", (item) => getChartTooltipText(getTip(item)))
+              .attr("aria-label", (item) => getChartTooltipText(getTip(item)))
+              .attr("aria-describedby", "herdlinkTooltip");
           }
 
           function bindDistanceTradePoints(selection) {
             return selection.call(bindChartRegionFocus, getDistanceTradeFocusId)
-              .classed("has-tip", true)
-              .attr("data-tip-kind", "chart")
-              .attr("data-tip", getDistanceTradeTip)
-              .attr("aria-label", getDistanceTradeTip)
-              .attr("aria-describedby", "herdlinkTooltip");
+              .call(bindChartTooltip, getDistanceTradeTipData);
           }
 
           // Node Click Handler
@@ -8568,8 +8660,7 @@
             d3.selectAll(".trade-section, .simulation-node-controls").classed(classStringA, true);
             d3.select(".trade-info-header").classed(classStringA, true);
             d3.select("#inArboContainer").classed(classStringA, true);
-    
-
+            updateNodeHoverLinks();
           }
     
           // Clear Selection (If Clicking Again/Unclicked)
@@ -10208,7 +10299,6 @@
           }
     
           function updateNetwork(instant = false) {
-            refreshPooledFlows();
             // Disable buttons and checkboxes during transitions.
             disableAllButtons();
             disableAllCheckboxes();
@@ -10376,6 +10466,7 @@
     
             // Re-enable buttons and checkboxes after transitions.
             applySimulationNodeStyles();
+            refreshPooledFlows();
 
             if (instant) {
               enableAllButtons(isSwitchingCSV ? 550 : 0);
@@ -10856,6 +10947,19 @@
             return "Curve fitting stopped before convergence.";
           }
 
+          function getDistanceTradeDomain(data, field) {
+            const [minimum, maximum] = d3.extent(data, (point) => point[field]);
+            const low = Math.log(minimum);
+            const high = Math.log(maximum);
+            const padding = minimum === maximum ? Math.log(10) / 2 : (high - low) * 0.06;
+            return [Math.exp(low - padding), Math.exp(high + padding)];
+          }
+
+          function getDistanceTradeTicks(scale, count) {
+            const format = scale.tickFormat(count, "~s");
+            return scale.ticks(count).filter((value) => format(value));
+          }
+
           function updateTradeDistribution() {
             if (isSimulationModeActive() && simulationState.currentFrame) {
               renderSimulationSpatialPatternPanel();
@@ -10930,23 +11034,12 @@
             }
             g.select(".no-trade-data").remove();
     
-            // X-scale: distance (log scale). Maximum is fixed at 380 (km).
-            const xMin = d3.min(tradeData, (d) => d.distance);
-            const xScale = d3
-              .scaleLog()
-              .domain([Math.max(1, xMin), 380])
+            const xScale = d3.scaleLog()
+              .domain(getDistanceTradeDomain(tradeData, "distance"))
               .range([0, width]);
-            xScale.nice();
-            xScale.domain([xScale.domain()[0], 380]);
-    
-            // Y-scale: trade weight (log scale).
-            const yMin = d3.min(tradeData, (d) => d.weight);
-            const yMax = d3.max(tradeData, (d) => d.weight);
-            const yScale = d3
-              .scaleLog()
-              .domain([Math.max(1, yMin), yMax])
-              .range([height, 0])
-              .nice();
+            const yScale = d3.scaleLog()
+              .domain(getDistanceTradeDomain(tradeData, "weight"))
+              .range([height, 0]);
     
             // Circle size: massProduct.
             const massExtent = d3.extent(tradeData, (d) => d.massProduct);
@@ -10956,77 +11049,91 @@
             const tickFormat = d3.format("~s");
     
             // Vertical grid lines & x tick labels
-            const xTicks = xScale.ticks(5, "~s").filter((d, i) => i % 2 === 0);
+            const xTicks = getDistanceTradeTicks(xScale, Math.max(2, Math.floor(width / 45)));
     
             // Vertical grid lines.
-            const xGrid = g.selectAll(".x-grid").data(xTicks);
+            const xGrid = g.selectAll(".x-grid").data(xTicks, (value) => value);
             xGrid
               .enter()
               .append("line")
               .attr("class", "x-grid")
+              .attr("x1", (d) => xScale(d)).attr("x2", (d) => xScale(d))
+              .attr("y1", 0).attr("y2", height)
+              .attr("opacity", 0)
               .merge(xGrid)
               .transition()
               .duration(750)
+              .attr("opacity", 1)
               .attr("x1", (d) => xScale(d))
               .attr("y1", 0)
               .attr("x2", (d) => xScale(d))
               .attr("y2", height)
               .attr("stroke", theme.grid)
               .attr("stroke-dasharray", "2,2");
-            xGrid.exit().remove();
+            xGrid.exit().transition().duration(750).attr("opacity", 0).remove();
     
             // X tick labels at the bottom right of each vertical grid line.
-            const xGridLabels = g.selectAll(".x-grid-label").data(xTicks);
+            const xGridLabels = g.selectAll(".x-grid-label").data(xTicks, (value) => value);
             xGridLabels
               .enter()
               .append("text")
               .attr("class", "x-grid-label")
+              .attr("x", (d) => xScale(d) + 6).attr("y", height - 3)
+              .attr("opacity", 0)
               .merge(xGridLabels)
               .transition()
               .duration(750)
+              .attr("opacity", 1)
               .attr("x", (d) => xScale(d) + 6) // slight offset to the right
               .attr("y", height - 3) // near the bottom of the grid line
               .attr("text-anchor", "start")
               .attr("fill", theme.muted)
               .style("font", `10px ${theme.font}`)
               .text((d) => tickFormat(d));
-            xGridLabels.exit().remove();
+            xGridLabels.exit().transition().duration(750).attr("opacity", 0).remove();
     
             // Horizontal grid lines & y tick labels
-            const yTicks = yScale.ticks(5, "~s").filter((d, i) => i % 1 === 0);
+            const yTicks = getDistanceTradeTicks(yScale, Math.max(2, Math.floor(height / 30)));
             // Horizontal grid lines.
-            const yGrid = g.selectAll(".y-grid").data(yTicks);
+            const yGrid = g.selectAll(".y-grid").data(yTicks, (value) => value);
             yGrid
               .enter()
               .append("line")
               .attr("class", "y-grid")
+              .attr("x1", 0).attr("x2", width)
+              .attr("y1", (d) => yScale(d)).attr("y2", (d) => yScale(d))
+              .attr("opacity", 0)
               .merge(yGrid)
               .transition()
               .duration(750)
+              .attr("opacity", 1)
               .attr("x1", 0)
               .attr("y1", (d) => yScale(d))
               .attr("x2", width)
               .attr("y2", (d) => yScale(d))
               .attr("stroke", theme.grid)
               .attr("stroke-dasharray", "2,2");
-            yGrid.exit().remove();
+            yGrid.exit().transition().duration(750).attr("opacity", 0).remove();
     
             // Y tick labels: placed below each grid line, starting at the left end (x = 0).
-            const yGridLabels = g.selectAll(".y-grid-label").data(yTicks);
+            const yGridLabels = g.selectAll(".y-grid-label").data(yTicks, (value) => value);
             yGridLabels
               .enter()
               .append("text")
               .attr("class", "y-grid-label")
+              .attr("x", 0).attr("y", (d) => yScale(d) - 5)
+              .attr("opacity", 0)
               .merge(yGridLabels)
               .transition()
               .duration(750)
+              .attr("opacity", 1)
               .attr("x", 0)
               .attr("y", (d) => yScale(d) - 5) // slightly above the grid line
               .attr("text-anchor", "start")
               .attr("fill", theme.muted)
               .style("font", `10px ${theme.font}`)
               .text((d) => tickFormat(d));
-            yGridLabels.exit().remove();
+            yGridLabels.exit().transition().duration(750).attr("opacity", 0).remove();
     
             // Update scatter points using the D3 update pattern
             const communityByNode = tradeCommunityTimeline?.partition || {};
@@ -11171,24 +11278,12 @@
             }
             g.select(".no-trade-data").remove();
     
-            // Scales
-            // X-scale: distance (log scale). Maximum is fixed at 380 km.
-            const xMin = d3.min(tradeDataAll, (d) => d.distance);
-            const xScale = d3
-              .scaleLog()
-              .domain([Math.max(1, xMin), 380])
+            const xScale = d3.scaleLog()
+              .domain(getDistanceTradeDomain(tradeDataAll, "distance"))
               .range([0, width]);
-            xScale.nice();
-            xScale.domain([xScale.domain()[0], 380]);
-    
-            // Y-scale: trade weight (log scale).
-            const yMin = d3.min(tradeDataAll, (d) => d.weight);
-            const yMax = d3.max(tradeDataAll, (d) => d.weight);
-            const yScale = d3
-              .scaleLog()
-              .domain([Math.max(1, yMin), yMax])
-              .range([height, 0])
-              .nice();
+            const yScale = d3.scaleLog()
+              .domain(getDistanceTradeDomain(tradeDataAll, "weight"))
+              .range([height, 0]);
     
             // Circle size: massProduct.
             const massExtent = d3.extent(tradeDataAll, (d) => d.massProduct);
@@ -11201,72 +11296,86 @@
             const tickFormat = d3.format("~s");
     
             // Vertical grid lines & x tick labels
-            const xTicks = xScale.ticks(5, "~s").filter((d, i) => i % 2 === 0);
-            const xGrid = g.selectAll(".x-grid").data(xTicks);
+            const xTicks = getDistanceTradeTicks(xScale, Math.max(2, Math.floor(width / 45)));
+            const xGrid = g.selectAll(".x-grid").data(xTicks, (value) => value);
             xGrid
               .enter()
               .append("line")
               .attr("class", "x-grid")
+              .attr("x1", (d) => xScale(d)).attr("x2", (d) => xScale(d))
+              .attr("y1", 0).attr("y2", height)
+              .attr("opacity", 0)
               .merge(xGrid)
               .transition()
               .duration(750)
+              .attr("opacity", 1)
               .attr("x1", (d) => xScale(d))
               .attr("y1", 0)
               .attr("x2", (d) => xScale(d))
               .attr("y2", height)
               .attr("stroke", theme.grid)
               .attr("stroke-dasharray", "2,2");
-            xGrid.exit().remove();
+            xGrid.exit().transition().duration(750).attr("opacity", 0).remove();
     
-            const xGridLabels = g.selectAll(".x-grid-label").data(xTicks);
+            const xGridLabels = g.selectAll(".x-grid-label").data(xTicks, (value) => value);
             xGridLabels
               .enter()
               .append("text")
               .attr("class", "x-grid-label")
+              .attr("x", (d) => xScale(d) + 6).attr("y", height - 3)
+              .attr("opacity", 0)
               .merge(xGridLabels)
               .transition()
               .duration(750)
+              .attr("opacity", 1)
               .attr("x", (d) => xScale(d) + 6)
               .attr("y", height - 3)
               .attr("text-anchor", "start")
               .attr("fill", theme.text)
               .style("font", `10px ${theme.font}`)
               .text((d) => tickFormat(d));
-            xGridLabels.exit().remove();
+            xGridLabels.exit().transition().duration(750).attr("opacity", 0).remove();
     
             // Horizontal grid lines & y tick labels
-            const yTicks = yScale.ticks(2, "~s");
-            const yGrid = g.selectAll(".y-grid").data(yTicks);
+            const yTicks = getDistanceTradeTicks(yScale, Math.max(2, Math.floor(height / 30)));
+            const yGrid = g.selectAll(".y-grid").data(yTicks, (value) => value);
             yGrid
               .enter()
               .append("line")
               .attr("class", "y-grid")
+              .attr("x1", 0).attr("x2", width)
+              .attr("y1", (d) => yScale(d)).attr("y2", (d) => yScale(d))
+              .attr("opacity", 0)
               .merge(yGrid)
               .transition()
               .duration(750)
+              .attr("opacity", 1)
               .attr("x1", 0)
               .attr("y1", (d) => yScale(d))
               .attr("x2", width)
               .attr("y2", (d) => yScale(d))
               .attr("stroke", theme.grid)
               .attr("stroke-dasharray", "2,2");
-            yGrid.exit().remove();
+            yGrid.exit().transition().duration(750).attr("opacity", 0).remove();
     
-            const yGridLabels = g.selectAll(".y-grid-label").data(yTicks);
+            const yGridLabels = g.selectAll(".y-grid-label").data(yTicks, (value) => value);
             yGridLabels
               .enter()
               .append("text")
               .attr("class", "y-grid-label")
+              .attr("x", 0).attr("y", (d) => yScale(d) - 5)
+              .attr("opacity", 0)
               .merge(yGridLabels)
               .transition()
               .duration(750)
+              .attr("opacity", 1)
               .attr("x", 0)
               .attr("y", (d) => yScale(d) - 5)
               .attr("text-anchor", "start")
               .attr("fill", theme.text)
               .style("font", `10px ${theme.font}`)
               .text((d) => tickFormat(d));
-            yGridLabels.exit().remove();
+            yGridLabels.exit().transition().duration(750).attr("opacity", 0).remove();
     
             // Update Scatter Points
             const sampledData =
@@ -11486,25 +11595,11 @@
               .style("opacity", 0)
               .call(drag(forceSim))
               .on("click", debouncedOnClickNode)
-              .on("mouseover", function (event, d) {
-                if (hoveredLink) clearHoveredLinkState();
-                hoveredNode = d;
-                d3.select(this).select("circle.primary").attr("stroke", theme.text);
-                updateAnnotationForNode(d, annotationGroup);
+              .on("pointerenter", handleNetworkNodeEnter)
+              .on("pointermove", function (event, d) {
+                if (hoveredNode === d) updateAnnotationForNode(d, annotationGroup);
               })
-              .on("mousemove", function (event, d) {
-                if (hoveredNode === d) {
-                  updateAnnotationForNode(d, annotationGroup);
-                }
-              })
-              .on("mouseout", function (event, d) {
-                hoveredNode = null;
-                d3.select(this)
-                  .select("circle.primary")
-                  .attr("stroke", null)
-                  .attr("stroke-width", null);
-                clearNetworkCallout();
-              });
+              .on("pointerleave", handleNetworkNodeLeave);
     
             // In the enter selection, build the node shapes.
             nodesEnter.each(function (d) {
@@ -12243,6 +12338,7 @@
 
           // Functions to switch between graph and map mode
           function switchToMapMode(instant = false) {
+            svg.classed("map-view", true);
             if (forceSim) forceSim.alphaTarget(0).stop();
             if (!nlMapData) {
               console.error("Failed to load NL map data.");
@@ -12313,6 +12409,7 @@
           }
     
           function switchToGraphMode() {
+            svg.classed("map-view", false);
             mapLayers.unmount();
             nodeGroup.interrupt("map-position");
             disableAllButtons();
@@ -14127,6 +14224,7 @@
             nodeGroup?.interrupt("map-position");
             clearHoveredLinkState();
             hoveredNode = null;
+            updateNodeHoverLinks();
             linkSelection = null;
             comparisonDataError = null;
             cancelSimulationRecompute();

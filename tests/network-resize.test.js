@@ -470,6 +470,25 @@ test("callout placement keeps full cards inside the panel at every edge", () => 
   assert.ok(below.y > 200);
 });
 
+test("callout connectors bend in two segments and leave space around targets on all sides", () => {
+  const context = vm.createContext({});
+  vm.runInContext(extractFunction("getNetworkCalloutPosition"), context);
+  for (const [x, y] of [[80, 300], [720, 300], [400, 70], [400, 930], [0, 0], [800, 1000]]) {
+    const position = context.getNetworkCalloutPosition(x, y, 270, 359, 800, 1000);
+    const points = position.connector.slice(1).split("L").map((point) => point.split(",").map(Number));
+    assert.equal(points.length, 3);
+    assert.deepEqual(points[0], [x, y]);
+    const [[ax, ay], [bx, by], [cx, cy]] = points;
+    assert.notEqual((bx - ax) * (cy - by) - (by - ay) * (cx - bx), 0);
+    assert.ok((cx === position.x || cx === position.x + 270) && cy >= position.y && cy <= position.y + 359 ||
+      (cy === position.y || cy === position.y + 359) && cx >= position.x && cx <= position.x + 270);
+    const dx = Math.max(position.x - x, 0, x - position.x - 270);
+    const dy = Math.max(position.y - y, 0, y - position.y - 359);
+    assert.ok(Math.hypot(dx, dy) >= 72);
+    for (const [px, py] of points) assert.ok(px >= 0 && px <= 800 && py >= 0 && py <= 1000);
+  }
+});
+
 test("small graph bounds keep inactive nodes and route endpoints inside the panel", () => {
   const app = runtime("graph");
   app.allNodes[0].active = false;

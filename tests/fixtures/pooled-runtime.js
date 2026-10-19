@@ -12,5 +12,8 @@ export const pooledRuntime = {
   getPooledFlowSummary: emptyFlow,
   renderPooledFlowPositions() {},
   refreshPooledFlows() {},
+  updateNodeHoverLinks() {},
+  handleNetworkNodeEnter() {},
+  handleNetworkNodeLeave() {},
 };
 export const pooledTools = { flowMetrics };

@@ -13,7 +13,7 @@
   pointer-events: none;
   transition: opacity 160ms, filter 160ms;
 }
-.pooled-flow-route.is-hovered .pooled-flow-link {
+.pooled-flow-route:is(.is-hovered, .is-region-hovered) .pooled-flow-link {
   opacity: 0.85;
   filter: drop-shadow(0 0 3px color-mix(in srgb, var(--flow-accent) 55%, transparent));
   animation: pooled-flow-travel 1.8s linear infinite;
@@ -26,10 +26,31 @@
   pointer-events: none;
   transition: opacity 160ms;
 }
-.pooled-flow-route.is-hovered .pooled-flow-halo { opacity: 0.9; }
+.pooled-flow-route:is(.is-hovered, .is-region-hovered) .pooled-flow-halo { opacity: 0.9; }
 #mainFigureSVG > .links { transition: opacity 160ms; }
 #mainFigureSVG.pooled-flow-focus > .links { opacity: 0.14; }
-#mainFigureSVG.pooled-flow-focus .pooled-flow-route:not(.is-hovered) .pooled-flow-link { opacity: 0.025; }
+#mainFigureSVG.pooled-flow-focus .pooled-flow-route:not(.is-hovered) .pooled-flow-link,
+#mainFigureSVG.region-flow-focus .pooled-flow-route:not(.is-region-hovered) .pooled-flow-link { opacity: 0.025; }
+
+body:not(.focus-mode-active) #mainFigureSVG.map-view > .links > .link {
+  stroke-width: 0.85px;
+  opacity: 0.075;
+  marker-end: none;
+}
+#mainFigureSVG > .links > path { transition: opacity 160ms; }
+body:not(.focus-mode-active) #mainFigureSVG.region-flow-focus > .links > path:not([data-node-flow]) { opacity: 0.025; }
+#mainFigureSVG .links > [data-node-flow="incoming"] { --flow-accent: var(--color-chart-incoming); }
+#mainFigureSVG .links > [data-node-flow="outgoing"] { --flow-accent: var(--color-chart-outgoing); }
+body:not(.focus-mode-active) #mainFigureSVG.region-flow-focus > .links > path[data-node-flow] {
+  stroke: var(--flow-accent);
+  stroke-width: 1.7px;
+  stroke-linecap: round;
+  stroke-dasharray: 7 7;
+  opacity: 0.85;
+  marker-end: none;
+  filter: drop-shadow(0 0 3px color-mix(in srgb, var(--flow-accent) 55%, transparent));
+  animation: pooled-flow-travel 1.8s linear infinite;
+}
 .pooled-flow-hit {
   fill: none;
   stroke: transparent;
@@ -41,7 +62,8 @@
 .pooled-flows marker path { fill: var(--flow-accent); }
 .port-gradient-start { stop-color: color-mix(in srgb, var(--flow-accent) 7%, var(--color-canvas)); }
 .port-gradient-end { stop-color: var(--color-canvas); }
-.pooled-port { outline: none; }
+.pooled-port { outline: none; cursor: grab; touch-action: none; }
+.pooled-port.is-dragging { cursor: grabbing; }
 .port-surface {
   stroke: color-mix(in srgb, var(--color-border) 65%, transparent);
   stroke-width: 0.7;
@@ -90,8 +112,9 @@
 
 @keyframes pooled-flow-travel { to { stroke-dashoffset: -14; } }
 @media (prefers-reduced-motion: reduce) {
-  .pooled-flow-route.is-hovered .pooled-flow-link { animation: none; }
-  .pooled-flow-link, .pooled-flow-halo, .port-surface, .port-orbit, .port-icon-orbit, #mainFigureSVG > .links { transition: none; }
+  .pooled-flow-route:is(.is-hovered, .is-region-hovered) .pooled-flow-link,
+  body:not(.focus-mode-active) #mainFigureSVG.region-flow-focus > .links > path[data-node-flow] { animation: none; }
+  .pooled-flow-link, .pooled-flow-halo, .port-surface, .port-orbit, .port-icon-orbit, #mainFigureSVG > .links, #mainFigureSVG > .links > path { transition: none; }
 }
 
 .trade-item[data-flow-channel] .trade-icon,

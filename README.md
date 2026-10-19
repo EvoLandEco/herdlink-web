@@ -1,6 +1,6 @@
 <h1><img src="public/assets/herdlink-logo.svg" alt="HerdLink — Livestock Trade Networks" width="560"></h1>
 
-![Version](https://img.shields.io/badge/version-v1.0.0-2f6fed)
+![Version](https://img.shields.io/badge/version-v1.0.1-2f6fed)
 ![Deployment](https://img.shields.io/badge/deployment-GitHub%20Pages-121013?logo=github)
 ![Website](https://img.shields.io/website?url=https%3A%2F%2Fherdlink.nl&label=HerdLink.nl)
 ![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)

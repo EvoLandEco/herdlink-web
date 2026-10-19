@@ -7,6 +7,7 @@ const source = readFileSync(new URL("../src/runtime/herdlink-runtime.js", import
 const functions = [
   "getPooledPortPosition", "getPooledPortRegionCount", "getPooledFlowLinks", "getPooledFlowGeometry", "getPooledFlowPath", "getPooledFlowCalloutData",
   "showPooledFlowCallout", "renderPooledFlowCallout", "clearPooledFlowHover", "updateAnnotationForNode",
+  "clampPooledPortPosition", "movePooledPort", "dragPooledPort", "handlePooledPortKeydown",
 ].map((name) => source.match(new RegExp(`^([ ]*)function ${name}\\([^]*?^\\1}`, "m"))[0]).join("\n");
 
 function runtime() {
@@ -14,6 +15,7 @@ function runtime() {
   let clears = 0, domesticClears = 0;
   const context = vm.createContext({
     w: 800, h: 600, currentMode: "map", hoveredPooledFlow: null, hoveredNode: {}, selectedNodeData: null,
+    pooledPortPositions: { map: {}, graph: {} },
     isSimulationModeActive: () => false,
     allNodes: [{ id: "CR13", x: 400, y: 240, r: 10, linkBoundaryRadius: 20 }],
     pooledFlowFrame: {
@@ -30,6 +32,7 @@ function runtime() {
       classed: (name, value) => highlights.set(`svg:${name}`, value),
       selectAll: (selector) => ({ classed: (_name, value) => highlights.set(selector, value) }),
     },
+    updateNodeHoverLinks() {},
     annotationGroup: {}, renderNetworkCallout: (_group, x, y, info) => cards.push({ x, y, info }),
     clearNetworkCallout: () => clears++, clearHoveredLinkState: () => domesticClears++,
   });
@@ -46,6 +49,82 @@ test("map port centers follow the requested height fractions and graph ports sta
   app.currentMode = "graph";
   assert.equal(app.getPooledPortPosition("imports")[1], 520);
   assert.equal(app.getPooledPortPosition("exports")[1], 520);
+});
+
+test("dragged ports retain the grab offset, redraw links and leave regional nodes untouched", () => {
+  const { context: app } = runtime();
+  const handlers = {}, options = {}, classes = {};
+  const root = {}, element = {};
+  const behavior = {
+    container(value) { options.container = value; return this; },
+    subject(value) { options.subject = value; return this; },
+    clickDistance(value) { options.clickDistance = value; return this; },
+    on(name, callback) { handlers[name] = callback; return this; },
+  };
+  app.svg.node = () => root;
+  app.d3 = { drag: () => behavior, select: (node) => {
+    assert.equal(node, element);
+    return { classed: (name, value) => { classes[name] = value; } };
+  } };
+  const paths = [];
+  app.renderPooledFlowPositions = () => paths.push(app.getPooledFlowPath({ channel: "imports" }, app.allNodes[0]));
+  const nodes = JSON.stringify(app.allNodes);
+  app.selectedNodeData = app.allNodes[0];
+  const before = app.getPooledFlowPath({ channel: "imports" }, app.allNodes[0]);
+  assert.equal(app.dragPooledPort(), behavior);
+  assert.equal(options.container(), root);
+  assert.deepEqual({ ...options.subject({ x: 90, y: 220 }, "imports") }, { x: 110, y: 240 });
+  assert.equal(options.clickDistance, 3);
+  handlers.start.call(element);
+  assert.equal(classes["is-dragging"], true);
+  handlers.drag({ x: 210, y: 300 }, "imports");
+  assert.deepEqual(Array.from(app.getPooledPortPosition("imports")), [210, 300]);
+  assert.equal(paths.length, 1);
+  assert.notEqual(paths[0], before);
+  handlers.end.call(element);
+  assert.equal(classes["is-dragging"], false);
+  assert.equal(JSON.stringify(app.allNodes), nodes);
+  assert.equal(app.selectedNodeData, app.allNodes[0]);
+});
+
+test("port placement is separate per view, scales with panel size and keeps the full node inside", () => {
+  const { context: app } = runtime();
+  app.renderPooledFlowPositions = () => {};
+  app.movePooledPort("imports", 200, 300);
+  app.movePooledPort("exports", 600, 450);
+  app.currentMode = "graph";
+  assert.deepEqual(Array.from(app.getPooledPortPosition("imports")), [110, 312]);
+  app.movePooledPort("exports", 400, 400);
+  app.currentMode = "map";
+  assert.deepEqual(Array.from(app.getPooledPortPosition("imports")), [200, 300]);
+  assert.deepEqual(Array.from(app.getPooledPortPosition("exports")), [600, 450]);
+  app.w = 400; app.h = 300;
+  assert.deepEqual(Array.from(app.getPooledPortPosition("imports")), [100, 150]);
+  assert.deepEqual(Array.from(app.getPooledPortPosition("exports")), [300, 225]);
+  app.movePooledPort("imports", -100, 500);
+  app.movePooledPort("exports", 900, -100);
+  assert.deepEqual(Array.from(app.getPooledPortPosition("imports")), [80, 254]);
+  assert.deepEqual(Array.from(app.getPooledPortPosition("exports")), [320, 46]);
+  app.w = 100; app.h = 60;
+  assert.deepEqual(Array.from(app.getPooledPortPosition("imports")), [50, 30]);
+});
+
+test("port arrow keys move without replaying dates or switching the focused region", () => {
+  const { context: app } = runtime();
+  app.renderPooledFlowPositions = () => {};
+  const press = (key, extra = {}) => {
+    const event = { key, preventDefault() { this.prevented = true; }, stopPropagation() { this.stopped = true; }, ...extra };
+    app.handlePooledPortKeydown(event, "imports");
+    return event;
+  };
+  const right = press("ArrowRight");
+  assert.ok(right.prevented && right.stopped);
+  assert.deepEqual(Array.from(app.getPooledPortPosition("imports")), [120, 240]);
+  press("ArrowDown", { shiftKey: true });
+  assert.deepEqual(Array.from(app.getPooledPortPosition("imports")), [120, 241]);
+  assert.equal(press("ArrowUp", { ctrlKey: true }).prevented, undefined);
+  assert.equal(press("Tab").stopped, undefined);
+  assert.deepEqual(Array.from(app.getPooledPortPosition("imports")), [120, 241]);
 });
 
 test("international paths meet the rounded port and the region's visible ring boundary", () => {
