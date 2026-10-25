@@ -162,9 +162,10 @@ argument, they use `HEAD`.
 node scripts/profile-runtime-analytics.js <revision>
 node --expose-gc scripts/profile-simulation.js <revision>
 node scripts/profile-network-rendering.js
-node scripts/profile-community-flow.js
+node scripts/profile-community-flow.js /path/to/d3.min.js
 ```
 
+The community flow profiler takes a local copy of D3 6.7.0.
 The network rendering profiler measures route geometry, international summaries,
 and donut totals. Its SVG elements are plain JavaScript objects, so these timings
 exclude browser layout and painting. Measure frame rates in a production preview
