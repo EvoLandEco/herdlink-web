@@ -212,12 +212,68 @@ test("flow geometry is reused for the same roster and rebuilt when community mem
   assert.equal(fourth.nodesById.get("CR02").data.key, "0");
 });
 
+test("flow paths retain directed ports and reuse geometry until the radius or roster changes", () => {
+  const context = runtime();
+  let routeCalls = 0;
+  context.d3 = {
+    curveBundle: { beta: () => null },
+    lineRadial() {
+      let angle, radius;
+      const line = (route) => JSON.stringify(route.map((node) => [angle(node), radius(node)]));
+      line.curve = () => line;
+      line.angle = (value) => { angle = value; return line; };
+      line.radius = (value) => { radius = value; return line; };
+      return line;
+    },
+  };
+  vm.runInContext(extractFunction("getCommunityFlowPaths"), context);
+  const geometry = (offset = 0) => ({
+    nodesById: new Map(["CR01", "CR02", "CR03"].map((id, index) => [id, {
+      x: index + offset, y: 1,
+      path(target) { routeCalls++; return [this, { x: 0.5, y: 0 }, target]; },
+    }])),
+  });
+  const layout = geometry();
+  const flow = (source, target) => ({ source, target, key: JSON.stringify([source, target]), weight: 1 });
+  const data = {
+    nodes: [...layout.nodesById.keys()], groups: [{}, {}],
+    flows: [flow("CR01", "CR02"), flow("CR02", "CR01"), flow("CR01", "CR01")],
+  };
+  const paths = context.getCommunityFlowPaths(data, layout, 120);
+  const snapshot = [...paths];
+  assert.equal(routeCalls, 2);
+  const forward = JSON.parse(paths.get(data.flows[0].key));
+  const reverse = JSON.parse(paths.get(data.flows[1].key));
+  assert.equal(forward[0][0], 0.016);
+  assert.equal(forward.at(-1)[0], 0.984);
+  assert.notEqual(forward[0][0], reverse.at(-1)[0]);
+  assert.match(paths.get(data.flows[2].key), /^M.*C/);
+  data.flows[0].weight = 50;
+  assert.equal(context.getCommunityFlowPaths(data, layout, 120), paths);
+  assert.deepEqual([...paths], snapshot);
+  assert.equal(routeCalls, 2);
+
+  data.flows.push(flow("CR03", "CR01"));
+  assert.equal(context.getCommunityFlowPaths(data, layout, 120), paths);
+  assert.equal(routeCalls, 3);
+  assert.equal(paths.size, 4);
+  const resized = context.getCommunityFlowPaths(data, layout, 160);
+  assert.notEqual(resized, paths);
+  assert.notEqual(resized.get(data.flows[0].key), paths.get(data.flows[0].key));
+  assert.equal(routeCalls, 6);
+
+  const regrouped = context.getCommunityFlowPaths(data, geometry(0.2), 160);
+  assert.notEqual(regrouped, resized);
+  assert.notEqual(regrouped.get(data.flows[0].key), resized.get(data.flows[0].key));
+  assert.equal(routeCalls, 9);
+});
+
 test("simulation frame rendering preserves the selected community view", () => {
   const context = runtime();
   const calls = [];
   Object.assign(context, {
     communityView: "flow", selectedNodeData: null, simulationState: {
-      currentFrame: {}, trajectory: { initialFrame: { nodeStates: {} }, frames: [] },
+      currentFrame: {}, trajectory: { initialFrame: { nodeStates: {}, summary: { prevalence: 0 } }, frames: [] },
     },
     d3: { max: (items, accessor) => Math.max(0, ...items.map(accessor)) },
     simulationPrevalenceScale: { domain() {} }, simulationPrevalenceTextScale: { domain() {} },
@@ -229,7 +285,7 @@ test("simulation frame rendering preserves the selected community view", () => {
     "renderSimulationIncidenceChart", "renderSimulationNodeStatsChart", "renderSimulationSpatialPatternPanel", "applySimulationNodeStyles"]) {
     context[name] = () => {};
   }
-  vm.runInContext(["renderSimulationPanels", "updateSCCs"].map(extractFunction).join("\n"), context);
+  vm.runInContext(["getSimulationPrevalencePeaks", "renderSimulationPanels", "updateSCCs"].map(extractFunction).join("\n"), context);
   context.renderSimulationPanels();
   assert.deepEqual(calls, ["flow"]);
   context.communityView = "heatmap";

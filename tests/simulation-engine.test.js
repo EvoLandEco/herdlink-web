@@ -172,6 +172,41 @@ test("canonical identity ignores input ordering and includes all numerical contr
   assert.notEqual(simulationInputKey(base), simulationInputKey({ ...base, nodeInterventions: new Map([[date(2).getTime(), new Map([["A", { exports: false }]])]]) }));
 });
 
+test("trajectory reuse validates current observations, controls and schedules before reading the cache", () => {
+  const base = inputs();
+  const daily = simulateDaily(base);
+  const cache = new Map([[daily.identity, daily]]);
+  assert.equal(simulateDaily({ ...base, data: [...base.data].reverse() }, cache), daily);
+  assert.throws(() => simulateDaily({ ...base, data: [...base.data, row(1, "A", "B", Infinity)] }, cache), /Movement weight/);
+  assert.throws(() => simulateDaily({ ...base, settings: { ...base.settings, gamma: 2 } }, cache), /gamma/);
+  assert.throws(() => simulateDaily({ ...base, linkInterventions: new Map([[date(1).getTime(), new Map([["A-X", true]])]]) }, cache), /route restriction/);
+  const changed = simulateDaily({ ...base, data: [...base.data, row(1, "A", "B", 10)] }, cache);
+  assert.notEqual(changed, daily);
+  assert.ok(changed.frames[0].summary.newInfections > daily.frames[0].summary.newInfections);
+  assert.equal(cache.size, 1);
+});
+
+test("restriction boundaries preserve the union of persistent permissions and daily route closures", () => {
+  const nodeInterventions = new Map([
+    [+date(1) - 86400000, new Map([["A", { exports: false }]])],
+    [+date(3), new Map([["A", { exports: false }]])],
+    [+date(6), new Map([["A", { exports: true }]])],
+    [+date(8), new Map([["B", { imports: false }]])],
+    [+date(9), new Map([["A", { exports: false }], ["B", { imports: true }]])],
+    [+date(10), new Map([["A", { exports: true }]])],
+  ]);
+  const linkInterventions = new Map([
+    [+date(4), new Map([["A-B", true]])],
+    [+date(5), new Map([["A-A", true]])],
+    [+date(6), new Map([["A-B", true]])],
+  ]);
+  const daily = simulateDaily(inputs({ dates: dates(10), data: dates(10).map((_, index) => row(index + 1)),
+    nodeInterventions, linkInterventions }));
+  assert.deepEqual(daily.boundaryIndices, [4, 5, 6, 7, 9]);
+  assert.deepEqual(daily.frames.map((frame) => frame.linkStates.has("A-B")),
+    [false, false, false, false, false, false, true, false, false, true]);
+});
+
 test("uniform artificial population rescaling with matching movement coefficient rescales counts", () => {
   const a = simulateDaily(inputs());
   const b = simulateDaily(inputs({ settings: settings({ holdings: { A: 300, B: 600 }, movementBeta: 3 }) }));

@@ -2,6 +2,8 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   buildComparisonChart,
+  comparisonChartDomain,
+  comparisonChartLayout,
   comparisonEventMarkerWidth,
   formatComparisonDelta,
   formatComparisonValue,
@@ -13,6 +15,38 @@ import {
 } from "../src/comparisonCharts.js";
 
 const dates = ["2020-01-01", "2020-01-02", "2020-01-05"];
+
+test("chart frames reuse calendar coordinates while values and their domain change", () => {
+  const points = [
+    { date: dates[0], original: 1, intervention: 3 },
+    { date: dates[1], original: null, intervention: 5 },
+    { date: dates[2], original: 4, intervention: null },
+  ];
+  for (const compact of [false, true]) {
+    const layout = comparisonChartLayout(points, 480, 160, compact);
+    for (const factor of [1, 10, 0.01]) {
+      const next = points.map((point) => ({ date: point.date,
+        original: point.original === null ? null : point.original * factor,
+        intervention: point.intervention === null ? null : point.intervention * factor,
+      }));
+      const domain = comparisonChartDomain(next);
+      const expected = buildComparisonChart(next, 480, 160, compact, next, domain);
+      const tracked = next.map((point) => ({ ...point, get date() { assert.fail("Animation frames reuse their calendar layout"); } }));
+      const actual = buildComparisonChart(tracked, 480, 160, compact, next, domain, layout);
+      assert.equal(actual.original, expected.original);
+      assert.equal(actual.intervention, expected.intervention);
+      assert.deepEqual(actual.ticks, expected.ticks);
+      assert.deepEqual(actual.positions, expected.positions);
+    }
+  }
+});
+
+test("chart domains handle long shared trajectories without argument limits", () => {
+  const points = Array.from({ length: 100000 }, (_, index) => ({ original: -index, intervention: index }));
+  assert.deepEqual(comparisonChartDomain(points), { minimum: -99999, maximum: 99999 });
+  assert.equal(comparisonChartDomain([{ original: null, intervention: Infinity }]), null);
+  assert.deepEqual(comparisonChartDomain([{ original: 0, intervention: NaN }]), { minimum: 0, maximum: 1 });
+});
 
 test("top regions use original timeline peaks, stable ties and finite results", () => {
   const regions = ["CR07", "CR06", "CR05", "CR04", "CR03", "CR02", "CR01"].map((id) => ({ id, name: id }));

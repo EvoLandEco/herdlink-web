@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import test from "node:test";
 import vm from "node:vm";
 import { transform } from "esbuild";
-import { buildComparisonChart, comparisonChartDomain, comparisonEventMarkerWidth, formatComparisonDelta, formatComparisonValue, getComparisonIntroduction, groupComparisonEvents, pairComparisonSeries, topComparisonRegions } from "../src/comparisonCharts.js";
+import { buildComparisonChart, comparisonChartDomain, comparisonChartLayout, comparisonEventMarkerWidth, formatComparisonDelta, formatComparisonValue, getComparisonIntroduction, groupComparisonEvents, pairComparisonSeries, topComparisonRegions } from "../src/comparisonCharts.js";
 import { comparisonConfigurations } from "../src/scenarioComparison.js";
 
 const source = readFileSync(new URL("../src/components/ComparisonOverlay.jsx", import.meta.url), "utf8");
@@ -68,7 +68,7 @@ function renderWrapper(name, props, states = []) {
       return [states[index], (value) => { states[index] = typeof value === "function" ? value(states[index]) : value; }];
     },
     useAnimatedComparisonSeries: (points, domain) => ({ points, domain }),
-    buildComparisonChart, comparisonChartDomain, comparisonEventMarkerWidth, formatComparisonDelta, formatComparisonValue, getComparisonIntroduction, groupComparisonEvents, pairComparisonSeries, topComparisonRegions,
+    buildComparisonChart, comparisonChartDomain, comparisonChartLayout, comparisonEventMarkerWidth, formatComparisonDelta, formatComparisonValue, getComparisonIntroduction, groupComparisonEvents, pairComparisonSeries, topComparisonRegions,
     comparisonConfigurations,
     createElement: (type, attributes, ...children) => ({ type: typeof type === "function" ? type.name : type, props: attributes || {}, children }),
   });

@@ -50,15 +50,19 @@ test("runtime waits for both built-in flows and scripts and respects cancelled m
   const effect = source.slice(start, end);
   for (const cancel of [false, true]) {
     const calls = [];
-    let readyFlows, readyScript, cleanup;
+    let readyFlows, readyScript, readySecondScript, cleanup;
     const flows = new Promise((resolve) => { readyFlows = resolve; });
     const script = new Promise((resolve) => { readyScript = resolve; });
+    const secondScript = new Promise((resolve) => { readySecondScript = resolve; });
     const context = vm.createContext({
       hasSupportedScreen: true, runtimeReady: { current: false }, Event,
       useEffect(fn) { cleanup = fn(); },
       loadPooledFlows: () => flows,
-      runtimeScripts: [{ src: "/dependency.js" }], herdLinkRuntimeUrl: "/runtime.js",
-      loadRuntimeScript({ src }) { calls.push(src); return src === "/dependency.js" ? script : Promise.resolve(); },
+      runtimeScripts: [{ src: "/dependency.js" }, { src: "/second.js" }], herdLinkRuntimeUrl: "/runtime.js",
+      loadRuntimeScript({ src }) {
+        calls.push(src);
+        return src === "/dependency.js" ? script : src === "/second.js" ? secondScript : Promise.resolve();
+      },
       window: {
         requestAnimationFrame(fn) { fn(); return 1; },
         cancelAnimationFrame() {},
@@ -68,14 +72,17 @@ test("runtime waits for both built-in flows and scripts and respects cancelled m
     });
     vm.runInContext(effect, context);
     await new Promise(setImmediate);
-    assert.deepEqual(calls, ["/dependency.js"]);
+    assert.deepEqual(calls, ["/dependency.js", "/second.js"]);
     readyScript();
     await new Promise(setImmediate);
-    assert.deepEqual(calls, ["/dependency.js"]);
+    assert.deepEqual(calls, ["/dependency.js", "/second.js"]);
     if (cancel) cleanup();
     readyFlows();
     await new Promise(setImmediate);
-    assert.deepEqual(calls, cancel ? ["/dependency.js"] : ["/dependency.js", "/runtime.js", "herdlink:mount"]);
+    assert.deepEqual(calls, ["/dependency.js", "/second.js"]);
+    readySecondScript();
+    await new Promise(setImmediate);
+    assert.deepEqual(calls, cancel ? ["/dependency.js", "/second.js"] : ["/dependency.js", "/second.js", "/runtime.js", "herdlink:mount"]);
     assert.equal(context.runtimeReady.current, !cancel);
   }
 });
@@ -109,6 +116,7 @@ test("a failed runtime request can retry with a fresh script while concurrent ca
   const retry = context.loadRuntimeScript(options);
   assert.equal(scripts.length, 1);
   const loadedScript = scripts[0];
+  assert.equal(loadedScript.async, false);
   assert.notEqual(loadedScript, failedScript);
   loadedScript.dispatchEvent(new Event("load"));
   assert.equal(await retry, loadedScript);

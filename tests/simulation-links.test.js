@@ -714,7 +714,7 @@ for (const mode of ["trade", "simulation"]) {
     context.d3.selectAll = () => ({ property() {} });
     for (const name of [
       "updateTradeTable", "updateInOutArbos", "updateTradeNodeInsight", "updateNetwork",
-      "updateDonutCharts", "updateNetworkStats", "updateHotspotMarks", "computeSCCs",
+      "updateDonutCharts", "updateNetworkStats", "updateHotspotMarks",
       "updateSCCs", "updateAnnotationForNode", "disableAllCheckboxes", "enableAllCheckboxes",
       "renderSimulationNodeControls", "updateGlobalStatsChart", "updateNodeStatsChart",
     ]) context[name] = () => {};
@@ -921,6 +921,21 @@ test("nonfinite movement weights are rejected before a cached trajectory can be 
   context.presetDailyData.push({ time: context.uniqueDates[0], COROP_LEV: "CR01", COROP_AFN: "CR02", AANTAL: Infinity });
   assert.throws(() => context.buildSimulationTrajectory(settingsFor(context)), /Movement weight.*finite/);
   assert.equal(snapshot(baseline), expected);
+});
+
+test("new and cached trajectories validate each daily observation in one preparation pass", () => {
+  const context = runtime();
+  let observationReads = 0;
+  context.presetDailyData = context.presetDailyData.map((row) => ({
+    ...row, get time() { observationReads++; return row.time; },
+  }));
+  const settings = settingsFor(context);
+  const first = context.buildSimulationTrajectory(settings);
+  assert.equal(observationReads, context.presetDailyData.length);
+  observationReads = 0;
+  const second = context.buildSimulationTrajectory(settings);
+  assert.equal(observationReads, context.presetDailyData.length);
+  assert.equal(second.dailyTrajectory, first.dailyTrajectory);
 });
 
 test("simulation edge colors use attributed entries with a valid zero logarithmic endpoint", () => {

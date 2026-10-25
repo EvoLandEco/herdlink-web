@@ -154,7 +154,7 @@ test("the prevalence peak includes initialization and every day at each display 
       return values.length ? Math.max(...values) : undefined;
     } },
   });
-  vm.runInContext(["formatPct", "renderSimulationStatsContainer"].map(extract).join("\n"), context);
+  vm.runInContext(["formatPct", "getSimulationPrevalencePeaks", "renderSimulationStatsContainer"].map(extract).join("\n"), context);
   for (const [N, beta, gamma, expected] of [[100, 0, 1, "10.0%"], [100, 10, 0, "100.0%"], [0, 0, 0, "—"]]) {
     const holdings = { A: N };
     const settings = { model: "SIR", seedRegion: "A", introductionDate: "2020-01-01", initialPct: 10,
@@ -214,7 +214,7 @@ test("prevalence colors retain the regional daily peak across replay and display
   for (const name of ["renderSimulationNodeControls", "renderSimulationStatsContainer", "renderSimulationGlobalStatsChart",
     "renderSimulationIncidenceChart", "renderSimulationNodeStatsChart", "renderSimulationSpatialPatternPanel",
     "updateSCCs", "applySimulationNodeStyles"]) context[name] = () => {};
-  vm.runInContext(extract("renderSimulationPanels"), context);
+  vm.runInContext(["getSimulationPrevalencePeaks", "renderSimulationPanels"].map(extract).join("\n"), context);
   for (const initialPct of [0, 1, 10]) {
     const settings = { model: "SIR", seedRegion: "A", introductionDate: "2020-01-01", initialPct,
       initializationConvention: "prevalence-shares", beta: 0, movementBeta: 0, sigma: 0, gamma: 1, holdings,
@@ -231,4 +231,35 @@ test("prevalence colors retain the regional daily peak across replay and display
       }
     }
   }
+});
+
+test("prevalence peaks read each trajectory once across replay and refresh for another result", () => {
+  let reads = 0;
+  const frame = (total, regional) => ({
+    summary: { get prevalence() { reads++; return total; } },
+    nodeStates: { A: { get prevalence() { reads++; return regional; } } },
+  });
+  const daily = { initialFrame: frame(0.3, 0.4), frames: [frame(0.1, 0.2), frame(0.2, 0.5)] };
+  const context = vm.createContext({
+    simulationState: { trajectory: { dailyTrajectory: daily } },
+    d3: { max: (items, accessor) => Math.max(...items.map(accessor)) },
+  });
+  vm.runInContext(extract("getSimulationPrevalencePeaks"), context);
+  const first = context.getSimulationPrevalencePeaks();
+  assert.equal(first.total, 0.3);
+  assert.equal(first.regional, 0.5);
+  assert.equal(reads, 6);
+  for (const currentFrame of daily.frames) {
+    context.simulationState.currentFrame = currentFrame;
+    assert.equal(context.getSimulationPrevalencePeaks(), first);
+  }
+  context.simulationState.trajectory = { dailyTrajectory: daily };
+  assert.equal(context.getSimulationPrevalencePeaks(), first);
+  assert.equal(reads, 6);
+  context.simulationState.trajectory = { initialFrame: frame(0.7, 0.8), frames: [frame(0.2, 0.4)] };
+  const next = context.getSimulationPrevalencePeaks();
+  assert.notEqual(next, first);
+  assert.equal(next.total, 0.7);
+  assert.equal(next.regional, 0.8);
+  assert.equal(reads, 10);
 });

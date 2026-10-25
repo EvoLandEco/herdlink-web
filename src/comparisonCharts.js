@@ -107,24 +107,40 @@ export function groupComparisonEvents(groups, dates, trackWidth, positionForDate
 }
 
 export function comparisonChartDomain(scalePoints) {
-  const values = scalePoints.flatMap((point) => [point.original, point.intervention]).filter(Number.isFinite);
-  if (!values.length) return null;
-  const minimum = Math.min(0, ...values);
-  const maximum = Math.max(0, ...values);
+  let minimum = 0;
+  let maximum = 0;
+  let found = false;
+  for (const point of scalePoints) {
+    for (const value of [point.original, point.intervention]) {
+      if (!Number.isFinite(value)) continue;
+      minimum = Math.min(minimum, value);
+      maximum = Math.max(maximum, value);
+      found = true;
+    }
+  }
+  if (!found) return null;
   return { minimum, maximum: maximum === minimum ? 1 : maximum };
 }
 
-export function buildComparisonChart(points, width = 640, height = 198, compact = false, scalePoints = points, domain = comparisonChartDomain(scalePoints)) {
-  if (!points.length || !domain) return null;
-
+export function comparisonChartLayout(points, width = 640, height = 198, compact = false) {
   const plot = { left: 64, right: width - 16, top: compact ? 6 : 12, bottom: height - (compact ? 8 : 28) };
   const dates = points.map((point) => Date.parse(point.date));
-  const start = Math.min(...dates);
-  const end = Math.max(...dates);
-  const { minimum, maximum: ceiling } = domain;
+  let start = Infinity;
+  let end = -Infinity;
+  for (const date of dates) {
+    start = Math.min(start, date);
+    end = Math.max(end, date);
+  }
   const x = (timestamp) => end === start
     ? (plot.left + plot.right) / 2
     : plot.left + (timestamp - start) / (end - start) * (plot.right - plot.left);
+  return { plot, start, end, x, positions: dates.map(x) };
+}
+
+export function buildComparisonChart(points, width = 640, height = 198, compact = false, scalePoints = points, domain = comparisonChartDomain(scalePoints), layout = comparisonChartLayout(points, width, height, compact)) {
+  if (!points.length || !domain) return null;
+  const { plot, positions } = layout;
+  const { minimum, maximum: ceiling } = domain;
   const y = (value) => plot.bottom - (value - minimum) / (ceiling - minimum) * (plot.bottom - plot.top);
   const path = (key) => {
     let connected = false;
@@ -133,14 +149,14 @@ export function buildComparisonChart(points, width = 640, height = 198, compact 
         connected = false;
         return "";
       }
-      const command = `${connected ? "L" : "M"}${x(dates[index])},${y(point[key])}`;
+      const command = `${connected ? "L" : "M"}${positions[index]},${y(point[key])}`;
       connected = true;
       return command;
     }).join(" ");
   };
 
   return {
-    plot, start, end, x, y,
+    ...layout, y,
     ticks: [minimum, (minimum + ceiling) / 2, ceiling],
     original: path("original"),
     intervention: path("intervention"),

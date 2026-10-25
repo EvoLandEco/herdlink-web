@@ -68,10 +68,33 @@ function runtime() {
   ]) context[name] = () => {};
   context.isSimulationModeActive = () => false;
   vm.runInContext([
-    "updateTemporalNetwork", "updateNetwork", "drag", "switchToMapMode", "switchToGraphMode",
+    "getNodeId", "getNodeTradeVolumes", "updateTemporalNetwork", "updateNetwork", "drag", "switchToMapMode", "switchToGraphMode",
   ].map(extractFunction).join("\n"), context);
   return context;
 }
+
+test("date joins draw positive domestic routes and retain disabled routes for permission changes", () => {
+  const context = runtime();
+  const a = { id: "A" }, b = { id: "B" };
+  const visible = { source: a, target: b, weight: 5 };
+  const disabled = { source: b, target: a, weight: 4, disabled: true };
+  const local = { source: a, target: a, weight: 3 };
+  const empty = { source: "C", target: a, weight: 0 };
+  context.allLinks = [visible, disabled, local, empty];
+  context.nonZeroLinks = [visible, disabled, local];
+  const joins = [];
+  const selection = new Proxy({}, { get: (_, key) => (...args) => {
+    if (key === "data") joins.push(Array.from(args[0]));
+    return selection;
+  } });
+  context.linkGroup = selection;
+  context.updateTemporalNetwork();
+  assert.deepEqual(joins[0], [visible, disabled]);
+  assert.equal(context.allLinks.length, 4);
+  context.nonZeroLinks = [{ ...empty, weight: 2 }, local];
+  context.updateTemporalNetwork();
+  assert.deepEqual(joins[1], [context.nonZeroLinks[0]]);
+});
 
 test("date changes keep map physics stopped and let graph physics cool", () => {
   const context = runtime();

@@ -9,6 +9,7 @@ import { useAnimatedComparisonSeries } from "../useAnimatedComparisonSeries";
 import {
   buildComparisonChart,
   comparisonChartDomain,
+  comparisonChartLayout,
   comparisonEventMarkerWidth,
   formatComparisonDelta,
   formatComparisonValue,
@@ -128,14 +129,21 @@ function PairedChart({ points, compact = false, scalePoints, seriesLabel, metric
   useEffect(() => {
     const observer = new ResizeObserver(([entry]) => {
       const { width, height } = entry.contentRect;
-      setSize({ width, height });
+      setSize((previous) => previous?.width === width && previous?.height === height ? previous : { width, height });
     });
     observer.observe(containerRef.current);
     return () => observer.disconnect();
   }, []);
-  const chart = useMemo(() => size?.width > 0 && size?.height > 0
-    ? buildComparisonChart(animatedPoints, size.width, size.height, compact, scalePoints, animatedDomain) : null, [animatedPoints, size, compact, scalePoints, animatedDomain]);
+  const layout = useMemo(() => size?.width > 0 && size?.height > 0
+    ? comparisonChartLayout(points, size.width, size.height, compact) : null, [points, size, compact]);
+  const chart = useMemo(() => layout
+    ? buildComparisonChart(animatedPoints, size.width, size.height, compact, scalePoints, animatedDomain, layout) : null,
+  [animatedPoints, size, compact, scalePoints, animatedDomain, layout]);
   const dates = useMemo(() => points.map((point) => point.date), [points]);
+  const dateIndexes = useMemo(() => new Map(dates.map((value, index) => [value, index])), [dates]);
+  const isolatedPoints = useMemo(() => ["original", "intervention"].flatMap((key) => points.flatMap((point, index) =>
+    Number.isFinite(point[key]) && !Number.isFinite(points[index - 1]?.[key]) && !Number.isFinite(points[index + 1]?.[key])
+      ? [{ key, index }] : [])), [points]);
   const chartStart = chart?.start;
   const chartEnd = chart?.end;
   const plotWidth = chart ? chart.plot.right - chart.plot.left : 0;
@@ -144,8 +152,9 @@ function PairedChart({ points, compact = false, scalePoints, seriesLabel, metric
   ), [chartStart, chartEnd, plotWidth, dates, interventionEvents, compact]);
   const introductionPosition = introduction && chart
     ? (chart.x(Date.parse(introduction.displayDate)) - chart.plot.left) / plotWidth : null;
-  const selected = points.find((point) => point.date === date);
-  const animatedSelected = animatedPoints.find((point) => point.date === date);
+  const selectedIndex = dateIndexes.get(date);
+  const selected = points[selectedIndex];
+  const animatedSelected = animatedPoints[selectedIndex];
   const delta = formatComparisonDelta(selected?.original, selected?.intervention, metric.format);
   const formatAxis = (value) => metric.format === "percent" || Math.abs(value) < 1
     ? formatComparisonValue(value, metric.format)
@@ -158,7 +167,7 @@ function PairedChart({ points, compact = false, scalePoints, seriesLabel, metric
     onInspect(dates[nearestComparisonDate(dates, timestamp)]);
   };
   const inspectWithKeyboard = (event) => {
-    const index = Math.max(0, dates.indexOf(date));
+    const index = selectedIndex ?? 0;
     const next = {
       ArrowLeft: Math.max(0, index - 1),
       ArrowRight: Math.min(dates.length - 1, index + 1),
@@ -199,17 +208,14 @@ function PairedChart({ points, compact = false, scalePoints, seriesLabel, metric
             y1={chart.plot.top - 27} y2={chart.plot.bottom} />}
           {!seriesLabel && <path className="comparison-line comparison-line--original" d={chart.original} />}
           <path className="comparison-line comparison-line--intervention" d={chart.intervention} />
-          {date !== currentDate && points.some((point) => point.date === currentDate) && <line className="comparison-current-date" x1={chart.x(Date.parse(currentDate))} x2={chart.x(Date.parse(currentDate))} y1={chart.plot.top} y2={chart.plot.bottom} />}
-          {["original", "intervention"].map((key) => animatedPoints.map((point, index) => (
-            Number.isFinite(point[key]) && !Number.isFinite(animatedPoints[index - 1]?.[key]) && !Number.isFinite(animatedPoints[index + 1]?.[key])
-              ? <circle key={`${key}-${point.date}`} className={`comparison-point comparison-point--${key}`} cx={chart.x(Date.parse(point.date))} cy={chart.y(point[key])} r="3" />
-              : null
-          )))}
+          {date !== currentDate && dateIndexes.has(currentDate) && <line className="comparison-current-date" x1={chart.x(Date.parse(currentDate))} x2={chart.x(Date.parse(currentDate))} y1={chart.plot.top} y2={chart.plot.bottom} />}
+          {isolatedPoints.map(({ key, index }) => <circle key={`${key}-${points[index].date}`} className={`comparison-point comparison-point--${key}`}
+            cx={chart.positions[index]} cy={chart.y(animatedPoints[index][key])} r="3" />)}
           {animatedSelected && (
             <g>
-              <line className="comparison-cursor" x1={chart.x(Date.parse(date))} x2={chart.x(Date.parse(date))} y1={chart.plot.top} y2={chart.plot.bottom} />
+              <line className="comparison-cursor" x1={chart.positions[selectedIndex]} x2={chart.positions[selectedIndex]} y1={chart.plot.top} y2={chart.plot.bottom} />
               {["original", "intervention"].map((key) => Number.isFinite(animatedSelected[key]) && (
-                <circle key={key} className={`comparison-point comparison-point--${key}`} cx={chart.x(Date.parse(date))} cy={chart.y(animatedSelected[key])} r="4" />
+                <circle key={key} className={`comparison-point comparison-point--${key}`} cx={chart.positions[selectedIndex]} cy={chart.y(animatedSelected[key])} r="4" />
               ))}
             </g>
           )}

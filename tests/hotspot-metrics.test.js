@@ -71,6 +71,57 @@ test("betweenness preserves the ordering of closely unequal inverse-weight paths
   }
 });
 
+test("weighted betweenness matches exhaustive shortest paths with shuffled node indices", () => {
+  const ids = ["CR04", "isolated", "CR02", "CR05", "CR01"];
+  let seed = 94317;
+  const random = (limit) => {
+    seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0;
+    return seed % limit;
+  };
+  const weights = [2, 3, 4, 5, 6, 10, 12, 15, 20, 30];
+  for (let graph = 0; graph < 24; graph++) {
+    const links = [];
+    for (const source of ids) {
+      for (const target of ids) {
+        if (source !== target && random(3) !== 0) {
+          links.push([source, target, weights[random(weights.length)]]);
+        }
+      }
+    }
+    if (links.length) links.push([...links[0]]);
+    const expected = Object.fromEntries(ids.map((id) => [id, 0]));
+    for (const source of ids) {
+      for (const target of ids) {
+        if (source === target) continue;
+        let shortest = Infinity;
+        let paths = [];
+        const visit = (node, path, distance) => {
+          if (node === target) {
+            if (distance < shortest) { shortest = distance; paths = []; }
+            if (distance === shortest) paths.push(path);
+            return;
+          }
+          for (const [from, to, weight] of links) {
+            if (from === node && !path.includes(to)) visit(to, [...path, to], distance + 60 / weight);
+          }
+        };
+        visit(source, [source], 0);
+        for (const path of paths) {
+          for (const id of path.slice(1, -1)) expected[id] += 1 / paths.length;
+        }
+      }
+    }
+    const nodes = ids.map((id) => ({ id }));
+    const nodeById = new Map(nodes.map((node) => [node.id, node]));
+    const actual = metricsContext.computeHotSpotMetrics(nodes, links.map(([source, target, weight], index) => ({
+      source: index % 2 ? source : nodeById.get(source),
+      target: index % 2 ? nodeById.get(target) : target,
+      weight,
+    })));
+    for (const id of ids) near(actual[id].betweenness, expected[id], 1e-12);
+  }
+});
+
 test("blocked CR35 exports do not count within-region trades as seeding", () => {
   const csv = readFileSync(new URL("../src/assets/data/weekly_aggregation.csv", import.meta.url), "utf8");
   const links = csv.trim().split("\n").slice(1).flatMap((line) => {

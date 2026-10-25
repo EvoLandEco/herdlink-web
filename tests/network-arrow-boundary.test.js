@@ -13,8 +13,8 @@ function extractFunction(name) {
 }
 
 function runtime() {
-  const context = vm.createContext({ ...pooledRuntime,});
-  vm.runInContext(["getNetworkLinkPath", "getNetworkLinkArc", "updateNetworkLinkBoundaries"].map(extractFunction).join("\n"), context);
+  const context = vm.createContext({ ...pooledRuntime });
+  vm.runInContext(["getNetworkLinkPath", "getNetworkLinkArc", "renderNetworkLinkPositions", "updateNetworkLinkBoundaries"].map(extractFunction).join("\n"), context);
   return context;
 }
 
@@ -45,6 +45,10 @@ function boundaryScene({ radius = 12, displayedRadius = radius, rings = [] } = {
   };
   const link = { source: { id: "CR01", x: 0, y: 100 }, target: node };
   const rendered = [], annotations = [], frames = new Map();
+  const linkElement = {
+    setAttribute(name, value) { assert.equal(name, "d"); rendered.push(value); },
+    removeAttribute(name) { assert.equal(name, "d"); rendered.push(null); },
+  };
   let nextFrame = 0;
   const svgElement = { isConnected: true };
   Object.assign(context, {
@@ -54,7 +58,7 @@ function boundaryScene({ radius = 12, displayedRadius = radius, rings = [] } = {
     requestAnimationFrame(callback) { const id = ++nextFrame; frames.set(id, callback); return id; },
     cancelAnimationFrame(id) { frames.delete(id); },
     nodeEnter: { each(callback) { callback.call(element, node); } },
-    linkSelection: { attr(name, value) { assert.equal(name, "d"); rendered.push(value(link)); return this; } },
+    linkSelection: { each(callback) { callback.call(linkElement, link); return this; } },
     updateAnnotationForLink: (datum, group) => annotations.push({ datum, group }),
   });
   return { context, node, circle, element, ringGroup, link, rendered, annotations, frames, svgElement,

@@ -36,6 +36,7 @@
           let communityFlowLayoutId = 0;
           let uniqueDates = [];
           let pooledFlowFrame = null;
+          let pooledFlowSummaryCache = null;
           const pooledPortPositions = { map: {}, graph: {} };
           let temporalUpdateTimeout;
           window.allTemporalStats = {};
@@ -124,12 +125,12 @@
           const hotspotRingSpacing = 4;
           const nodeAppearanceDuration = 200;
           let linkBoundaryFrame = null;
-          let newSCCs;
           let hoveredNode = null;
           let hoveredLink = null;
           let hoveredLinkElement = null;
           let hoveredPooledFlow = null;
           const linkHoverGeometry = new WeakMap();
+          const pooledFlowPositions = new WeakMap();
           let annotationGroup = null;
           const metricNames = [
             "inDegree",
@@ -1299,17 +1300,12 @@
             const nodeInterventions = inputs.nodeInterventions ?? simulationNodeInterventions;
             const linkInterventions = inputs.linkInterventions ?? simulationLinkInterventions;
             const ids = collectSimulationRegionIds(data);
-            const validated = window.herdlinkSimulation.validateSimulationSettings(settings, ids);
-            const key = window.herdlinkSimulation.simulationInputKey({
-              settings: validated, data, dates, ids, nodeInterventions, linkInterventions, movementGeography: "COROP",
-            });
-            let daily = dailySimulationCache.get(key);
-            if (!daily) {
-              daily = window.herdlinkSimulation.simulateDaily({
-                settings: validated, data, dates, ids, nodeInterventions, linkInterventions, movementGeography: "COROP",
-              });
+            const daily = window.herdlinkSimulation.simulateDaily({
+              settings, data, dates, ids, nodeInterventions, linkInterventions, movementGeography: "COROP",
+            }, dailySimulationCache);
+            if (!dailySimulationCache.has(daily.identity)) {
               if (dailySimulationCache.size >= 2) dailySimulationCache.delete(dailySimulationCache.keys().next().value);
-              dailySimulationCache.set(key, daily);
+              dailySimulationCache.set(daily.identity, daily);
             }
             return explicitData ? daily : window.herdlinkSimulation.aggregateDailyTrajectory(daily, uniqueDates);
           }
@@ -2177,14 +2173,24 @@
             }));
           }
 
+          function getSimulationPrevalencePeaks() {
+            const daily = simulationState.trajectory.dailyTrajectory || simulationState.trajectory;
+            if (simulationState.prevalencePeaks?.daily !== daily) {
+              const frames = [daily.initialFrame, ...daily.frames];
+              simulationState.prevalencePeaks = {
+                daily,
+                total: d3.max(frames, (frame) => frame.summary.prevalence),
+                regional: d3.max(frames, (frame) => d3.max(Object.values(frame.nodeStates), (state) => state.prevalence)),
+              };
+            }
+            return simulationState.prevalencePeaks;
+          }
+
           function renderSimulationStatsContainer() {
             const frame = simulationState.currentFrame;
             if (!frame) return;
             const summary = frame.summary;
-            const peak = d3.max(
-              [simulationState.trajectory.initialFrame, ...simulationState.trajectory.dailyFrames],
-              (item) => item.summary.prevalence,
-            );
+            const peak = getSimulationPrevalencePeaks().total;
             const rows = [
               ["fa-solid fa-users", "Model units", formatCount(summary.N)],
               ["fa-solid fa-virus", "Infectious", formatCount(summary.I)],
@@ -4490,9 +4496,7 @@
 
           function renderSimulationPanels() {
             if (!isSimulationModeActive() || !simulationState.currentFrame) return;
-            const daily = simulationState.trajectory.dailyTrajectory || simulationState.trajectory;
-            const prevalenceMax = d3.max([daily.initialFrame, ...daily.frames],
-              (frame) => d3.max(Object.values(frame.nodeStates), (state) => state.prevalence));
+            const prevalenceMax = getSimulationPrevalencePeaks().regional;
             simulationPrevalenceScale.domain([0, prevalenceMax || 1]);
             simulationPrevalenceTextScale.domain([0, prevalenceMax || 1]);
             renderSimulationNodeControls();
@@ -4862,7 +4866,6 @@
             updateInOutArbos();
             updateTradeNodeInsight(window.currentSelectedTradeNodeInsight);
             updateHotspotMarks();
-            computeSCCs();
             updateSCCs();
             updateAnnotationForNode(selectedNodeData, annotationGroup);
             if (!isSimulationModeActive()) {
@@ -5004,8 +5007,7 @@
               });
           }
     
-          // Cache loaded assets in memory.
-          const assetCache = {};
+          const assetCache = new Map();
 
           function resolveAssetUrl(url) {
             if (/^(?:[a-z]+:)?\/\//i.test(url)) {
@@ -5018,40 +5020,20 @@
             return new URL(assetUrl, window.location.href).toString();
           }
     
-          // Load an asset and cache the result.
-          // Supports JSON, blob, and text payloads.
           function fetchAsset(url, type = "json") {
             const assetUrl = resolveAssetUrl(url);
-            if (assetCache[assetUrl]) {
-              return Promise.resolve(assetCache[assetUrl]);
-            }
-            let promise;
-            if (type === "json") {
-              promise = fetch(assetUrl).then((response) => {
-                if (!response.ok) {
-                  throw new Error(`Failed to load ${assetUrl}`);
-                }
-                return response.json();
-              });
-            } else if (type === "blob") {
-              promise = fetch(assetUrl).then((response) => {
-                if (!response.ok) {
-                  throw new Error(`Failed to load ${assetUrl}`);
-                }
-                return response.blob();
-              });
-            } else if (type === "text") {
-              promise = fetch(assetUrl).then((response) => {
-                if (!response.ok) {
-                  throw new Error(`Failed to load ${assetUrl}`);
-                }
-                return response.text();
-              });
-            }
-            return promise.then((data) => {
-              assetCache[assetUrl] = data;
-              return data;
+            if (!["json", "blob", "text"].includes(type)) throw new Error(`Unsupported asset type: ${type}`);
+            const key = JSON.stringify([assetUrl, type]);
+            if (assetCache.has(key)) return assetCache.get(key);
+            const promise = fetch(assetUrl).then((response) => {
+              if (!response.ok) throw new Error(`Failed to load ${assetUrl}`);
+              return response[type]();
+            }).catch((error) => {
+              assetCache.delete(key);
+              throw error;
             });
+            assetCache.set(key, promise);
+            return promise;
           }
     
           const mapLayers = window.createHerdLinkMapLayers({
@@ -6763,11 +6745,12 @@
            * eigenvector centrality from available movements between regions.
            */
           function computeHotSpotMetrics(allNodes, enabledLinks) {
-            const ids = new Set(allNodes.map((node) => node.id));
+            const count = allNodes.length;
+            const positions = new Map(allNodes.map((node, index) => [node.id, index]));
             enabledLinks = enabledLinks.filter((link) => !link.disabled &&
               Number.isFinite(link.weight) && link.weight > 0 &&
               getNodeId(link.source) !== getNodeId(link.target) &&
-              ids.has(getNodeId(link.source)) && ids.has(getNodeId(link.target)));
+              positions.has(getNodeId(link.source)) && positions.has(getNodeId(link.target)));
             const metrics = {};
             allNodes.forEach((n) => {
               metrics[n.id] = {
@@ -6882,50 +6865,20 @@
             const integerCosts = rationalWeights.map(([numerator, denominator]) => common / numerator * denominator);
 
             // Build adjacency for the available directed routes.
-            const adj = {};
-            allNodes.forEach((n) => {
-              adj[n.id] = [];
-            });
+            const adj = Array.from({ length: count }, () => []);
             enabledLinks.forEach((e, index) => {
-              const s = typeof e.source === "object" ? e.source.id : e.source;
-              const t = typeof e.target === "object" ? e.target.id : e.target;
+              const s = positions.get(getNodeId(e.source));
+              const t = positions.get(getNodeId(e.target));
               adj[s].push({ target: t, cost: integerCosts[index] });
             });
     
-            /**
-             * Compute weighted betweenness centrality using Brandes' algorithm.
-             * Uses a min-heap to efficiently perform Dijkstra's algorithm for each source.
-             *
-             * @param {Array} allNodes - Array of node objects (each must have an "id" property).
-             * @param {Object} adj - Adjacency list: keys are node IDs, values are arrays of objects {target, cost}.
-             */
-            function brandesBetweennessWeighted(allNodes, adj) {
-              // Initialize betweenness centrality for each node to zero.
-              allNodes.forEach((n) => {
-                metrics[n.id].betweenness = 0;
-              });
-    
-              // For each source node s:
-              allNodes.forEach((sNode) => {
-                const s = sNode.id;
-                // Stack to store the order in which vertices are visited.
-                let S = [];
-                // Predecessor list: P[w] will contain all nodes v that precede w in some shortest path from s.
-                let P = {};
-                // sigma[w]: number of shortest paths from s to w.
-                let sigma = {};
-                // dist[w]: distance from s to w.
-                let dist = {};
-                // delta[w]: dependency of s on w.
-                let delta = {};
-    
-                // Initialization: for all nodes v, set default values.
-                allNodes.forEach((n) => {
-                  P[n.id] = [];
-                  sigma[n.id] = 0;
-                  dist[n.id] = Infinity;
-                  delta[n.id] = 0;
-                });
+            function brandesBetweennessWeighted() {
+              for (let s = 0; s < count; s++) {
+                const S = [];
+                const P = Array.from({ length: count }, () => []);
+                const sigma = Array(count).fill(0);
+                const dist = Array(count).fill(Infinity);
+                const delta = Array(count).fill(0);
                 sigma[s] = 1;
                 dist[s] = 0n;
     
@@ -6964,19 +6917,16 @@
                     delta[v] += (sigma[v] / sigma[w]) * (1 + delta[w]);
                   });
                   if (w !== s) {
-                    metrics[w].betweenness += delta[w];
+                    metrics[allNodes[w].id].betweenness += delta[w];
                   }
                 }
-              });
+              }
             }
     
             // Run the weighted betweenness centrality calculation.
-            brandesBetweennessWeighted(allNodes, adj);
+            brandesBetweennessWeighted();
     
-            const count = allNodes.length;
-            if (!count) return metrics;
             const damping = 0.85;
-            const positions = new Map(allNodes.map((node, index) => [node.id, index]));
             const transitions = enabledLinks.map((link) => ({
               source: positions.get(getNodeId(link.source)),
               target: positions.get(getNodeId(link.target)),
@@ -7034,11 +6984,20 @@
             return `M${x1},${y1}A${radius},${radius} 0 0,1 ${x2},${y2}`;
           }
 
+          function renderNetworkLinkPositions(changedNodes) {
+            linkSelection.each(function (d) {
+              if (changedNodes && !changedNodes.has(d.source.id) && !changedNodes.has(d.target.id)) return;
+              const path = getNetworkLinkPath(d);
+              if (path === null) this.removeAttribute("d");
+              else this.setAttribute("d", path);
+            });
+          }
+
           function updateNetworkLinkBoundaries() {
             cancelAnimationFrame(linkBoundaryFrame);
             linkBoundaryFrame = null;
             if (!linkSelection || !svg.node().isConnected) return;
-            let changed = false;
+            const changedNodes = new Set();
             nodeEnter.each(function (d) {
               const circle = this.querySelector("circle.primary");
               let boundary = d.r;
@@ -7061,11 +7020,11 @@
                   boundary = Math.max(boundary, outer * scale);
                 }
               }
-              changed ||= d.linkBoundaryRadius !== boundary;
+              if (d.linkBoundaryRadius !== boundary) changedNodes.add(d.id);
               d.linkBoundaryRadius = boundary;
             });
-            if (changed) {
-              linkSelection.attr("d", getNetworkLinkPath);
+            if (changedNodes.size) {
+              renderNetworkLinkPositions(changedNodes);
               renderPooledFlowPositions();
               if (hoveredLink) updateAnnotationForLink(hoveredLink, annotationGroup);
             }
@@ -7098,7 +7057,8 @@
             hoveredNode = null;
             d3.select(this).select("circle.primary").attr("stroke", null).attr("stroke-width", null);
             updateNodeHoverLinks();
-            clearNetworkCallout();
+            if (selectedNodeData) updateAnnotationForNode(selectedNodeData, annotationGroup);
+            else clearNetworkCallout();
           }
 
           function getLinkBaseClass(d) {
@@ -7244,11 +7204,17 @@
             const scale = Math.hypot(matrix.a, matrix.b);
             const element = findNearestNetworkLink(x, y, 6 / scale);
             if (element) showNetworkLinkCallout(element, d3.select(element).datum());
-            else if (hoveredLink) clearHoveredLinkState();
+            else if (hoveredLink) {
+              clearHoveredLinkState();
+              if (selectedNodeData) updateAnnotationForNode(selectedNodeData, annotationGroup);
+            }
           }
 
           function handleNetworkLinkPointerLeave() {
-            if (hoveredLink) clearHoveredLinkState();
+            if (hoveredLink) {
+              clearHoveredLinkState();
+              if (selectedNodeData) updateAnnotationForNode(selectedNodeData, annotationGroup);
+            }
           }
 
           function restoreNetworkLinkCallout(id) {
@@ -7258,7 +7224,14 @@
           }
 
           function getPooledFlowSummary(date = window.currentDate, schedule = simulationNodeInterventions) {
-            return window.herdlinkPooledFlows.summarize(date, currentTimeSpan, schedule);
+            const provider = window.herdlinkPooledFlows;
+            const key = JSON.stringify([+date, currentTimeSpan, [...schedule].map(([time, changes]) => [time, [...changes]])]);
+            if (pooledFlowSummaryCache?.provider === provider && pooledFlowSummaryCache.key === key) {
+              return pooledFlowSummaryCache.summary;
+            }
+            const summary = provider.summarize(date, currentTimeSpan, schedule);
+            pooledFlowSummaryCache = { provider, key, summary };
+            return summary;
           }
 
           function getPooledPortRegionCount(channel) {
@@ -7415,7 +7388,18 @@
             const nodes = new Map(allNodes.map((node) => [node.id, node]));
             const layer = svg.select("g.pooled-flows");
             svg.selectAll("g.pooled-port").attr("transform", (d) => `translate(${getPooledPortPosition(d)})`);
-            layer.selectAll(".pooled-flow-halo, .pooled-flow-link, .pooled-flow-hit").attr("d", (d) => getPooledFlowPath(d, nodes.get(d.region)));
+            layer.selectAll(".pooled-flow-route").each(function (d) {
+              const node = nodes.get(d.region);
+              const x = node?.x, y = node?.y, radius = node?.linkBoundaryRadius ?? node?.r ?? 8;
+              const [portX, portY] = getPooledPortPosition(d.channel);
+              const previous = pooledFlowPositions.get(this);
+              if (previous && previous.x === x && previous.y === y && previous.radius === radius &&
+                  previous.portX === portX && previous.portY === portY && previous.width === w && previous.height === h &&
+                  previous.channel === d.channel) return;
+              const path = getPooledFlowPath(d, node);
+              if (!previous || previous.path !== path) d3.select(this).selectAll("path").attr("d", path);
+              pooledFlowPositions.set(this, { x, y, radius, portX, portY, width: w, height: h, channel: d.channel, path });
+            });
             if (hoveredPooledFlow) renderPooledFlowCallout();
           }
 
@@ -7492,7 +7476,7 @@
 
                 return `translate(${d.x},${d.y})`;
               });
-              linkSelection.attr("d", getNetworkLinkPath);
+              renderNetworkLinkPositions();
               renderPooledFlowPositions();
               // Update text labels positions.
               labelSelection
@@ -7504,6 +7488,20 @@
                 updateAnnotationForNode(hoveredNode || selectedNodeData, annotationGroup);
               }
             }
+          }
+
+          function getNodeTradeVolumes(links) {
+            const volumes = new Map();
+            for (const link of links) {
+              const weight = +link.weight;
+              if (!weight) continue;
+              const source = getNodeId(link.source);
+              let volume = volumes.get(source);
+              if (!volume) volumes.set(source, volume = { selfVolume: 0, otherVolume: 0 });
+              if (source === getNodeId(link.target)) volume.selfVolume += weight;
+              else volume.otherVolume += weight;
+            }
+            return volumes;
           }
 
           // Create Network
@@ -7541,7 +7539,7 @@
             linkGroup = svg.append("g").attr("class", "links");
             linkSelection = linkGroup
               .selectAll("path")
-              .data(allLinks)
+              .data(nonZeroLinks.filter((d) => getNodeId(d.source) !== getNodeId(d.target)))
               .enter()
               .append("path")
               .attr("class", "link")
@@ -7655,31 +7653,9 @@
             labelSelection.raise();
     
             // Append trade donut visualization for each node.
+            const tradeVolumes = getNodeTradeVolumes(allLinks);
             nodeEnter.each(function (d) {
-              // Compute self trade volume: sum of weights for links where source and target are the same.
-              const selfVolume = d3.sum(
-                allLinks.filter((link) => {
-                  let src =
-                    typeof link.source === "object" ? link.source.id : link.source;
-                  let tgt =
-                    typeof link.target === "object" ? link.target.id : link.target;
-                  return src === d.id && tgt === d.id;
-                }),
-                (link) => link.weight,
-              );
-    
-              // Compute external trade volume: sum of weights for links where source is d.id and target is not d.id.
-              const otherVolume = d3.sum(
-                allLinks.filter((link) => {
-                  let src =
-                    typeof link.source === "object" ? link.source.id : link.source;
-                  let tgt =
-                    typeof link.target === "object" ? link.target.id : link.target;
-                  return src === d.id && tgt !== d.id;
-                }),
-                (link) => link.weight,
-              );
-    
+              const { selfVolume, otherVolume } = tradeVolumes.get(d.id) || { selfVolume: 0, otherVolume: 0 };
               const totalVolume = selfVolume + otherVolume;
     
               // Only add the donut if there's any trade volume.
@@ -11516,20 +11492,9 @@
             // DATA JOIN for links.
             const linksSelection = linkGroup
               .selectAll("path")
-              .data(allLinks, linkKey);
+              .data(nonZeroLinks.filter((d) => getNodeId(d.source) !== getNodeId(d.target)), linkKey);
     
-            // EXIT: Transition out old links.
-            linksSelection.exit().each(function (d) {
-              const totalLength = this.getTotalLength();
-              d3.select(this)
-                .attr("stroke-dasharray", totalLength + " " + totalLength)
-                .attr("stroke-dashoffset", 0)
-                .transition()
-                .duration(400)
-                .attr("stroke-dashoffset", totalLength)
-                .style("opacity", 0)
-                .remove();
-            });
+            linksSelection.exit().remove();
     
             // ENTER: Create new links.
             const linksEnter = linksSelection
@@ -11542,12 +11507,8 @@
               .attr("stroke-width", (d) =>
                 d.weight <= 0 ? 0 : Math.sqrt(d.weight),
               )
-              .each(function (d) {
-                const totalLength = this.getTotalLength();
-                d3.select(this)
-                  .attr("stroke-dasharray", totalLength + " " + totalLength)
-                  .attr("stroke-dashoffset", totalLength);
-              });
+              .attr("stroke-dasharray", "0 0")
+              .attr("stroke-dashoffset", 0);
     
             // MERGE and transition links.
             linkSelection = linksEnter.merge(linksSelection);
@@ -11668,31 +11629,9 @@
             });
     
             // Append trade donut visualization for each node.
+            const tradeVolumes = getNodeTradeVolumes(allLinks);
             nodesEnter.each(function (d) {
-              // Compute self trade volume: sum of weights for links where source and target are the same.
-              const selfVolume = d3.sum(
-                allLinks.filter((link) => {
-                  let src =
-                    typeof link.source === "object" ? link.source.id : link.source;
-                  let tgt =
-                    typeof link.target === "object" ? link.target.id : link.target;
-                  return src === d.id && tgt === d.id;
-                }),
-                (link) => link.weight,
-              );
-    
-              // Compute external trade volume: sum of weights for links where source is d.id and target is not d.id.
-              const otherVolume = d3.sum(
-                allLinks.filter((link) => {
-                  let src =
-                    typeof link.source === "object" ? link.source.id : link.source;
-                  let tgt =
-                    typeof link.target === "object" ? link.target.id : link.target;
-                  return src === d.id && tgt !== d.id;
-                }),
-                (link) => link.weight,
-              );
-    
+              const { selfVolume, otherVolume } = tradeVolumes.get(d.id) || { selfVolume: 0, otherVolume: 0 };
               const totalVolume = selfVolume + otherVolume;
     
               // Only add the donut if there's any trade volume.
@@ -12027,37 +11966,9 @@
               return;
             }
 
-            // For each node group (each node)
+            const tradeVolumes = getNodeTradeVolumes(enabledLinks);
             d3.selectAll(".nodeGroup").each(function (d) {
-              // Filter enabled links that involve this node.
-              const filteredLinks = enabledLinks.filter((link) => {
-                const src =
-                  typeof link.source === "object" ? link.source.id : link.source;
-                // For this donut chart, consider outgoing trades for external volume
-                // and self-loops for self trade.
-                return src === d.id;
-              });
-    
-              // Compute self trade volume: links where target is the same as the source.
-              const selfVolume = d3.sum(
-                filteredLinks.filter((link) => {
-                  const tgt =
-                    typeof link.target === "object" ? link.target.id : link.target;
-                  return tgt === d.id;
-                }),
-                (link) => link.weight,
-              );
-    
-              // Compute external trade volume: links where target is different.
-              const otherVolume = d3.sum(
-                filteredLinks.filter((link) => {
-                  const tgt =
-                    typeof link.target === "object" ? link.target.id : link.target;
-                  return tgt !== d.id;
-                }),
-                (link) => link.weight,
-              );
-    
+              const { selfVolume, otherVolume } = tradeVolumes.get(d.id) || { selfVolume: 0, otherVolume: 0 };
               const totalVolume = selfVolume + otherVolume;
     
               // Select (or create) the donut group inside the node group.
@@ -12466,7 +12377,7 @@
                 d.y0 = d.y = y + (target[1] - y) * t;
               }
               nodeEnter.attr("transform", (d) => `translate(${d.x},${d.y})`);
-              linkSelection.attr("d", getNetworkLinkPath);
+              renderNetworkLinkPositions();
               renderPooledFlowPositions();
               labelSelection
                 .attr("x", (d) => d.x)
@@ -12803,67 +12714,6 @@
               .text((d) => d.data.name);
           }
     
-          // Maximum Clique Computation with Reciprocal Edges
-          // Only consider an undirected edge between two nodes if both A->B and B->A exist.
-          function computeMaximumClique() {
-            let directedEdges = new Set();
-            // Record all directed edges.
-            allLinks.forEach((link) => {
-              const s =
-                typeof link.source === "object" ? link.source.id : link.source;
-              const t =
-                typeof link.target === "object" ? link.target.id : link.target;
-              directedEdges.add(s + "->" + t);
-            });
-            // Build the undirected graph using only reciprocal edges.
-            let adjList = {};
-            allNodes.forEach((n) => {
-              adjList[n.id] = new Set();
-            });
-            allLinks.forEach((link) => {
-              const s =
-                typeof link.source === "object" ? link.source.id : link.source;
-              const t =
-                typeof link.target === "object" ? link.target.id : link.target;
-              // Only add the edge if both directions exist.
-              if (
-                directedEdges.has(s + "->" + t) &&
-                directedEdges.has(t + "->" + s)
-              ) {
-                adjList[s].add(t);
-                adjList[t].add(s);
-              }
-            });
-    
-            let maxClique = [];
-    
-            function bronKerboschPivot(R, P, X) {
-              if (P.length === 0 && X.length === 0) {
-                if (R.length > maxClique.length) {
-                  maxClique = R;
-                }
-                return;
-              }
-              // Choose a pivot from P ∪ X.
-              let pivotCandidates = P.concat(X);
-              let pivot = pivotCandidates[0];
-              let pivotNeighbors = adjList[pivot.id];
-              // Only consider vertices in P that are not neighbors of the pivot.
-              let PwithoutNeighbors = P.filter((v) => !pivotNeighbors.has(v.id));
-              for (let v of PwithoutNeighbors) {
-                let newR = R.concat([v]);
-                let newP = P.filter((u) => adjList[v.id].has(u.id));
-                let newX = X.filter((u) => adjList[v.id].has(u.id));
-                bronKerboschPivot(newR, newP, newX);
-                P = P.filter((u) => u.id !== v.id);
-                X.push(v);
-              }
-            }
-    
-            bronKerboschPivot([], allNodes.slice(), []);
-            return maxClique;
-          }
-    
           function getStronglyConnectedComponents(nodes, edges) {
             // 1) Build adjacency list from enabled edges
             const adj = buildAdjList(nodes, edges);
@@ -12926,10 +12776,6 @@
             return sccList;
           }
     
-          function computeSCCs() {
-            newSCCs = getStronglyConnectedComponents(activeNodes, enabledLinks);
-          }
-
           function computePerronPair(matrix, maxIter, tol) {
             const n = matrix.length;
             const scale = Math.max(...matrix.map((row) => row.reduce((sum, value) => sum + value, 0)));
@@ -13100,6 +12946,34 @@
             return communityFlowGeometry;
           }
 
+          function getCommunityFlowPaths(data, geometry, radius) {
+            if (geometry.pathRadius !== radius) {
+              geometry.pathRadius = radius;
+              geometry.paths = new Map();
+            }
+            const point = (angle, r) => [Math.sin(angle) * r, -Math.cos(angle) * r];
+            const line = d3.lineRadial().curve(d3.curveBundle.beta(0.82)).angle((node) => node.x).radius((node) => node.y * radius);
+            const halfStep = Math.PI / (data.nodes.length + data.groups.length);
+            const portAngle = Math.min(0.016, halfStep / 4);
+            for (const flow of data.flows) {
+              if (geometry.paths.has(flow.key)) continue;
+              const source = geometry.nodesById.get(flow.source), target = geometry.nodesById.get(flow.target);
+              let path;
+              if (source === target) {
+                const start = point(source.x + portAngle, radius), end = point(source.x - portAngle, radius);
+                const c1 = point(source.x + 0.065, radius - 18), c2 = point(source.x - 0.065, radius - 18);
+                path = `M${start}C${c1} ${c2} ${end}`;
+              } else {
+                const route = source.path(target).map((node) => ({ x: node.x, y: node.y }));
+                route[0].x += portAngle;
+                route[route.length - 1].x -= portAngle;
+                path = line(route);
+              }
+              geometry.paths.set(flow.key, path);
+            }
+            return geometry.paths;
+          }
+
           function renderCommunityFlowPanel() {
             const container = d3.select("#tradeClusters");
             const element = container.node();
@@ -13180,10 +13054,9 @@
               .attr("class", "community-flow-community-label").attr("text-anchor", "middle").attr("dy", "0.32em")
               .attr("transform", (group) => `translate(${point(group.x, radius + 35)})`)
               .style("fill", (group) => getTradeCommunityColor(group.data.key)).text((group) => getTradeCommunityLabel(group.data.key));
-            const line = d3.lineRadial().curve(d3.curveBundle.beta(0.82)).angle((node) => node.x).radius((node) => node.y * radius);
+            const flowPaths = getCommunityFlowPaths(data, geometry, radius);
             const maxWeight = d3.max(data.flows, (flow) => flow.weight) || 1;
             const flowWidth = d3.scaleSqrt().domain([0, maxWeight]).range([0.35, 2.4]);
-            const portAngle = Math.min(0.016, halfStep / 4);
             const paths = plot.selectAll("g.community-flow-links").data([null]).join("g").attr("class", "community-flow-links")
               .selectAll("path.community-flow-link").data(data.flows, (flow) => flow.key).join(
                 (enter) => enter.append("path").attr("class", "community-flow-link")
@@ -13192,18 +13065,7 @@
                 (exit) => exitFlow(exit),
               )
               .classed("is-exiting", false).attr("data-source", (flow) => flow.source).attr("data-target", (flow) => flow.target)
-              .attr("d", (flow) => {
-                const source = geometry.nodesById.get(flow.source), target = geometry.nodesById.get(flow.target);
-                if (source === target) {
-                  const start = point(source.x + portAngle, radius), end = point(source.x - portAngle, radius);
-                  const c1 = point(source.x + 0.065, radius - 18), c2 = point(source.x - 0.065, radius - 18);
-                  return `M${start}C${c1} ${c2} ${end}`;
-                }
-                const route = source.path(target).map((node) => ({ x: node.x, y: node.y }));
-                route[0].x += portAngle;
-                route[route.length - 1].x -= portAngle;
-                return line(route);
-              })
+              .attr("d", (flow) => flowPaths.get(flow.key))
               .attr("stroke", (flow) => getTradeCommunityColor(geometry.nodesById.get(flow.source).data.key))
               .attr("marker-end", (flow) => `url(#${plot.attr("id")}-arrow-${geometry.nodesById.get(flow.source).data.key})`);
             animateFlow(paths)
@@ -13676,407 +13538,8 @@
               return; // Do not update if a node is selected.
             }
             renderTradeCommunityStructurePanel();
-            return;
-            const container = d3.select("#tradeClusters");
-    
-            let svg = container.select("svg");
-            let g;
-            const margin = { top: 60, right: 0, bottom: 10, left: 0 };
-            const containerNode = container.node();
-            const width = containerNode.clientWidth - margin.left - margin.right;
-            const height = containerNode.clientHeight - margin.top - margin.bottom;
-    
-            if (svg.empty()) {
-              svg = container.append("svg");
-              g = svg.append("g");
-            } else {
-              g = svg.select("g");
-              svg.selectAll("*").remove();
-              g = svg.append("g");
-            }
-    
-            svg
-              .attr("width", width + margin.left + margin.right)
-              .attr("height", height + margin.top + margin.bottom);
-    
-            g.attr("transform", `translate(${margin.left},${margin.top})`);
-    
-            const nodeMap = new Map();
-            allNodes.forEach((n) => {
-              nodeMap.set(n.id, {
-                id: n.id,
-                tradeTotal: n.tradeTotal,
-                community: n.community,
-              });
-            });
-    
-            const simNodes = [];
-            const simLinks = [];
-    
-            function addLink(sourceId, targetId) {
-              simLinks.push({ source: sourceId, target: targetId });
-            }
-    
-            const addedNodeIds = new Set();
-    
-            newSCCs.forEach((component, sccIndex) => {
-              const n = component.length;
-              if (n < 1) return;
-    
-              // For each node in this SCC
-              component.forEach((nodeId) => {
-                if (!addedNodeIds.has(nodeId) && nodeMap.has(nodeId)) {
-                  const nodeObj = nodeMap.get(nodeId);
-                  // Record which SCC this node belongs to
-                  nodeObj.sccIndex = sccIndex;
-                  // Add node to simNodes
-                  simNodes.push(nodeObj);
-                  addedNodeIds.add(nodeId);
-                }
-              });
-    
-              // Create "ring" links among this SCC’s nodes
-              for (let i = 0; i < n; i++) {
-                const sourceId = component[i];
-                const targetId = component[(i + 1) % n];
-                addLink(sourceId, targetId);
-              }
-            });
-    
-            // Number of SCC clusters
-            const nClusters = newSCCs.length;
-    
-            // Use mini force simulation to compute centers for each cluster
-            const clusterCenters = computeCentersViaMiniForceSim(
-              nClusters,
-              width,
-              height,
-            );
-    
-            // Build the main force simulation
-            const simulation = d3
-              .forceSimulation(simNodes)
-              .force(
-                "link",
-                d3
-                  .forceLink(simLinks)
-                  .id((d) => d.id)
-                  .distance(10)
-                  .strength(2),
-              )
-              .force("charge", d3.forceManyBody().strength(5))
-              .force("collide", d3.forceCollide(5))
-              .force(
-                "x",
-                d3.forceX((d) => clusterCenters[d.sccIndex].x).strength(0.3),
-              )
-              .force(
-                "y",
-                d3.forceY((d) => clusterCenters[d.sccIndex].y).strength(0.3),
-              )
-              .on("tick", ticked);
-    
-            const linkSelection = g
-              .selectAll(".ringLink")
-              .data(simLinks)
-              .enter()
-              .append("line")
-              .attr("class", "ringLink")
-              .attr("stroke", theme.muted)
-              .attr("stroke-opacity", 0.6)
-              .attr("stroke-width", 1.5);
-    
-            const nodeSelection = g
-              .selectAll(".ringNode")
-              .data(simNodes)
-              .enter()
-              .append("circle")
-              .attr("class", "ringNode")
-              .attr("r", (d) => nodeSize(d.tradeTotal))
-              .attr("fill", (d) => nodeColor(d.community))
-              .attr("stroke", theme.muted)
-              .attr("stroke-width", 1)
-              .call(
-                d3
-                  .drag()
-                  .on("start", dragStarted)
-                  .on("drag", dragged)
-                  .on("end", dragEnded),
-              );
-    
-            // Create a group for each node label
-            const labelGroup = g
-              .selectAll(".ringNodeLabelGroup")
-              .data(simNodes)
-              .enter()
-              .append("g")
-              .attr("class", "ringNodeLabelGroup")
-              .style("display", "none"); // Hide by default
-    
-            // Append the background rectangle inside the group
-            labelGroup
-              .append("rect")
-              .attr("class", "ringNodeLabelBg")
-              .attr("rx", 4)
-              .attr("ry", 4)
-              .attr("fill", theme.elevated);
-    
-            // Append the text element inside the same group
-            labelGroup
-              .append("text")
-              .attr("class", "ringNodeLabel")
-              .attr("text-anchor", "middle")
-              .attr("dy", "-0.5em")
-              .style("font-size", "8px")
-              .style("fill", theme.text)
-              .style("font-weight", "bold")
-              .text((d) => d.id)
-              .each(function () {
-                const bbox = this.getBBox();
-                d3.select(this.parentNode)
-                  .select("rect")
-                  .attr("x", bbox.x - 2)
-                  .attr("y", bbox.y - 2)
-                  .attr("width", bbox.width + 4)
-                  .attr("height", bbox.height + 4);
-              });
-    
-            nodeSelection
-              .on("click", function (event, d) {
-                const selectedNode = allNodes.find((n) => n.id === d.id);
-                // Call the debounced function with both event and node.
-                debouncedOnClickNode(event, selectedNode);
-              })
-              .on("mouseover", function (event, d) {
-                labelGroup.filter((ld) => ld.id === d.id).style("display", "block");
-              })
-              .on("mouseout", function (event, d) {
-                labelGroup.filter((ld) => ld.id === d.id).style("display", "none");
-              });
-    
-            // Convex hull setup
-            const hullSelection = g
-              .selectAll(".clusterHull")
-              .data(d3.range(nClusters))
-              .enter()
-              .append("path")
-              .attr("class", "clusterHull")
-              .style("fill", "var(--color-chart-amber)")
-              .style("fill-opacity", 0.15)
-              .style("stroke", "var(--color-chart-amber)")
-              .style("stroke-width", 2)
-              .style("stroke-opacity", 0.6);
-    
-            // Create a group for each cluster label
-            const clusterLabelGroup = g
-              .selectAll(".clusterLabelGroup")
-              .data(d3.range(nClusters))
-              .enter()
-              .append("g")
-              .attr("class", "clusterLabelGroup");
-    
-            // Append the text inside the group
-            clusterLabelGroup
-              .append("text")
-              .attr("class", "clusterLabel")
-              .attr("text-anchor", "middle")
-              .style("font-weight", "bold")
-              .style("font-size", "14px")
-              .style("fill", theme.text)
-              .text((d) => `Cluster #${d + 1}`);
-    
-            // Append a background rectangle behind the text inside the group.
-            clusterLabelGroup.each(function () {
-              const group = d3.select(this);
-              const textEl = group.select("text");
-              const bbox = textEl.node().getBBox();
-              group
-                .insert("rect", "text")
-                .attr("x", bbox.x - 2)
-                .attr("y", bbox.y - 2)
-                .attr("width", bbox.width + 4)
-                .attr("height", bbox.height + 4)
-                .attr("rx", 4)
-                .attr("ry", 4)
-                .attr("fill", theme.elevated);
-            });
-    
-            clusterLabelGroup
-              .on("mouseover", function (event, clusterIndex) {
-                // Compute the cluster’s center using the same logic as in ticked()
-                const clusterNodes = simNodes.filter(
-                  (n) => n.sccIndex === clusterIndex,
-                );
-                const cx = clusterNodes.length
-                  ? d3.mean(clusterNodes, (d) => d.x)
-                  : 0;
-                const cy = clusterNodes.length
-                  ? d3.mean(clusterNodes, (d) => d.y) - 25
-                  : 0;
-    
-                // Get offsets for the annotation (assuming getAnnotationOffset exists)
-                const offsets = getAnnotationOffsetMidPoint(
-                  cx,
-                  cy,
-                  width,
-                  height,
-                  (amount = 15),
-                );
-    
-                const annotationData = [
-                  {
-                    note: {
-                      label: clusterNodes.map((n) => n.id).join(", "),
-                      wrap: 140,
-                      bgPadding: { top: 4, left: 4, right: 4, bottom: 4 },
-                    },
-                    x: cx,
-                    y: cy,
-                    dx: offsets.dx,
-                    dy: offsets.dy,
-                    type: d3.annotationElbow,
-                  },
-                ];
-    
-                const makeAnnotations = d3.annotation().annotations(annotationData);
-    
-                // Append the annotation group with a custom class for styling
-                g.append("g")
-                  .attr("class", "cluster-annotation")
-                  .call(makeAnnotations);
-    
-                // Style the annotation note background via the custom class
-                g.select("g.cluster-annotation")
-                  .selectAll("rect.annotation-note-bg")
-                  .attr("fill", theme.elevated)
-                  .attr("fill-opacity", 0.8)
-                  .attr("rx", 4)
-                  .attr("ry", 4);
-    
-                g.select("g.cluster-annotation")
-                  .selectAll(
-                    "text.annotation-note-title, text.annotation-note-label",
-                  )
-                  .attr("fill", theme.text);
-              })
-              .on("mouseout", function () {
-                g.selectAll(".cluster-annotation").remove();
-              });
-    
-            function ticked() {
-              linkSelection
-                .attr("x1", (d) => d.source.x)
-                .attr("y1", (d) => d.source.y)
-                .attr("x2", (d) => d.target.x)
-                .attr("y2", (d) => d.target.y);
-    
-              nodeSelection
-                .attr("cx", (d) => {
-                  d.x = Math.max(8 + 5, Math.min(width - 8 - 5, d.x));
-                  return d.x;
-                })
-                .attr("cy", (d) => {
-                  d.y = Math.max(8, Math.min(height - 8 - 20, d.y));
-                  return d.y;
-                });
-    
-              labelGroup.attr("transform", (d) => `translate(${d.x},${d.y - 8})`);
-    
-              // Update convex hulls with padding
-              const SCALE_FACTOR = 1.7;
-              hullSelection.attr("d", function (clusterIndex) {
-                const clusterNodes = simNodes.filter(
-                  (n) => n.sccIndex === clusterIndex,
-                );
-                if (clusterNodes.length === 0) return null;
-    
-                if (clusterNodes.length < 3) {
-                  // For clusters with 1 or 2 nodes, compute a randomly perturbed polygon that roughly looks like an oval.
-                  const minX = d3.min(clusterNodes, (d) => d.x);
-                  const maxX = d3.max(clusterNodes, (d) => d.x);
-                  const minY = d3.min(clusterNodes, (d) => d.y);
-                  const maxY = d3.max(clusterNodes, (d) => d.y);
-                  const cx = (minX + maxX) / 2;
-                  const cy = (minY + maxY) / 2;
-                  // Define radii with extra padding.
-                  const rx = (maxX - minX) / 2 + 15;
-                  const ry = (maxY - minY) / 2 + 16;
-                  // Choose a fixed number of points for the polygon.
-                  const numPoints = 8;
-                  let points = [];
-                  for (let i = 0; i < numPoints; i++) {
-                    const angle = (2 * Math.PI * i) / numPoints;
-                    // Generate a random factor between 0.9 and 1.1
-                    const factor = 1 + (Math.random() - 0.5) * 0.2;
-                    const xPoint = cx + rx * factor * Math.cos(angle);
-                    const yPoint = cy + ry * factor * Math.sin(angle);
-                    points.push([xPoint, yPoint]);
-                  }
-                  return "M" + points.map((p) => p.join(",")).join("L") + "Z";
-                } else {
-                  // For clusters with 3 or more nodes, compute the convex hull and expand it.
-                  const points = clusterNodes.map((n) => [n.x, n.y]);
-                  let hull = d3.polygonHull(points);
-                  if (!hull) return null;
-                  const cx = d3.mean(hull, (p) => p[0]);
-                  const cy = d3.mean(hull, (p) => p[1]);
-                  hull = hull.map((pt) => {
-                    const dx = pt[0] - cx;
-                    const dy = pt[1] - cy;
-                    return [cx + dx * SCALE_FACTOR, cy + dy * SCALE_FACTOR];
-                  });
-                  return "M" + hull.join("L") + "Z";
-                }
-              });
-    
-              hullSelection.lower();
-    
-              clusterLabelGroup.attr("transform", (clusterIndex) => {
-                const clusterNodes = simNodes.filter(
-                  (n) => n.sccIndex === clusterIndex,
-                );
-                const cx = clusterNodes.length
-                  ? d3.mean(clusterNodes, (d) => d.x)
-                  : 0;
-                const cy = clusterNodes.length
-                  ? d3.mean(clusterNodes, (d) => d.y) - 25
-                  : 0;
-                return `translate(${cx},${cy})`;
-              });
-            }
-    
-            function dragStarted(event, d) {
-              if (!event.active) simulation.alphaTarget(0.3).restart();
-              d.fx = d.x;
-              d.fy = d.y;
-            }
-            function dragged(event, d) {
-              d.fx = event.x;
-              d.fy = event.y;
-            }
-            function dragEnded(event, d) {
-              if (!event.active) simulation.alphaTarget(0);
-              d.fx = null;
-              d.fy = null;
-            }
           }
-    
-          /**
-           * Mini force simulation for cluster centers.
-           * Returns an array of { x, y } for each cluster.
-           */
-          function computeCentersViaMiniForceSim(nClusters, width, height) {
-            const centerNodes = d3.range(nClusters).map((i) => ({ id: i }));
-            const centerSim = d3
-              .forceSimulation(centerNodes)
-              .force("charge", d3.forceManyBody().strength(200))
-              .force("collide", d3.forceCollide(Math.max(40, 50 - 2 * nClusters)))
-              .force("center", d3.forceCenter(width / 2, height / 2))
-              .stop();
-            for (let i = 0; i < 50; i++) centerSim.tick();
-            return centerNodes.map((d) => ({ x: d.x, y: d.y }));
-          }
-    
+
           function updateInOutArbos() {
             if (!selectedNodeData) {
               return; // Do not update if no node is selected.
@@ -14488,7 +13951,6 @@
     
                     if (!isSimulationModeActive()) updateNetworkStats();
     
-                    computeSCCs();
                     if (!isSimulationModeActive()) updateSCCs();
     
                     updateTemporalNetwork();
@@ -14635,7 +14097,6 @@
                 updateTemporalNetwork();
                 updateNetwork((instant = true));
                 updateDonutCharts();
-                computeSCCs();
                 updateSCCs();
     
                 updateGlobalStatsChart(window.currentSelectedStat);

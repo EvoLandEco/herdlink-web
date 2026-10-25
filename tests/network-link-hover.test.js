@@ -335,3 +335,26 @@ test("regional emphasis follows refreshed data and yields to node focus", () => 
   assert.equal(link.attrs["data-node-flow"], null);
   assert.equal(app.getLinkBaseClass(link.datum), "linkSelectIn");
 });
+
+test("ending a node or route hover restores the focused region card without waiting for a layout tick", () => {
+  const element = route("route", "M0,0A10,10 0 0,1 20,0");
+  const { context: app, cards } = runtime([element]);
+  const selected = { id: "CR01" };
+  app.selectedNodeData = selected;
+  app.hoveredNode = { id: "CR02" };
+  app.handleNetworkNodeLeave.call({ attrs: {} });
+  assert.equal(app.hoveredNode, null);
+  assert.equal(cards.at(-1), selected);
+
+  app.showNetworkLinkCallout(element, element.datum);
+  assert.equal(cards.at(-1), element.datum);
+  app.handleNetworkLinkPointerLeave();
+  assert.equal(app.hoveredLink, null);
+  assert.equal(cards.at(-1), selected);
+
+  app.showNetworkLinkCallout(element, element.datum);
+  app.handleNetworkLinkPointerMove({ target: { closest: () => null }, point: [200, 200] });
+  assert.equal(app.hoveredLink, null);
+  assert.equal(cards.at(-1), selected);
+  assert.equal(app.selectedNodeData, selected);
+});

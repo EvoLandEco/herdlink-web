@@ -19,7 +19,7 @@ function modelRows(settings, regions) {
     ["Population", populationLabel(settings)],
     ["Population source", settings.population.reference.label || settings.population.reference.id],
     ["Initial infectious", settings.initializationConvention === "absolute-counts"
-      ? `${numberFormatter.format(Object.values(settings.initialStates).reduce((sum, state) => sum + state.I, 0))} units`
+      ? `${numberFormatter.format(Object.values(settings.initialStates).reduce((sum, state) => sum + state.I, 0))} ${settings.population.kind === "synthetic" ? "units" : "animals"}`
       : `${settings.initialPct}% of the seed region`],
     ["Contact / movement", `${settings.beta} / ${settings.movementBeta}`],
     ["Recovery", `${settings.gamma} per day`],

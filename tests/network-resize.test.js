@@ -14,7 +14,11 @@ function extractFunction(name) {
 
 function selection(data = []) {
   return {
-    elements: data.map((datum) => ({ datum, attrs: {} })),
+    elements: data.map((datum) => ({
+      datum, attrs: {},
+      setAttribute(name, value) { this.attrs[name] = value; },
+      removeAttribute(name) { delete this.attrs[name]; },
+    })),
     interruptions: [], transitions: new Map(), transitionCalls: [],
     attr(name, value) {
       this.elements.forEach((element) => {
@@ -126,7 +130,7 @@ function runtime(mode = "map") {
     },
   });
   vm.runInContext([
-    "getNetworkLinkPath", "getNetworkLinkArc", "renderGraphPositions", "updateMapPositionsWithTransition",
+    "getNetworkLinkPath", "getNetworkLinkArc", "renderNetworkLinkPositions", "renderGraphPositions", "updateMapPositionsWithTransition",
     "updateMapLayout", "resizeNetworkPanel",
   ].map(extractFunction).join("\n"), context);
   return {

@@ -1,6 +1,6 @@
 <h1><img src="public/assets/herdlink-logo.svg" alt="HerdLink — Livestock Trade Networks" width="560"></h1>
 
-![Version](https://img.shields.io/badge/version-v1.0.1-2f6fed)
+![Version](https://img.shields.io/badge/version-v1.1.0-2f6fed)
 ![Deployment](https://img.shields.io/badge/deployment-GitHub%20Pages-121013?logo=github)
 ![Website](https://img.shields.io/website?url=https%3A%2F%2Fherdlink.nl&label=HerdLink.nl)
 ![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)
@@ -151,11 +151,31 @@ Preview the build locally:
 npm run preview
 ```
 
+## Performance checks
+
+The analytics and simulation profilers compare the working tree with a supplied
+Git revision and assert exact results across the bundled data. Each prints its
+measurement scope, machine details, and timings as JSON. Without a revision
+argument, they use `HEAD`.
+
+```bash
+node scripts/profile-runtime-analytics.js <revision>
+node --expose-gc scripts/profile-simulation.js <revision>
+node scripts/profile-network-rendering.js
+node scripts/profile-community-flow.js
+```
+
+The network rendering profiler measures route geometry, international summaries,
+and donut totals. Its SVG elements are plain JavaScript objects, so these timings
+exclude browser layout and painting. Measure frame rates in a production preview
+with the same viewport, CPU throttle, data resolution, and interactions for each run.
+Keep animations enabled when checking the breathing rings, moving links, and chart transitions.
+
 ## Deployment and caching
 
 Vite gives the app, classic runtime scripts, styles, datasets, geography, and
 logos filenames based on their contents. Each app build refers to its own asset
-URLs. The runtime loads its classic scripts in dependency order and resolves
+URLs. The runtime downloads its classic scripts together, executes them in dependency order, and resolves
 bundled data through `src/assetUrls.js`.
 
 SimpleKeyboard JavaScript and CSS use release 3.8.187. D3 uses 6.7.0.

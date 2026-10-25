@@ -190,6 +190,8 @@ export function ScenarioComparison({ data, enabled, slots, configurations, onCha
   const available = enabled && context.controlsValid && !context.disabled;
   const ready = evaluation.status === "ready";
   const results = evaluation.results;
+  const peaks = useMemo(() => results?.map((result) => result.series.global.reduce((value, point) =>
+    Number.isFinite(point[metric.key]) ? Math.max(value, point[metric.key]) : value, -Infinity)), [results, metric.key]);
   const dateIndex = Math.max(0, data.dates.indexOf(inspectedDate || data.date));
   const date = data.dates[dateIndex];
   const regions = useMemo(() => regionView === "top-3"
@@ -215,7 +217,7 @@ export function ScenarioComparison({ data, enabled, slots, configurations, onCha
           const saved = config.presetId.startsWith("saved-");
           const introduction = result && getComparisonIntroduction(result.settings.introductionDate, data.dates, context.provenance?.movementData);
           const current = result?.series.global[dateIndex]?.[metric.key];
-          const peak = result?.series.global.reduce((value, point) => Number.isFinite(point[metric.key]) ? Math.max(value, point[metric.key]) : value, -Infinity);
+          const peak = peaks?.[column];
           return <section key={column} className="scenario-comparison-column" aria-label={`Scenario ${column + 1}`}
             style={{ "--comparison-intervention": comparisonColors[column], "--scenario-color": comparisonColors[column] }}>
             <div className="scenario-comparison-column__heading">

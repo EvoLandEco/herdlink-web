@@ -10,17 +10,14 @@ const source = readFileSync(new URL('src/runtime/herdlink-runtime.js', root), 'u
 const context = vm.createContext({ Map, Set, communityFlowGeometry: null });
 vm.runInContext(readFileSync(new URL('src/runtime/jLouvain.js', root), 'utf8'), context);
 vm.runInContext(readFileSync(d3Path, 'utf8'), context);
-for (const name of ['getNodeId', 'computeModularity', 'buildCommunityFlowData', 'getCommunityFlowGeometry']) {
+for (const name of ['getNodeId', 'computeModularity', 'buildCommunityFlowData', 'getCommunityFlowGeometry', 'getCommunityFlowPaths']) {
   const match = source.match(new RegExp(`^([ ]*)function ${name}\\([^]*?^\\1}`, 'm'));
   assert.ok(match, name);
   vm.runInContext(match[0], context);
 }
-const renderer = source.match(/^([ ]*)function renderCommunityFlowPanel\([^]*?^\1}/m)[0];
-const pathCallback = renderer.match(/\.attr\("d", \(flow\) => \{([^]*?)\n\s+\}\)\n\s+\.attr\("stroke"/)[1];
-const pathSetup = ['const point =', 'const line =', 'const halfStep =', 'const portAngle ='].map((prefix) =>
-  renderer.split('\n').find((line) => line.trim().startsWith(prefix))).join('\n');
-vm.runInContext(`function makeFlowPaths(data, geometry, radius) { ${pathSetup}
-  return data.flows.map((flow) => { ${pathCallback} });
+vm.runInContext(`function makeFlowPaths(data, geometry, radius) {
+  const paths = getCommunityFlowPaths(data, geometry, radius);
+  return data.flows.map((flow) => paths.get(flow.key));
 }`, context);
 const ids = Array.from({ length: 40 }, (_, i) => `CR${String(i + 1).padStart(2, '0')}`);
 const summarize = (values) => {

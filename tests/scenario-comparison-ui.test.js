@@ -75,6 +75,11 @@ test("sidebar details show shared settings, actual target counts and each saved 
   assert.equal(savedRows.find(([label]) => label === "Introduction")[1], "7 Jan 2020");
   assert.equal(savedRows.find(([label]) => label === "Initial infectious")[1], "30 units");
   assert.equal(savedRows.some(([label]) => label === "Progression" || label === "Waning"), false);
+  props.evaluation.results[2].settings.population = { ...settings.population, kind: "fixed-animal-inventory",
+    reference: { ...settings.population.reference, countUnit: "animal" } };
+  nodes = render();
+  assert.equal(nodes.find((node) => node.type === "info" && node.props.label === "Scenario 3 settings")
+    .props.rows.find(([label]) => label === "Initial infectious")[1], "30 animals");
   props.evaluation = { status: "loading", completed: 1 };
   nodes = render();
   assert.equal(nodes.filter((node) => node.props.className === "comparison-details__scenario-name").filter((node) => text(node).includes("Calculating…")).length, 3);

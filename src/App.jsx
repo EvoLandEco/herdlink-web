@@ -1039,15 +1039,7 @@ export default function App() {
 
     Promise.all([
       loadPooledFlows(),
-      runtimeScripts.reduce((chain, script) => {
-        return chain.then(() => {
-          if (cancelled) {
-            return undefined;
-          }
-
-          return loadRuntimeScript(script);
-        });
-      }, Promise.resolve()),
+      Promise.all(runtimeScripts.map(loadRuntimeScript)),
     ])
       .then(() => {
         if (!cancelled) return loadRuntimeScript({ src: herdLinkRuntimeUrl });

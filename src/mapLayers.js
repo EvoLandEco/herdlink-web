@@ -78,6 +78,8 @@ export function createMapLayers({ svg, theme, fetchAsset, refreshRegions }) {
   const opacity = document.getElementById("mapLayerOpacity");
   const panel = document.getElementById("col2");
   const imageCache = new Map();
+  const capabilityCache = new Map();
+  const densityScales = new Map();
   let context = null;
   let census = null;
   let year = null;
@@ -142,7 +144,12 @@ export function createMapLayers({ svg, theme, fetchAsset, refreshRegions }) {
   async function loadBackground(selected, projection, width, height) {
     if (selected === "plain") return [];
     const source = backgrounds[selected];
-    const capabilities = readWMTS(await fetchAsset(source.url, "text"), source.layer);
+    if (!capabilityCache.has(selected)) {
+      const request = fetchAsset(source.url, "text").then((xml) => readWMTS(xml, source.layer));
+      capabilityCache.set(selected, request);
+      request.catch(() => capabilityCache.delete(selected));
+    }
+    const capabilities = await capabilityCache.get(selected);
     const bottomLeft = projection.invert([0, height]);
     const topRight = projection.invert([width, 0]);
     const tiles = wmtsTiles(capabilities.matrices, [...bottomLeft, ...topRight], 1 / projection.scale());
@@ -172,9 +179,12 @@ export function createMapLayers({ svg, theme, fetchAsset, refreshRegions }) {
   }
 
   function densityScale() {
-    const values = Object.entries(census?.years || {}).flatMap(([dataYear, regions]) =>
-      Object.keys(regions).map((code) => censusValue(census, dataYear, code, fill.value)).filter((value) => value !== null));
-    return d3.scaleSequential(d3.interpolateRgb("#e1f0dc", "#287449")).domain([0, d3.max(values) || 1]);
+    if (!densityScales.has(fill.value)) {
+      const values = Object.entries(census?.years || {}).flatMap(([dataYear, regions]) =>
+        Object.keys(regions).map((code) => censusValue(census, dataYear, code, fill.value)).filter((value) => value !== null));
+      densityScales.set(fill.value, d3.scaleSequential(d3.interpolateRgb("#e1f0dc", "#287449")).domain([0, d3.max(values) || 1]));
+    }
+    return densityScales.get(fill.value);
   }
 
   function drawLegend() {
@@ -218,7 +228,7 @@ export function createMapLayers({ svg, theme, fetchAsset, refreshRegions }) {
     const selectedBackground = background.value;
     const selectedLayers = overlays.filter((layer) => document.getElementById(layer.id).checked);
     const target = context;
-    target.group.selectAll(".map-context-content").remove();
+    target.group.selectAll(".map-context-content").attr("visibility", "hidden");
     svg.selectAll(".map-layer-legend").remove();
     status.textContent = "Loading map layers…";
     pending = (async () => {
@@ -228,16 +238,21 @@ export function createMapLayers({ svg, theme, fetchAsset, refreshRegions }) {
         fill.value === "metric" ? Promise.resolve(census) : fetchAsset("assets/data/pig-census.json"),
       ]);
       if (current !== generation || !target.group.node().isConnected) return;
+      if (census !== censusData) densityScales.clear();
       census = censusData;
-      const content = target.group.append("g").attr("class", "map-context-content").attr("opacity", Number(opacity.value) / 100);
-      content.append("g").attr("class", "map-background").selectAll("image").data(tiles).join("image")
+      const content = target.group.selectAll(".map-context-content").data([null]).join("g")
+        .attr("class", "map-context-content").attr("opacity", Number(opacity.value) / 100).attr("visibility", null);
+      content.selectAll(".map-background").data([null]).join("g").attr("class", "map-background")
+        .selectAll("image").data(tiles, (tile) => `${tile.matrix}/${tile.row}/${tile.col}`).join("image")
         .attr("x", (tile) => target.projection([tile.x, tile.y])[0])
         .attr("y", (tile) => target.projection([tile.x, tile.y])[1])
         .attr("width", (tile) => tile.width * target.projection.scale())
         .attr("height", (tile) => tile.height * target.projection.scale())
         .attr("preserveAspectRatio", "none").attr("href", (tile) => tile.href);
-      selectedLayers.forEach((layer, index) => drawOverlay(
-        content.append("g").attr("class", `map-context-${layer.file}`), layer, data[index], target.path));
+      content.selectAll(".map-context-overlay").data(selectedLayers, (layer) => layer.id).join(
+        (enter) => enter.append("g").attr("class", (layer) => `map-context-overlay map-context-${layer.file}`)
+          .each(function (layer) { drawOverlay(d3.select(this), layer, data[selectedLayers.indexOf(layer)], target.path); }),
+      );
       status.textContent = "";
       refreshRegions();
       drawLegend();

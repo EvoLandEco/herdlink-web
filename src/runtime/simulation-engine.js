@@ -187,8 +187,10 @@ function prepareInputs({ settings, data, dates, ids, movementGeography, nodeInte
   validateSimulationSchedules({ ids, dates: times, nodeInterventions, linkInterventions });
   const sortedSchedule = (schedule) => [...schedule].sort(([a], [b]) => a - b)
     .map(([time, changes]) => [time, [...changes].sort(([a], [b]) => a.localeCompare(b))]);
-  const identity = JSON.stringify(canonical({ settings, movementGeography, ids: [...ids].sort(), times, ledger: [...ledger],
-    nodeInterventions: sortedSchedule(nodeInterventions), linkInterventions: sortedSchedule(linkInterventions) }));
+  // Ledger fields and outer keys are already ordered for a stable input identity.
+  const identity = JSON.stringify({ ids, ledger: [...ledger],
+    linkInterventions: sortedSchedule(linkInterventions), movementGeography,
+    nodeInterventions: canonical(sortedSchedule(nodeInterventions)), settings: canonical(settings), times });
   return { settings, ids, times, ledger, start, end, movementGeography, nodeInterventions, linkInterventions, identity };
 }
 
@@ -224,19 +226,18 @@ function makeFrame(time, intervalEnd, nodeStates, linkStates, seedIds) {
 }
 
 function trajectoryFields(frames) {
-  const metricMax = Object.fromEntries(METRICS.map((metric) => {
-    let max = 0;
-    for (const frame of frames) for (const node of Object.values(frame.nodeMetrics)) {
-      if (node[metric] !== null) max = Math.max(max, node[metric]);
-    }
-    return [metric, max || 1];
-  }));
+  const metricMax = Object.fromEntries(METRICS.map((metric) => [metric, 0]));
+  for (const frame of frames) for (const node of Object.values(frame.nodeMetrics)) {
+    for (const metric of METRICS) if (node[metric] !== null) metricMax[metric] = Math.max(metricMax[metric], node[metric]);
+  }
+  for (const metric of METRICS) metricMax[metric] ||= 1;
   return { frames, frameByKey: Object.fromEntries(frames.map((frame) => [frame.key, frame])), metricMax };
 }
 
-export function simulateDaily(inputs) {
+export function simulateDaily(inputs, cache) {
   const prepared = prepareInputs(inputs);
   const { settings, ids, times, ledger, start, end, movementGeography, nodeInterventions, linkInterventions, identity } = prepared;
+  if (cache?.has(identity)) return cache.get(identity);
   const holdings = new Map(ids.map((id) => [id, settings.holdings[id]]));
   const seedIds = settings.initialStates ? ids.filter((id) => settings.initialStates[id].E + settings.initialStates[id].I > 0) :
     settings.holdings[settings.seedRegion] > 0 && settings.initialPct + settings.initialExposedPct > 0 ? [settings.seedRegion] : [];
@@ -246,9 +247,12 @@ export function simulateDaily(inputs) {
   const events = [...nodeInterventions].sort(([a], [b]) => a - b);
   const frames = [], boundaryIndices = [];
   let eventIndex = 0, initialFrame, previousRestrictions;
+  const nodeRestrictedRoutes = new Set();
+  let nodeRestrictionKey = "[]";
+  const introductionTime = Date.parse(settings.introductionDate);
   const exposed = settings.model === "SEIR" || settings.model === "SEIRS";
   for (const [frameIndex, time] of times.entries()) {
-    if (time === Date.parse(settings.introductionDate)) {
+    if (time === introductionTime) {
       for (const id of ids) {
         const state = current.get(id);
         if (settings.initialStates) Object.assign(state, settings.initialStates[id]);
@@ -262,19 +266,25 @@ export function simulateDaily(inputs) {
       }
       initialFrame = makeFrame(time, time, Object.fromEntries(ids.map((id) => [id, decorateState(current.get(id))])), new Map(), seedIds);
     }
+    const firstEvent = eventIndex;
     while (eventIndex < events.length && events[eventIndex][0] <= time) {
       for (const [id, changes] of events[eventIndex++][1]) {
         permissions.set(id, { ...permissions.get(id), ...changes });
       }
     }
-    const disabled = linkInterventions.get(time);
-    const disabledRoutes = new Set(disabled?.keys());
-    for (const source of ids) for (const target of ids) {
-      if (source !== target && (permissions.get(source)?.exports === false || permissions.get(target)?.imports === false)) {
-        disabledRoutes.add(linkKey(source, target));
+    if (eventIndex !== firstEvent) {
+      nodeRestrictedRoutes.clear();
+      for (const source of ids) for (const target of ids) {
+        if (source !== target && (permissions.get(source)?.exports === false || permissions.get(target)?.imports === false)) {
+          nodeRestrictedRoutes.add(linkKey(source, target));
+        }
       }
+      nodeRestrictionKey = JSON.stringify([...nodeRestrictedRoutes].sort());
     }
-    const restrictionKey = JSON.stringify([...disabledRoutes].sort());
+    const disabled = linkInterventions.get(time);
+    const restrictionKey = disabled
+      ? JSON.stringify([...new Set([...nodeRestrictedRoutes, ...disabled.keys()])].sort())
+      : nodeRestrictionKey;
     if (frameIndex > 0 && restrictionKey !== previousRestrictions) boundaryIndices.push(frameIndex);
     previousRestrictions = restrictionKey;
     const linkStates = new Map();

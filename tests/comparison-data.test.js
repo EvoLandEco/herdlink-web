@@ -384,7 +384,11 @@ test("display bins reuse the daily calculation and project end states and interv
   const context = runtime();
   const simulate = context.window.herdlinkSimulation.simulateDaily;
   let dailyCalculations = 0;
-  context.window.herdlinkSimulation.simulateDaily = (...args) => { dailyCalculations++; return simulate(...args); };
+  context.window.herdlinkSimulation.simulateDaily = (...args) => {
+    const result = simulate(...args);
+    if (!context.dailySimulationCache.has(result.identity)) dailyCalculations++;
+    return result;
+  };
   runSimulation(context);
   const daily = context.simulationState.trajectory.dailyTrajectory;
   const dailySnapshot = plain(daily);
